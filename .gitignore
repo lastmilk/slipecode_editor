@@ -11,3 +11,13 @@ __pycache__/
 *.pyc
 .next/
 coverage/
+
+# Flutter / Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+android/local.properties
+android/.gradle/
+**/*.iml
+android/key.properties
