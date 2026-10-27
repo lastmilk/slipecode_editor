@@ -162,6 +162,78 @@ class SettingsScreen extends StatelessWidget {
               ),
             ],
           ),
+          const SizedBox(height: 16),
+
+          _Section(
+            title: 'AI 助手（LLM）',
+            isDark: isDark,
+            children: [
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.auto_awesome),
+                title: const Text('API 地址'),
+                subtitle: Text(
+                  settings.isLlmConfigured ? '已配置' : '未配置',
+                  style: TextStyle(
+                    color: settings.isLlmConfigured
+                        ? Colors.green
+                        : Colors.orange,
+                    fontSize: 11,
+                  ),
+                ),
+                onTap: () => _editText(
+                  context,
+                  title: 'LLM API 地址',
+                  hint: 'https://api.openai.com/v1',
+                  value: settings.llmApiBase,
+                  onSave: settingsProvider.setLlmApiBase,
+                ),
+              ),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.key),
+                title: const Text('API Key'),
+                subtitle: Text(
+                  settings.llmApiKey.isEmpty ? '未设置' : '已设置（仅存本地）',
+                  style: TextStyle(
+                    color: settings.llmApiKey.isEmpty
+                        ? Colors.orange
+                        : Colors.green,
+                    fontSize: 11,
+                  ),
+                ),
+                onTap: () => _editText(
+                  context,
+                  title: 'LLM API Key',
+                  hint: 'sk-...',
+                  value: settings.llmApiKey,
+                  obscure: true,
+                  onSave: settingsProvider.setLlmApiKey,
+                ),
+              ),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.psychology),
+                title: const Text('模型名称'),
+                subtitle: Text(settings.llmModel),
+                onTap: () => _editText(
+                  context,
+                  title: '模型名称',
+                  hint: 'gpt-4o-mini',
+                  value: settings.llmModel,
+                  onSave: settingsProvider.setLlmModel,
+                ),
+              ),
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 4),
+                child: Text(
+                  '对接任意 OpenAI 兼容接口（OpenAI / 通义千问 / DeepSeek / 本地模型等）。'
+                  '凭据仅保存在本地，不会上传。',
+                  style: TextStyle(fontSize: 11, color: Colors.grey),
+                ),
+              ),
+            ],
+          ),
           const SizedBox(height: 24),
           Center(
             child: Text(
@@ -325,5 +397,59 @@ class _SyncCard extends StatelessWidget {
   static String _format(DateTime time) {
     return '${time.month}月${time.day}日 ${time.hour.toString().padLeft(2, '0')}:'
         '${time.minute.toString().padLeft(2, '0')}';
+  }
+}
+
+/// 弹出文本编辑对话框，用于编辑 LLM 配置项
+Future<void> _editText(
+  BuildContext context, {
+  required String title,
+  required String hint,
+  required String value,
+  required Future<void> Function(String) onSave,
+  bool obscure = false,
+}) async {
+  final controller = TextEditingController(text: value);
+  var obscureText = obscure;
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (context) => StatefulBuilder(
+      builder: (context, setDialogState) => AlertDialog(
+        title: Text(title),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          obscureText: obscureText,
+          decoration: InputDecoration(
+            hintText: hint,
+            border: const OutlineInputBorder(),
+            isDense: true,
+            suffixIcon: obscure
+                ? IconButton(
+                    icon: Icon(
+                      obscureText ? Icons.visibility_off : Icons.visibility,
+                      size: 18,
+                    ),
+                    onPressed: () =>
+                        setDialogState(() => obscureText = !obscureText),
+                  )
+                : null,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    ),
+  );
+  if (confirmed == true) {
+    await onSave(controller.text);
   }
 }

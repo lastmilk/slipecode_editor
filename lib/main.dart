@@ -3,6 +3,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:provider/provider.dart';
 
 import 'providers/account_provider.dart';
+import 'providers/ai_provider.dart';
 import 'providers/build_provider.dart';
 import 'providers/container_provider.dart';
 import 'providers/editor_provider.dart';
@@ -25,16 +26,28 @@ Future<void> main() async {
 
   // Git 平台登录态
   final githubProvider = GitHubProvider();
-  await githubProvider.init();
   final giteeProvider = GiteeProvider();
-  await giteeProvider.init();
 
   // 账号体系：登录后可同步偏好设置
   final accountProvider = AccountProvider(settingsProvider);
   settingsProvider.attachRemoteSync(
     accountProvider.pushSettingsIfLoggedIn,
   );
-  await accountProvider.init();
+
+  // 降级策略：账号/Git 平台的 token 校验涉及网络请求，
+  // 在没有真实后端或 token 时可能超时。统一限时，避免卡在首屏。
+  // 超时后各 provider 仍以 signedOut 状态运行，不影响编辑器核心功能。
+  await Future.wait([
+    githubProvider.init(),
+    giteeProvider.init(),
+    accountProvider.init(),
+  ]).timeout(
+    const Duration(seconds: 12),
+    onTimeout: () {
+      debugPrint('[init] 账号/平台登录态恢复超时，降级为未登录启动');
+      return [];
+    },
+  );
 
   // 其余 Provider 依赖上面三者，直接实例化后注入
   final projectProvider = ProjectProvider();
@@ -51,6 +64,7 @@ Future<void> main() async {
     giteeProvider,
     gitSyncProvider,
   );
+  final aiProvider = AiProvider(settingsProvider, editorProvider, buildProvider);
 
   runApp(
     SlipCodeApp(
@@ -64,6 +78,7 @@ Future<void> main() async {
       terminalProvider: terminalProvider,
       gitSyncProvider: gitSyncProvider,
       buildProvider: buildProvider,
+      aiProvider: aiProvider,
     ),
   );
 }
@@ -81,6 +96,7 @@ class SlipCodeApp extends StatelessWidget {
     required this.terminalProvider,
     required this.gitSyncProvider,
     required this.buildProvider,
+    required this.aiProvider,
   });
 
   final SettingsProvider settingsProvider;
@@ -93,6 +109,7 @@ class SlipCodeApp extends StatelessWidget {
   final TerminalProvider terminalProvider;
   final GitSyncProvider gitSyncProvider;
   final BuildProvider buildProvider;
+  final AiProvider aiProvider;
 
   @override
   Widget build(BuildContext context) {
@@ -109,6 +126,7 @@ class SlipCodeApp extends StatelessWidget {
         ChangeNotifierProvider.value(value: giteeProvider),
         ChangeNotifierProvider.value(value: gitSyncProvider),
         ChangeNotifierProvider.value(value: buildProvider),
+        ChangeNotifierProvider.value(value: aiProvider),
       ],
       child: Consumer<SettingsProvider>(
         builder: (context, settings, _) {

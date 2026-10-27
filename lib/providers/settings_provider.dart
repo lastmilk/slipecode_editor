@@ -85,6 +85,25 @@ class SettingsProvider extends ChangeNotifier {
     await _save();
   }
 
+  // ---------------------------------------------------------------------------
+  // LLM / AI 助手
+  // ---------------------------------------------------------------------------
+
+  Future<void> setLlmApiBase(String value) async {
+    _settings = _settings.copyWith(llmApiBase: value.trim());
+    await _save();
+  }
+
+  Future<void> setLlmApiKey(String value) async {
+    _settings = _settings.copyWith(llmApiKey: value.trim());
+    await _save();
+  }
+
+  Future<void> setLlmModel(String value) async {
+    _settings = _settings.copyWith(llmModel: value.trim());
+    await _save();
+  }
+
   Future<void> _save() async {
     await _persist();
     notifyListeners();

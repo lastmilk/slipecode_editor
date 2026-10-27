@@ -1,5 +1,10 @@
 allprojects {
     repositories {
+        // 优先使用国内镜像，避免 Maven Central 限流 (429)
+        maven { url = uri("https://maven.aliyun.com/repository/google") }
+        maven { url = uri("https://maven.aliyun.com/repository/public") }
+        // Flutter 引擎产物（io.flutter:*）仅在此仓库
+        maven { url = uri("https://storage.googleapis.com/download.flutter.io") }
         google()
         mavenCentral()
     }

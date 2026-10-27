@@ -70,5 +70,8 @@
             <action android:name="android.intent.action.VIEW"/>
             <data android:scheme="https"/>
         </intent>
+        <!-- Termux 本地构建：检测 Termux / Termux:API 是否已安装 -->
+        <package android:name="com.termux"/>
+        <package android:name="com.termux.api"/>
     </queries>
 </manifest>

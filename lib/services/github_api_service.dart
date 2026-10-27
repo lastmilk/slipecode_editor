@@ -157,20 +157,28 @@ class GitHubApiService {
   // 基础请求
   // ---------------------------------------------------------------------------
 
+  /// 统一的网络请求超时时间。
+  /// 启动时 token 校验若卡住会导致首屏白屏，因此所有请求都必须带超时。
+  static const _timeout = Duration(seconds: 10);
+
   Future<Map<String, dynamic>> _getJson(String path,
       [Map<String, String>? query]) async {
-    final res = await _client.get(_u(path, query), headers: _headers);
+    final res = await _client
+        .get(_u(path, query), headers: _headers)
+        .timeout(_timeout);
     _check(res, 'GET $path');
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
   Future<Map<String, dynamic>> _postJson(
       String path, Map<String, dynamic> body) async {
-    final res = await _client.post(
-      _u(path),
-      headers: {..._headers, 'Content-Type': 'application/json'},
-      body: jsonEncode(body),
-    );
+    final res = await _client
+        .post(
+          _u(path),
+          headers: {..._headers, 'Content-Type': 'application/json'},
+          body: jsonEncode(body),
+        )
+        .timeout(_timeout);
     _check(res, 'POST $path');
     if (res.body.isEmpty) return {};
     return jsonDecode(res.body) as Map<String, dynamic>;
@@ -178,11 +186,13 @@ class GitHubApiService {
 
   Future<Map<String, dynamic>> _patchJson(
       String path, Map<String, dynamic> body) async {
-    final res = await _client.patch(
-      _u(path),
-      headers: {..._headers, 'Content-Type': 'application/json'},
-      body: jsonEncode(body),
-    );
+    final res = await _client
+        .patch(
+          _u(path),
+          headers: {..._headers, 'Content-Type': 'application/json'},
+          body: jsonEncode(body),
+        )
+        .timeout(_timeout);
     _check(res, 'PATCH $path');
     return jsonDecode(res.body) as Map<String, dynamic>;
   }

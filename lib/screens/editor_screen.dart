@@ -9,6 +9,7 @@ import '../providers/settings_provider.dart';
 import '../widgets/code_editor.dart';
 import '../widgets/editor_tabs.dart';
 import '../widgets/file_tree.dart';
+import 'ai_chat_screen.dart';
 import 'build_screen.dart';
 import 'terminal_screen.dart';
 
@@ -130,6 +131,13 @@ class _EditorScreenState extends State<EditorScreen> {
             },
           ),
           IconButton(
+            icon: const Icon(Icons.auto_awesome),
+            tooltip: 'AI 助手（右滑）',
+            onPressed: () {
+              Scaffold.of(context).openEndDrawer();
+            },
+          ),
+          IconButton(
             icon: const Icon(Icons.refresh),
             tooltip: '刷新文件树',
             onPressed: projectProvider.refreshFileTree,
@@ -216,6 +224,8 @@ class _EditorScreenState extends State<EditorScreen> {
           ),
         ],
       ),
+      // 右侧 AI 助手面板（右滑打开）
+      endDrawer: const AiChatScreen(),
     );
   }
 

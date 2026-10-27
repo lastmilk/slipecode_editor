@@ -74,9 +74,12 @@ class GiteeApiService {
   // 基础请求
   // ---------------------------------------------------------------------------
 
+  /// 统一的网络请求超时时间，避免首屏因网络卡死。
+  static const _timeout = Duration(seconds: 10);
+
   Future<Map<String, dynamic>> _getJson(String path,
       [Map<String, String>? query]) async {
-    final res = await _client.get(_u(path, query));
+    final res = await _client.get(_u(path, query)).timeout(_timeout);
     _check(res, 'GET $path');
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
@@ -89,7 +92,7 @@ class GiteeApiService {
     final req = http.Request(method, _u(path))
       ..headers['Content-Type'] = 'application/json;charset=UTF-8'
       ..body = jsonEncode(body);
-    final streamed = await _client.send(req);
+    final streamed = await _client.send(req).timeout(_timeout);
     final res = await http.Response.fromStream(streamed);
     _check(res, '$method $path');
     if (res.body.isEmpty) return {};
