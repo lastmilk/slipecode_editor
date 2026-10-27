@@ -1,0 +1,329 @@
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+
+import '../providers/account_provider.dart';
+import '../providers/settings_provider.dart';
+import '../services/git_host.dart';
+import 'account_screen.dart';
+
+/// 偏好设置页面
+///
+/// 配置 IDE 行为（主题、编辑器字号、自动保存、首页语句、Git 默认平台），
+/// 登录 SlipCode 账号后设置会自动同步到其他设备。
+class SettingsScreen extends StatelessWidget {
+  const SettingsScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final settingsProvider = context.watch<SettingsProvider>();
+    final account = context.watch<AccountProvider>();
+    final settings = settingsProvider.settings;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('偏好设置'),
+        elevation: 0,
+      ),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+        children: [
+          _SyncCard(account: account),
+          const SizedBox(height: 16),
+
+          _Section(
+            title: '外观',
+            isDark: isDark,
+            children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Row(
+                  children: [
+                    const Expanded(child: Text('主题模式')),
+                    SegmentedButton<ThemeMode>(
+                      segments: const [
+                        ButtonSegment(
+                          value: ThemeMode.system,
+                          label: Text('跟随系统'),
+                        ),
+                        ButtonSegment(
+                          value: ThemeMode.light,
+                          label: Text('浅色'),
+                        ),
+                        ButtonSegment(
+                          value: ThemeMode.dark,
+                          label: Text('深色'),
+                        ),
+                      ],
+                      selected: {settings.themeMode},
+                      onSelectionChanged: (value) =>
+                          settingsProvider.setThemeMode(value.first),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+
+          _Section(
+            title: '编辑器',
+            isDark: isDark,
+            children: [
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('自动保存'),
+                subtitle: const Text('编辑文件后自动写入并同步到远程仓库'),
+                value: settings.autoSave,
+                onChanged: settingsProvider.setAutoSave,
+              ),
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Row(
+                  children: [
+                    const Expanded(child: Text('代码字号')),
+                    Text(
+                      settings.editorFontSize.toStringAsFixed(0),
+                      style: const TextStyle(fontFeatures: [
+                        FontFeature.tabularFigures(),
+                      ]),
+                    ),
+                  ],
+                ),
+              ),
+              Slider(
+                min: 11,
+                max: 22,
+                divisions: 11,
+                value: settings.editorFontSize,
+                label: settings.editorFontSize.toStringAsFixed(0),
+                onChanged: settingsProvider.setEditorFontSize,
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+
+          _Section(
+            title: '首页',
+            isDark: isDark,
+            children: [
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('显示随机语句'),
+                subtitle: const Text('每次打开首页用打字机效果显示一句随机语句'),
+                value: settings.showSaying,
+                onChanged: settingsProvider.setShowSaying,
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+
+          _Section(
+            title: 'Git 与项目',
+            isDark: isDark,
+            children: [
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('默认 Git 平台'),
+                subtitle: const Text('创建项目时默认使用的托管平台'),
+                trailing: DropdownButton<GitHost>(
+                  value: settings.defaultGitHost,
+                  underline: const SizedBox.shrink(),
+                  items: GitHost.values
+                      .map(
+                        (host) => DropdownMenuItem(
+                          value: host,
+                          child: Text(host.label),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (host) {
+                    if (host != null) {
+                      settingsProvider.setDefaultGitHost(host);
+                    }
+                  },
+                ),
+              ),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('创建项目时自动建仓并推送'),
+                subtitle: const Text('默认勾选是否创建远程仓库并推送模板文件'),
+                value: settings.createRepoOnCreate,
+                onChanged: settingsProvider.setCreateRepoOnCreate,
+              ),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('iOS 构建'),
+                subtitle: const Text(
+                  'iOS 只能在 GitHub Actions 的 macOS Runner 上构建；'
+                  'Gitee Go 不支持 macOS，因此选择 Gitee 时 iOS 构建会被禁用',
+                ),
+                leading: const Icon(Icons.apple),
+              ),
+            ],
+          ),
+          const SizedBox(height: 24),
+          Center(
+            child: Text(
+              'SlipCode · 偏好设置保存在本地，登录账号后同步到云端',
+              style: TextStyle(
+                fontSize: 11,
+                color: isDark ? Colors.white38 : Colors.black38,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _Section extends StatelessWidget {
+  const _Section({
+    required this.title,
+    required this.children,
+    required this.isDark,
+  });
+
+  final String title;
+  final List<Widget> children;
+  final bool isDark;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(left: 4, bottom: 8),
+          child: Text(
+            title,
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: isDark ? Colors.white60 : Colors.black54,
+            ),
+          ),
+        ),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF2D2D30) : Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: isDark ? const Color(0xFF3C3C3C) : const Color(0xFFE0E4E8),
+            ),
+          ),
+          child: Column(children: children),
+        ),
+      ],
+    );
+  }
+}
+
+/// 账号同步状态卡片
+class _SyncCard extends StatelessWidget {
+  const _SyncCard({required this.account});
+
+  final AccountProvider account;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final signedIn = account.isSignedIn;
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: isDark
+              ? const [Color(0xFF1F3A4D), Color(0xFF1B2B36)]
+              : const [Color(0xFFE3F2FD), Color(0xFFF1F8FE)],
+        ),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isDark ? const Color(0xFF2E5A75) : const Color(0xFFBBDEFB),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                signedIn ? Icons.cloud_done : Icons.cloud_off,
+                size: 20,
+                color: Colors.blueAccent,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  signedIn
+                      ? '设置同步已开启（${account.user?.displayName ?? account.user?.email ?? ''}）'
+                      : '登录 SlipCode 账号以同步设置',
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            signedIn
+                ? (account.lastSyncAt == null
+                    ? '尚未同步，点右侧按钮立即同步'
+                    : '上次同步：${_format(account.lastSyncAt!)}')
+                : '账号与设置独立于 GitHub / Gitee，登录后可在多台设备间同步偏好设置。',
+            style: TextStyle(
+              fontSize: 11,
+              height: 1.4,
+              color: isDark ? Colors.white54 : Colors.black54,
+            ),
+          ),
+          if (account.error != null && signedIn) ...[
+            const SizedBox(height: 4),
+            Text(
+              account.error!,
+              style: const TextStyle(fontSize: 11, color: Colors.redAccent),
+            ),
+          ],
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              TextButton(
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const AccountScreen()),
+                ),
+                child: Text(signedIn ? '管理账号' : '登录 / 注册'),
+              ),
+              if (signedIn) ...[
+                const Spacer(),
+                TextButton.icon(
+                  onPressed: () async {
+                    final ok = await context.read<AccountProvider>().syncNow();
+                    if (!context.mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(ok ? '设置已从云端同步' : '同步失败'),
+                        backgroundColor: ok ? Colors.green : Colors.redAccent,
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.sync, size: 16),
+                  label: const Text('立即同步'),
+                ),
+              ],
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  static String _format(DateTime time) {
+    return '${time.month}月${time.day}日 ${time.hour.toString().padLeft(2, '0')}:'
+        '${time.minute.toString().padLeft(2, '0')}';
+  }
+}

@@ -4,22 +4,33 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
-import '../services/github_api_service.dart';
+import '../services/github_api_service.dart' show RepoFile;
+import '../services/git_host.dart';
 import '../services/project_snapshot.dart';
+import 'gitee_provider.dart';
 import 'github_provider.dart';
 import 'project_provider.dart';
 
 /// 同步状态
 enum GitSyncStatus { idle, pending, syncing, success, error }
 
+/// 项目关联的远程仓库
+class GitLink {
+  final GitHost host;
+  final String repo;
+
+  const GitLink(this.host, this.repo);
+}
+
 /// 代码自动同步（AI 自动 push）
 ///
-/// 编辑器保存文件后调用 [markChanged]，
-/// 防抖 [debounce] 后自动把变更文件通过 GitHub Git Data API 推送到远程仓库。
+/// 编辑器保存文件后调用 [markChanged]，防抖后自动把变更文件推送到
+/// GitHub 或 Gitee（取决于项目关联的仓库）。
 class GitSyncProvider extends ChangeNotifier {
-  GitSyncProvider(this._github, this._project);
+  GitSyncProvider(this._github, this._gitee, this._project);
 
   final GitHubProvider _github;
+  final GiteeProvider _gitee;
   final ProjectProvider _project;
 
   static const Duration debounce = Duration(seconds: 8);
@@ -43,12 +54,30 @@ class GitSyncProvider extends ChangeNotifier {
   DateTime? get lastSyncAt => _lastSyncAt;
   String get lastCommitUrl => _lastCommitUrl;
 
-  /// 是否具备同步条件（已登录 + 项目已关联仓库）
-  bool get canSync {
+  /// 当前项目关联的远程仓库（优先 GitHub，其次 Gitee）
+  GitLink? get currentLink {
     final path = _project.projectPath;
-    return _github.isSignedIn &&
-        path != null &&
-        _github.repoFor(path) != null;
+    if (path == null) return null;
+    return linkFor(path);
+  }
+
+  GitLink? linkFor(String projectPath) {
+    final githubRepo = _github.repoFor(projectPath);
+    if (githubRepo != null) return GitLink(GitHost.github, githubRepo);
+    final giteeRepo = _gitee.repoFor(projectPath);
+    if (giteeRepo != null) return GitLink(GitHost.gitee, giteeRepo);
+    return null;
+  }
+
+  bool _hostSignedIn(GitHost host) => switch (host) {
+        GitHost.github => _github.isSignedIn,
+        GitHost.gitee => _gitee.isSignedIn,
+      };
+
+  /// 是否具备同步条件（对应平台已登录 + 项目已关联仓库）
+  bool get canSync {
+    final link = currentLink;
+    return link != null && _hostSignedIn(link.host);
   }
 
   /// 标记文件已变更（保存后由编辑器调用）
@@ -70,16 +99,14 @@ class GitSyncProvider extends ChangeNotifier {
       notifyListeners();
       return true;
     }
-    if (!canSync) {
+    final projectPath = _project.projectPath;
+    final link = projectPath == null ? null : linkFor(projectPath);
+    if (projectPath == null || link == null || !_hostSignedIn(link.host)) {
       _pending.clear();
       _status = GitSyncStatus.idle;
       notifyListeners();
       return false;
     }
-
-    final projectPath = _project.projectPath!;
-    final repo = _github.repoFor(projectPath)!;
-    final api = _github.api!;
 
     final files = _pending.toList();
     _status = GitSyncStatus.syncing;
@@ -110,11 +137,19 @@ class GitSyncProvider extends ChangeNotifier {
         return true;
       }
 
-      final result = await api.pushFiles(
-        repo,
-        repoFiles,
-        message: 'chore: sync ${repoFiles.length} file(s) from SlipCode',
-      );
+      final result = switch (link.host) {
+        GitHost.github => await _github.api!.pushFiles(
+            link.repo,
+            repoFiles,
+            message: 'chore: sync ${repoFiles.length} file(s) from SlipCode',
+          ),
+        GitHost.gitee => await _gitee.api!.pushFiles(
+            link.repo,
+            repoFiles,
+            message: 'chore: sync ${repoFiles.length} file(s) from SlipCode',
+            branch: 'master',
+          ),
+      };
 
       _pending.removeAll(files);
       _lastSyncAt = DateTime.now();

@@ -1,9 +1,15 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
+import '../providers/gitee_provider.dart';
 import '../providers/github_provider.dart';
 import '../providers/project_provider.dart';
+import '../providers/settings_provider.dart';
 import '../services/flutter_service.dart';
+import '../services/git_host.dart';
 
 /// 创建新项目页面
 class CreateProjectScreen extends StatefulWidget {
@@ -18,16 +24,46 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
   final _nameController = TextEditingController();
   final _pathController = TextEditingController();
   final _orgController = TextEditingController(text: 'com.example');
+  final _repoNameController = TextEditingController();
 
   String _template = 'app';
   bool _isCreating = false;
+
+  /// 是否创建远程仓库并推送模板文件
+  bool _createRepo = true;
+
+  /// 目标 Git 平台（默认 GitHub）
+  GitHost _host = GitHost.github;
+
+  /// 用户是否手动改过仓库名；未改过时跟随项目名
+  bool _repoNameEdited = false;
+
   final List<String> _outputLines = [];
 
   @override
   void initState() {
     super.initState();
-    // 设置默认路径（Android 上常用的 Projects 目录）
-    _pathController.text = '/storage/emulated/0/Projects';
+    // 设置默认路径（Android 外部存储 / iOS 应用文档目录）
+    if (Platform.isAndroid) {
+      _pathController.text = '/storage/emulated/0/Projects';
+    } else {
+      getApplicationDocumentsDirectory().then((dir) {
+        if (!mounted || _pathController.text.isNotEmpty) return;
+        setState(() => _pathController.text = p.join(dir.path, 'Projects'));
+      });
+    }
+
+    // 偏好设置中的默认 Git 平台与建仓开关
+    final settings = context.read<SettingsProvider>().settings;
+    _host = settings.defaultGitHost;
+    _createRepo = settings.createRepoOnCreate;
+
+    // 仓库名默认等于项目名
+    _nameController.addListener(() {
+      if (!_repoNameEdited) {
+        _repoNameController.text = _nameController.text.trim();
+      }
+    });
   }
 
   @override
@@ -35,6 +71,7 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
     _nameController.dispose();
     _pathController.dispose();
     _orgController.dispose();
+    _repoNameController.dispose();
     super.dispose();
   }
 
@@ -71,23 +108,55 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
       await projectProvider.openProject(_targetPath);
       if (!mounted) return;
 
-      // 已连接 GitHub 时：自动创建仓库并推送初始代码
-      final github = context.read<GitHubProvider>();
-      if (github.isSignedIn) {
+      // 按所选平台创建仓库并推送模板文件
+      if (_createRepo) {
+        final repoName = _repoNameController.text.trim().isEmpty
+            ? _nameController.text.trim()
+            : _repoNameController.text.trim();
         try {
-          await github.createRepoWithInitialPush(
-            _targetPath,
-            _nameController.text.trim(),
-            onLog: (line) {
-              if (mounted) setState(() => _outputLines.add(line));
-            },
-          );
+          if (_host == GitHost.github) {
+            final github = context.read<GitHubProvider>();
+            if (github.isSignedIn) {
+              await github.createRepoWithInitialPush(
+                _targetPath,
+                repoName,
+                onLog: (line) {
+                  if (mounted) setState(() => _outputLines.add(line));
+                },
+              );
+            } else {
+              if (mounted) {
+                setState(() => _outputLines.add(
+                      '[WARN] 未登录 GitHub，已跳过创建仓库',
+                    ));
+              }
+            }
+          } else {
+            final gitee = context.read<GiteeProvider>();
+            if (gitee.isSignedIn) {
+              await gitee.createRepoWithInitialPush(
+                _targetPath,
+                repoName,
+                onLog: (line) {
+                  if (mounted) setState(() => _outputLines.add(line));
+                },
+              );
+            } else {
+              if (mounted) {
+                setState(() => _outputLines.add(
+                      '[WARN] 未登录 Gitee（或未配置后端），已跳过创建仓库',
+                    ));
+              }
+            }
+          }
         } catch (e) {
           if (mounted) {
-            setState(() => _outputLines.add('[ERROR] GitHub 仓库创建失败: $e'));
+            setState(
+              () => _outputLines.add('[ERROR] ${_host.label} 仓库创建失败: $e'),
+            );
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
-                content: Text('项目已创建，但 GitHub 仓库创建失败: $e'),
+                content: Text('项目已创建，但 ${_host.label} 仓库创建失败: $e'),
                 backgroundColor: Colors.orange,
               ),
             );
@@ -227,6 +296,10 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                 _buildTemplateChip('plugin', '插件', isDark),
               ],
             ),
+            const SizedBox(height: 20),
+
+            // 远程仓库选项
+            _buildRepoOptions(isDark),
             const SizedBox(height: 24),
 
             // 创建按钮
@@ -309,6 +382,114 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
             ],
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildRepoOptions(bool isDark) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF2D2D30) : Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isDark ? const Color(0xFF3C3C3C) : const Color(0xFFE0E4E8),
+        ),
+      ),
+      child: Column(
+        children: [
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('创建远程仓库并推送'),
+            subtitle: const Text('创建后把模板文件推送到所选平台'),
+            value: _createRepo,
+            onChanged: _isCreating
+                ? null
+                : (value) => setState(() => _createRepo = value),
+          ),
+          if (_createRepo) ...[
+            const Divider(height: 8),
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Row(
+                children: [
+                  const Text('平台', style: TextStyle(fontSize: 13)),
+                  const SizedBox(width: 12),
+                  ...GitHost.values.map(
+                    (host) => Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: ChoiceChip(
+                        label: Text(host.label),
+                        selected: _host == host,
+                        onSelected: _isCreating
+                            ? null
+                            : (_) => setState(() => _host = host),
+                        selectedColor: Colors.blueAccent,
+                        labelStyle: TextStyle(
+                          fontSize: 12,
+                          color: _host == host
+                              ? Colors.white
+                              : (isDark ? Colors.white70 : Colors.black87),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+            TextFormField(
+              controller: _repoNameController,
+              enabled: !_isCreating,
+              onChanged: (_) => _repoNameEdited = true,
+              decoration: InputDecoration(
+                labelText: '仓库名称',
+                hintText: '默认与项目名称相同',
+                border: const OutlineInputBorder(),
+                isDense: true,
+                prefixIcon: const Icon(Icons.cloud_outlined),
+                suffixText: _host.label,
+              ),
+              validator: (value) {
+                if (!_createRepo) return null;
+                final name = (value == null || value.trim().isEmpty)
+                    ? _nameController.text.trim()
+                    : value.trim();
+                if (name.isEmpty) return '请输入仓库名称';
+                if (!RegExp(r'^[A-Za-z0-9._-]+$').hasMatch(name)) {
+                  return '仓库名只能包含字母、数字、点、下划线和中划线';
+                }
+                return null;
+              },
+            ),
+            Padding(
+              padding: const EdgeInsets.only(top: 6, bottom: 8),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    Icons.info_outline,
+                    size: 13,
+                    color: isDark ? Colors.white38 : Colors.black38,
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      _host == GitHost.gitee
+                          ? '同名仓库已存在时会自动改为 _1、_2；Gitee Go 无 macOS Runner，iOS 构建不可用'
+                          : '同名仓库已存在时会自动改为 _1、_2；iOS 构建使用 macOS Runner',
+                      style: TextStyle(
+                        fontSize: 10,
+                        height: 1.4,
+                        color: isDark ? Colors.white38 : Colors.black45,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }

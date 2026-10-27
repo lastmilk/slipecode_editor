@@ -1,0 +1,88 @@
+name: SlipCode Build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      target:
+        description: '构建目标'
+        required: true
+        type: choice
+        default: all
+        options:
+          - all
+          - android
+          - ios
+
+jobs:
+  android:
+    if: ${{ github.event_name == 'push' || inputs.target != 'ios' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      # .env 在 .gitignore 中，但 pubspec 将其声明为 asset，缺失会导致构建失败
+      - name: Create empty .env
+        run: touch .env
+
+      - name: Pub get
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Build APK
+        run: flutter build apk --release
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: slipecode-editor-apk
+          path: build/app/outputs/flutter-apk/*.apk
+          if-no-files-found: error
+
+  # iOS 由 macOS Runner 构建；暂未配置 Developer 证书，先产出未签名产物
+  ios:
+    if: ${{ github.event_name == 'workflow_dispatch' && (inputs.target == 'ios' || inputs.target == 'all') }}
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Create empty .env
+        run: touch .env
+
+      - name: Pub get
+        run: flutter pub get
+
+      - name: Build iOS (no codesign)
+        run: flutter build ios --release --no-codesign
+
+      - name: Package Runner.app
+        run: |
+          set -e
+          mkdir -p build/ios-artifact
+          ditto -c -k --sequesterRsrc --keepParent \
+            build/ios/iphoneos/Runner.app \
+            build/ios-artifact/slipecode-editor-ios-unsigned.zip
+
+      - name: Upload iOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: slipecode-editor-ios-unsigned
+          path: build/ios-artifact/slipecode-editor-ios-unsigned.zip
+          if-no-files-found: error

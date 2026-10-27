@@ -1,15 +1,40 @@
-// SlipCode Editor 基本测试
+// SlipCode 偏好设置模型测试
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:slipecode_editor/main.dart';
-import 'package:slipecode_editor/providers/github_provider.dart';
+import 'package:slipecode_editor/models/app_settings.dart';
+import 'package:slipecode_editor/services/git_host.dart';
 
 void main() {
-  testWidgets('App launches with HomeScreen', (WidgetTester tester) async {
-    await tester.pumpWidget(SlipCodeApp(githubProvider: GitHubProvider()));
-    await tester.pumpAndSettle();
+  test('默认设置符合预期', () {
+    const settings = AppSettings.defaults;
+    expect(settings.themeMode, ThemeMode.system);
+    expect(settings.editorFontSize, 14);
+    expect(settings.autoSave, isTrue);
+    expect(settings.showSaying, isTrue);
+    expect(settings.defaultGitHost, GitHost.github);
+    expect(settings.createRepoOnCreate, isTrue);
+  });
 
-    // 验证主页关键元素存在
-    expect(find.text('创建新项目'), findsOneWidget);
-    expect(find.text('打开已有项目'), findsOneWidget);
+  test('JSON 往返保持字段一致', () {
+    const settings = AppSettings(
+      themeMode: ThemeMode.dark,
+      editorFontSize: 18,
+      autoSave: false,
+      showSaying: false,
+      defaultGitHost: GitHost.gitee,
+      createRepoOnCreate: false,
+    );
+    final restored = AppSettings.fromJson(settings.toJson());
+    expect(restored.themeMode, ThemeMode.dark);
+    expect(restored.editorFontSize, 18);
+    expect(restored.autoSave, isFalse);
+    expect(restored.showSaying, isFalse);
+    expect(restored.defaultGitHost, GitHost.gitee);
+    expect(restored.createRepoOnCreate, isFalse);
+  });
+
+  test('Gitee Go 不支持 iOS 构建', () {
+    expect(GitHost.gitee.supportsIosBuild, isFalse);
+    expect(GitHost.github.supportsIosBuild, isTrue);
   });
 }

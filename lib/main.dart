@@ -1,69 +1,126 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:provider/provider.dart';
+
+import 'providers/account_provider.dart';
 import 'providers/build_provider.dart';
 import 'providers/container_provider.dart';
 import 'providers/editor_provider.dart';
 import 'providers/git_sync_provider.dart';
+import 'providers/gitee_provider.dart';
 import 'providers/github_provider.dart';
 import 'providers/project_provider.dart';
+import 'providers/settings_provider.dart';
 import 'providers/terminal_provider.dart';
 import 'screens/home_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  // 加载 .env（GitHub OAuth Client ID 等；PKCE 模式下不含任何 secret）
+  // 加载 .env（各平台 OAuth Client ID、账号后端地址；不含任何 secret）
   await dotenv.load(fileName: '.env', isOptional: true);
 
+  // 偏好设置先加载，决定首帧主题
+  final settingsProvider = SettingsProvider();
+  await settingsProvider.load();
+
+  // Git 平台登录态
   final githubProvider = GitHubProvider();
   await githubProvider.init();
+  final giteeProvider = GiteeProvider();
+  await giteeProvider.init();
 
-  runApp(SlipCodeApp(githubProvider: githubProvider));
+  // 账号体系：登录后可同步偏好设置
+  final accountProvider = AccountProvider(settingsProvider);
+  settingsProvider.attachRemoteSync(
+    accountProvider.pushSettingsIfLoggedIn,
+  );
+  await accountProvider.init();
+
+  // 其余 Provider 依赖上面三者，直接实例化后注入
+  final projectProvider = ProjectProvider();
+  final editorProvider = EditorProvider();
+  final containerProvider = ContainerProvider();
+  final terminalProvider = TerminalProvider();
+  final gitSyncProvider = GitSyncProvider(
+    githubProvider,
+    giteeProvider,
+    projectProvider,
+  );
+  final buildProvider = BuildProvider(
+    githubProvider,
+    giteeProvider,
+    gitSyncProvider,
+  );
+
+  runApp(
+    SlipCodeApp(
+      settingsProvider: settingsProvider,
+      accountProvider: accountProvider,
+      githubProvider: githubProvider,
+      giteeProvider: giteeProvider,
+      projectProvider: projectProvider,
+      editorProvider: editorProvider,
+      containerProvider: containerProvider,
+      terminalProvider: terminalProvider,
+      gitSyncProvider: gitSyncProvider,
+      buildProvider: buildProvider,
+    ),
+  );
 }
 
 class SlipCodeApp extends StatelessWidget {
-  const SlipCodeApp({super.key, required this.githubProvider});
+  const SlipCodeApp({
+    super.key,
+    required this.settingsProvider,
+    required this.accountProvider,
+    required this.githubProvider,
+    required this.giteeProvider,
+    required this.projectProvider,
+    required this.editorProvider,
+    required this.containerProvider,
+    required this.terminalProvider,
+    required this.gitSyncProvider,
+    required this.buildProvider,
+  });
 
+  final SettingsProvider settingsProvider;
+  final AccountProvider accountProvider;
   final GitHubProvider githubProvider;
+  final GiteeProvider giteeProvider;
+  final ProjectProvider projectProvider;
+  final EditorProvider editorProvider;
+  final ContainerProvider containerProvider;
+  final TerminalProvider terminalProvider;
+  final GitSyncProvider gitSyncProvider;
+  final BuildProvider buildProvider;
 
   @override
   Widget build(BuildContext context) {
     // 注册全局 Provider
     return MultiProvider(
       providers: [
-        ChangeNotifierProvider(create: (_) => ProjectProvider()),
-        ChangeNotifierProvider(create: (_) => EditorProvider()),
-        ChangeNotifierProvider(create: (_) => ContainerProvider()),
-        ChangeNotifierProvider(create: (_) => TerminalProvider()),
+        ChangeNotifierProvider.value(value: settingsProvider),
+        ChangeNotifierProvider.value(value: accountProvider),
+        ChangeNotifierProvider.value(value: projectProvider),
+        ChangeNotifierProvider.value(value: editorProvider),
+        ChangeNotifierProvider.value(value: containerProvider),
+        ChangeNotifierProvider.value(value: terminalProvider),
         ChangeNotifierProvider.value(value: githubProvider),
-        // 代码自动同步依赖 GitHub 登录态与当前项目
-        ChangeNotifierProxyProvider2<GitHubProvider, ProjectProvider,
-            GitSyncProvider>(
-          create: (context) => GitSyncProvider(
-            context.read<GitHubProvider>(),
-            context.read<ProjectProvider>(),
-          ),
-          update: (context, github, project, previous) =>
-              previous ?? GitSyncProvider(github, project),
-        ),
-        // 云端构建依赖 GitHub 与同步状态
-        ChangeNotifierProxyProvider2<GitHubProvider, GitSyncProvider,
-            BuildProvider>(
-          create: (context) => BuildProvider(
-            context.read<GitHubProvider>(),
-            context.read<GitSyncProvider>(),
-          ),
-          update: (context, github, gitSync, previous) =>
-              previous ?? BuildProvider(github, gitSync),
-        ),
+        ChangeNotifierProvider.value(value: giteeProvider),
+        ChangeNotifierProvider.value(value: gitSyncProvider),
+        ChangeNotifierProvider.value(value: buildProvider),
       ],
-      child: MaterialApp(
-        title: 'SlipCode — Flutter Editor',
-        debugShowCheckedModeBanner: false,
-        themeMode: ThemeMode.system,
-        theme: _buildLightTheme(),
-        darkTheme: _buildDarkTheme(),
-        home: const HomeScreen(),
+      child: Consumer<SettingsProvider>(
+        builder: (context, settings, _) {
+          return MaterialApp(
+            title: 'SlipCode — Flutter Editor',
+            debugShowCheckedModeBanner: false,
+            themeMode: settings.settings.themeMode,
+            theme: _buildLightTheme(),
+            darkTheme: _buildDarkTheme(),
+            home: const HomeScreen(),
+          );
+        },
       ),
     );
   }

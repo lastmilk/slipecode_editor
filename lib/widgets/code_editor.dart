@@ -10,6 +10,9 @@ class CodeEditor extends StatefulWidget {
   final bool readOnly;
   final int? maxLines;
 
+  /// 代码字号（来自偏好设置）
+  final double fontSize;
+
   const CodeEditor({
     super.key,
     this.initialContent = '',
@@ -17,6 +20,7 @@ class CodeEditor extends StatefulWidget {
     this.onChanged,
     this.readOnly = false,
     this.maxLines,
+    this.fontSize = 14,
   });
 
   @override
@@ -58,7 +62,7 @@ class _CodeEditorState extends State<CodeEditor> {
       child: TextField(
         controller: _controller,
         style: TextStyle(
-          fontSize: 14,
+          fontSize: widget.fontSize,
           height: 1.5,
           color: textColor,
           fontFamily: 'monospace',

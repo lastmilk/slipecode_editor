@@ -13,7 +13,11 @@ import 'github_api_service.dart';
 enum BuildType {
   apkRelease('apk-release', 'APK (Release)', '.apk'),
   apkDebug('apk-debug', 'APK (Debug)', '.apk'),
-  appBundleRelease('appbundle-release', 'AppBundle (Release)', '.aab');
+  appBundleRelease('appbundle-release', 'AppBundle (Release)', '.aab'),
+
+  /// iOS 构建需要 macOS Runner；Gitee Go 不支持，只能在 GitHub 上执行。
+  /// 证书暂未配置，使用 `--no-codesign` 产出未签名的 Runner.app（zip）。
+  iosRelease('ios-release', 'iOS (无签名)', '.app');
 
   /// workflow inputs.build_type 取值
   final String inputValue;
@@ -23,6 +27,12 @@ enum BuildType {
   final String artifactExt;
 
   const BuildType(this.inputValue, this.label, this.artifactExt);
+
+  bool get isIos => this == BuildType.iosRelease;
+
+  /// Gitee Go 可用的构建类型（无 macOS Runner）
+  static List<BuildType> forHost({required bool supportsIos}) =>
+      values.where((t) => supportsIos || !t.isIos).toList();
 }
 
 /// GitHub Actions 构建服务
@@ -129,6 +139,8 @@ class BuildService {
   }
 
   /// 下载产物 zip 并解压出 APK/AAB 到 `项目目录/build/github/`
+  ///
+  /// iOS 产物是未签名的 Runner.app 目录，直接保存原始 zip。
   Future<String?> downloadAndExtractArtifact(
     GitHubApiService api,
     String repoFullName,
@@ -137,11 +149,17 @@ class BuildService {
     BuildType type,
   ) async {
     final zipBytes = await api.downloadArtifact(repoFullName, artifact.id);
-    final archive = ZipDecoder().decodeBytes(zipBytes);
 
     final outDir = Directory(p.join(projectDir, 'build', 'github'));
     await outDir.create(recursive: true);
 
+    if (type.isIos) {
+      final outPath = p.join(outDir.path, 'slipecode-ios-unsigned.zip');
+      await File(outPath).writeAsBytes(zipBytes, flush: true);
+      return outPath;
+    }
+
+    final archive = ZipDecoder().decodeBytes(zipBytes);
     for (final entry in archive.files) {
       if (!entry.isFile) continue;
       final name = p.basename(entry.name);

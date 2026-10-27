@@ -1,0 +1,14 @@
+import 'package:flutter/services.dart';
+
+/// {{PROJECT_NAME}} 插件的 Dart 侧入口。
+///
+/// 原生实现（android/ 目录）在首次 GitHub Actions 构建时
+/// 由 `flutter create` 生成，可随后拉取到本地继续编辑。
+class {{CLASS_NAME}} {
+  static const MethodChannel _channel = MethodChannel('{{ORG}}/{{PROJECT_NAME}}');
+
+  /// 返回平台版本字符串，例如 "Android 14"。
+  static Future<String?> getPlatformVersion() {
+    return _channel.invokeMethod<String>('getPlatformVersion');
+  }
+}

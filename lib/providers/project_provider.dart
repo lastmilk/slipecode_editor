@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import '../models/file_node.dart';
 import '../services/file_service.dart';
+import '../services/project_history_service.dart';
 
 /// 项目状态 Provider
 ///
@@ -44,6 +45,10 @@ class ProjectProvider extends ChangeNotifier {
 
     try {
       _fileTree = await _fileService.loadDirectory(_projectPath!);
+      // 成功打开后记入历史（不影响主流程）
+      if (_error == null) {
+        ProjectHistoryService.instance.touch(_projectPath!);
+      }
     } catch (e) {
       _error = 'Failed to load directory: $e';
       debugPrint(_error);

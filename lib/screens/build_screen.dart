@@ -5,14 +5,16 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../providers/build_provider.dart';
 import '../providers/git_sync_provider.dart';
+import '../providers/gitee_provider.dart';
 import '../providers/github_provider.dart';
 import '../providers/project_provider.dart';
-import '../services/build_service.dart';
+import '../services/git_host.dart';
 import '../widgets/log_console.dart';
 
 /// 云端构建页面
 ///
-/// 基于 GitHub Actions：连接 GitHub → 关联仓库 → 触发云端构建 → 下载产物
+/// GitHub：GitHub Actions（Android + iOS，macOS Runner）
+/// Gitee：Gitee Go（仅 Android；无 macOS Runner 所以 iOS 禁用）
 class BuildScreen extends StatefulWidget {
   const BuildScreen({super.key});
 
@@ -24,19 +26,37 @@ class _BuildScreenState extends State<BuildScreen> {
   bool _repoSetupRunning = false;
   final List<String> _repoSetupLogs = [];
 
-  Future<void> _connectGitHub() async {
-    final github = context.read<GitHubProvider>();
-    final ok = await github.signIn();
-    if (!mounted) return;
-    if (!ok && github.error != null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('连接失败：${github.error}')),
-      );
+  /// 当前项目使用的平台（默认 GitHub）
+  GitHost _host = GitHost.github;
+
+  Future<void> _connect() async {
+    if (_host == GitHost.github) {
+      final github = context.read<GitHubProvider>();
+      final ok = await github.signIn();
+      if (!mounted) return;
+      if (!ok && github.error != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('连接失败：${github.error}')),
+        );
+      }
+    } else {
+      final gitee = context.read<GiteeProvider>();
+      final ok = await gitee.signIn();
+      if (!mounted) return;
+      if (!ok && gitee.error != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('连接失败：${gitee.error}')),
+        );
+      }
     }
   }
 
-  Future<void> _disconnectGitHub() async {
-    await context.read<GitHubProvider>().signOut();
+  Future<void> _disconnect() async {
+    if (_host == GitHost.github) {
+      await context.read<GitHubProvider>().signOut();
+    } else {
+      await context.read<GiteeProvider>().signOut();
+    }
   }
 
   /// 为当前项目创建仓库并做初始推送
@@ -44,6 +64,7 @@ class _BuildScreenState extends State<BuildScreen> {
     final projectPath = context.read<ProjectProvider>().projectPath;
     if (projectPath == null) return;
     final defaultName = projectPath.split(RegExp(r'[/\\]')).last;
+    final host = _host;
 
     final nameController = TextEditingController(text: defaultName);
     var isPrivate = true;
@@ -52,7 +73,7 @@ class _BuildScreenState extends State<BuildScreen> {
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          title: const Text('创建 GitHub 仓库'),
+          title: Text('创建 ${host.label} 仓库'),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -73,9 +94,11 @@ class _BuildScreenState extends State<BuildScreen> {
                 contentPadding: EdgeInsets.zero,
               ),
               const SizedBox(height: 4),
-              const Text(
-                '创建后将把当前项目代码推送到 main 分支，并注入 GitHub Actions 构建 workflow。',
-                style: TextStyle(fontSize: 12, color: Colors.grey),
+              Text(
+                host == GitHost.github
+                    ? '创建后将把当前项目代码推送到 main 分支，并注入 GitHub Actions workflow（含 iOS 构建）。'
+                    : '创建后将把当前项目代码推送到 master 分支，并注入 Gitee Go 流水线（仅 Android，iOS 不可用）。',
+                style: const TextStyle(fontSize: 12, color: Colors.grey),
               ),
             ],
           ),
@@ -103,21 +126,38 @@ class _BuildScreenState extends State<BuildScreen> {
     });
 
     try {
-      final repo =
-          await context.read<GitHubProvider>().createRepoWithInitialPush(
-                projectPath,
-                repoName,
-                private: isPrivate,
-                onLog: (line) {
-                  if (mounted) {
-                    setState(() => _repoSetupLogs.add(line));
-                  }
-                },
-              );
+      final String fullName;
+      if (host == GitHost.github) {
+        final repo =
+            await context.read<GitHubProvider>().createRepoWithInitialPush(
+                  projectPath,
+                  repoName,
+                  private: isPrivate,
+                  onLog: (line) {
+                    if (mounted) {
+                      setState(() => _repoSetupLogs.add(line));
+                    }
+                  },
+                );
+        fullName = repo.fullName;
+      } else {
+        final repo =
+            await context.read<GiteeProvider>().createRepoWithInitialPush(
+                  projectPath,
+                  repoName,
+                  private: isPrivate,
+                  onLog: (line) {
+                    if (mounted) {
+                      setState(() => _repoSetupLogs.add(line));
+                    }
+                  },
+                );
+        fullName = repo.fullName;
+      }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('✓ 仓库已创建：${repo.fullName}'),
+            content: Text('✓ 仓库已创建：$fullName'),
             backgroundColor: Colors.green,
           ),
         );
@@ -149,14 +189,18 @@ class _BuildScreenState extends State<BuildScreen> {
   Widget build(BuildContext context) {
     final build = context.watch<BuildProvider>();
     final github = context.watch<GitHubProvider>();
+    final gitee = context.watch<GiteeProvider>();
     final sync = context.watch<GitSyncProvider>();
     final projectPath = context.watch<ProjectProvider>().projectPath;
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    final repo = projectPath == null ? null : github.repoFor(projectPath);
+    // 已关联仓库时以实际平台为准，否则用用户选择的平台
+    final link = sync.currentLink;
+    if (link != null) _host = link.host;
+    final signedIn = _host == GitHost.github ? github.isSignedIn : gitee.isSignedIn;
     final canBuild = projectPath != null &&
-        github.isSignedIn &&
-        repo != null &&
+        signedIn &&
+        link != null &&
         !build.isRunning &&
         !_repoSetupRunning;
 
@@ -177,28 +221,66 @@ class _BuildScreenState extends State<BuildScreen> {
             child: ListView(
               padding: const EdgeInsets.all(16),
               children: [
-                // GitHub 账号状态
-                _GitHubAccountCard(
+                // 平台选择（已关联仓库时锁定）
+                if (link == null) ...[
+                  Text(
+                    '构建平台',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: isDark ? Colors.white70 : Colors.black87,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    children: GitHost.values.map((host) {
+                      return ChoiceChip(
+                        label: Text(host.label),
+                        selected: _host == host,
+                        onSelected: build.isRunning
+                            ? null
+                            : (_) => setState(() => _host = host),
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 12),
+                ],
+
+                // 平台账号状态
+                _HostAccountCard(
                   isDark: isDark,
-                  github: github,
-                  onConnect: _connectGitHub,
-                  onDisconnect: _disconnectGitHub,
+                  host: _host,
+                  configured: _host == GitHost.github
+                      ? github.isConfigured
+                      : gitee.isConfigured,
+                  signedIn: signedIn,
+                  signingIn: _host == GitHost.github
+                      ? github.status == GitHubAuthStatus.signingIn
+                      : gitee.status == GiteeAuthStatus.signingIn,
+                  login: _host == GitHost.github
+                      ? github.user?.login
+                      : gitee.user?.login,
+                  onConnect: _connect,
+                  onDisconnect: _disconnect,
                 ),
                 const SizedBox(height: 12),
 
                 // 项目 / 仓库状态
                 _StatusTile(
                   isDark: isDark,
-                  ok: projectPath != null && repo != null,
+                  ok: projectPath != null && link != null,
                   title: projectPath == null
                       ? '未打开项目'
-                      : (repo == null ? '项目未关联 GitHub 仓库' : '已关联仓库'),
+                      : (link == null
+                          ? '项目未关联 ${_host.label} 仓库'
+                          : '已关联仓库'),
                   subtitle: projectPath == null
                       ? '请先打开一个 Flutter 项目'
-                      : (repo ?? projectPath),
+                      : (link?.repo ?? projectPath),
                   trailing: (projectPath != null &&
-                          repo == null &&
-                          github.isSignedIn &&
+                          link == null &&
+                          signedIn &&
                           !_repoSetupRunning)
                       ? TextButton(
                           onPressed: _createRepoForProject,
@@ -246,7 +328,8 @@ class _BuildScreenState extends State<BuildScreen> {
                             '有 ${sync.pendingCount} 个文件待同步（自动推送中）',
                           GitSyncStatus.syncing =>
                             '正在同步 ${sync.pendingCount} 个文件...',
-                          GitSyncStatus.success => '代码已自动同步到 GitHub',
+                          GitSyncStatus.success =>
+                            '代码已自动同步到 ${link?.host.label ?? '远程仓库'}',
                           GitSyncStatus.error => '同步失败：${sync.error ?? ''}',
                         },
                         style: TextStyle(
@@ -267,19 +350,31 @@ class _BuildScreenState extends State<BuildScreen> {
                 const SizedBox(height: 16),
 
                 // 构建类型
-                Text(
-                  '构建类型',
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: isDark ? Colors.white70 : Colors.black87,
-                  ),
+                Row(
+                  children: [
+                    Text(
+                      '构建类型',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: isDark ? Colors.white70 : Colors.black87,
+                      ),
+                    ),
+                    const Spacer(),
+                    Text(
+                      _host.ciName,
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: isDark ? Colors.white38 : Colors.black38,
+                      ),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 8),
                 Wrap(
                   spacing: 8,
                   runSpacing: 8,
-                  children: BuildType.values.map((type) {
+                  children: build.availableTypes.map((type) {
                     final selected = build.type == type;
                     return ChoiceChip(
                       label: Text(type.label),
@@ -290,6 +385,17 @@ class _BuildScreenState extends State<BuildScreen> {
                     );
                   }).toList(),
                 ),
+                if (!_host.supportsIosBuild)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Text(
+                      'Gitee Go 无 macOS Runner，iOS 构建已禁用；需要 iOS 产物请使用 GitHub',
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: isDark ? Colors.white38 : Colors.black45,
+                      ),
+                    ),
+                  ),
                 const SizedBox(height: 16),
 
                 // 构建按钮
@@ -302,7 +408,9 @@ class _BuildScreenState extends State<BuildScreen> {
                             : null,
                         icon: const Icon(Icons.cloud_upload),
                         label: Text(
-                          build.isRunning ? '构建中（云端）...' : '开始云端构建',
+                          build.isRunning
+                              ? '构建中（${link?.host.ciName ?? '云端'}）...'
+                              : '开始云端构建',
                         ),
                         style: FilledButton.styleFrom(
                           padding: const EdgeInsets.symmetric(vertical: 14),
@@ -329,7 +437,9 @@ class _BuildScreenState extends State<BuildScreen> {
                         mode: LaunchMode.externalApplication,
                       ),
                       icon: const Icon(Icons.open_in_new, size: 16),
-                      label: const Text('在 GitHub 查看运行详情'),
+                      label: Text(
+                        '在 ${link?.host.label ?? _host.label} 查看运行详情',
+                      ),
                     ),
                   ),
                 ],
@@ -340,6 +450,7 @@ class _BuildScreenState extends State<BuildScreen> {
                   _ArtifactCard(
                     path: build.artifactPath!,
                     isDark: isDark,
+                    platformLabel: link?.host.label ?? _host.label,
                     onInstall: _installArtifact,
                     onCopy: () {
                       Clipboard.setData(
@@ -395,23 +506,29 @@ class _BuildScreenState extends State<BuildScreen> {
   }
 }
 
-class _GitHubAccountCard extends StatelessWidget {
+class _HostAccountCard extends StatelessWidget {
   final bool isDark;
-  final GitHubProvider github;
+  final GitHost host;
+  final bool configured;
+  final bool signedIn;
+  final bool signingIn;
+  final String? login;
   final VoidCallback onConnect;
   final VoidCallback onDisconnect;
 
-  const _GitHubAccountCard({
+  const _HostAccountCard({
     required this.isDark,
-    required this.github,
+    required this.host,
+    required this.configured,
+    required this.signedIn,
+    required this.signingIn,
+    required this.login,
     required this.onConnect,
     required this.onDisconnect,
   });
 
   @override
   Widget build(BuildContext context) {
-    final notConfigured = !github.isConfigured;
-    final signedIn = github.isSignedIn;
     final ok = signedIn;
 
     return Container(
@@ -437,8 +554,8 @@ class _GitHubAccountCard extends StatelessWidget {
               children: [
                 Text(
                   signedIn
-                      ? '已连接 GitHub：${github.user?.login ?? ''}'
-                      : (notConfigured ? '未配置 GitHub Client ID' : '未连接 GitHub'),
+                      ? '已连接 ${host.label}：${login ?? ''}'
+                      : (configured ? '未连接 ${host.label}' : '未配置 ${host.label}'),
                   style: const TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
@@ -446,11 +563,15 @@ class _GitHubAccountCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  notConfigured
-                      ? '请在 .env 中填写 GITHUB_CLIENT_ID 后重启应用'
-                      : (signedIn
-                          ? 'OAuth 授权（PKCE）已完成'
-                          : '通过 OAuth 授权后才能创建仓库与云端构建'),
+                  configured
+                      ? (signedIn
+                          ? (host == GitHost.github
+                              ? 'OAuth 授权（PKCE）已完成'
+                              : 'OAuth 授权已完成（token 由账号后端换取）')
+                          : '通过 OAuth 授权后才能创建仓库与云端构建')
+                      : (host == GitHost.github
+                          ? '请在 .env 中填写 GITHUB_CLIENT_ID 后重启应用'
+                          : 'Gitee 需要 GITEE_CLIENT_ID + 账号后端（后端换 token）'),
                   style: TextStyle(
                     fontSize: 11,
                     color: isDark ? Colors.white54 : Colors.black45,
@@ -459,15 +580,11 @@ class _GitHubAccountCard extends StatelessWidget {
               ],
             ),
           ),
-          if (!notConfigured)
+          if (configured)
             TextButton(
-              onPressed: github.status == GitHubAuthStatus.signingIn
-                  ? null
-                  : (signedIn ? onDisconnect : onConnect),
+              onPressed: signingIn ? null : (signedIn ? onDisconnect : onConnect),
               child: Text(
-                github.status == GitHubAuthStatus.signingIn
-                    ? '授权中...'
-                    : (signedIn ? '断开' : '连接'),
+                signingIn ? '授权中...' : (signedIn ? '断开' : '连接'),
               ),
             ),
         ],
@@ -542,12 +659,14 @@ class _StatusTile extends StatelessWidget {
 class _ArtifactCard extends StatelessWidget {
   final String path;
   final bool isDark;
+  final String platformLabel;
   final VoidCallback onInstall;
   final VoidCallback onCopy;
 
   const _ArtifactCard({
     required this.path,
     required this.isDark,
+    required this.platformLabel,
     required this.onInstall,
     required this.onCopy,
   });
@@ -564,13 +683,18 @@ class _ArtifactCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Row(
+          Row(
             children: [
-              Icon(Icons.check_circle, color: Colors.green, size: 18),
-              SizedBox(width: 6),
-              Text(
-                '构建产物（已从 GitHub Actions 下载）',
-                style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+              const Icon(Icons.check_circle, color: Colors.green, size: 18),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  '构建产物（已从 $platformLabel 下载）',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 13,
+                  ),
+                ),
               ),
             ],
           ),

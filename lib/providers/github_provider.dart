@@ -1,6 +1,9 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../config/app_config.dart';
@@ -147,9 +150,22 @@ class GitHubProvider extends ChangeNotifier {
     return repo;
   }
 
+  /// 仓库重名时自动追加 _1、_2……
+  Future<String> uniqueRepoName(String baseName) async {
+    final client = api;
+    final login = _user?.login;
+    if (client == null || login == null) throw StateError('尚未登录 GitHub');
+    for (var i = 0; i <= 20; i++) {
+      final candidate = i == 0 ? baseName : '${baseName}_$i';
+      final exists = await client.getRepo('$login/$candidate');
+      if (exists == null) return candidate;
+    }
+    throw StateError('同名仓库过多，请换一个仓库名');
+  }
+
   /// 创建仓库并把整个项目（含构建 workflow）首次推送到 main 分支
   ///
-  /// 返回创建的仓库。若仓库已存在（同名）会抛出异常。
+  /// 返回创建的仓库。若仓库已存在（同名）会自动追加 _1、_2。
   Future<GitHubRepo> createRepoWithInitialPush(
     String projectPath,
     String repoName, {
@@ -159,10 +175,15 @@ class GitHubProvider extends ChangeNotifier {
     final client = api;
     if (client == null) throw StateError('尚未登录 GitHub');
 
-    onLog?.call('==> 创建 GitHub 仓库：$repoName');
+    final resolvedName = await uniqueRepoName(repoName);
+    if (resolvedName != repoName) {
+      onLog?.call('    仓库 $repoName 已存在，改用 $resolvedName');
+    }
+
+    onLog?.call('==> 创建 GitHub 仓库：$resolvedName');
     final repo = await createRepoForProject(
       projectPath,
-      repoName,
+      resolvedName,
       private: private,
     );
     onLog?.call('    ${repo.htmlUrl}');
@@ -182,8 +203,10 @@ class GitHubProvider extends ChangeNotifier {
       branch: repo.defaultBranch,
     );
 
-    if (!await client.fileExists(
-        repo.fullName, BuildService.workflowFile, repo.defaultBranch)) {
+    // 仅 app 模板项目需要 Android 构建 workflow
+    if (_isAppTemplate(projectPath) &&
+        !await client.fileExists(
+            repo.fullName, BuildService.workflowFile, repo.defaultBranch)) {
       onLog?.call('==> 推送 GitHub Actions 构建 workflow');
       await BuildService.instance.ensureWorkflow(
         client,
@@ -193,5 +216,19 @@ class GitHubProvider extends ChangeNotifier {
     }
     onLog?.call('==> 完成');
     return repo;
+  }
+
+  /// 读取项目根目录 .slipecode.json，判断是否为 app 模板项目。
+  /// 文件缺失或解析失败时按 app 处理（保持旧行为）。
+  bool _isAppTemplate(String projectPath) {
+    try {
+      final metaFile = File(p.join(projectPath, '.slipecode.json'));
+      if (!metaFile.existsSync()) return true;
+      final meta = jsonDecode(metaFile.readAsStringSync());
+      if (meta is Map && meta['template'] is String) {
+        return meta['template'] == 'app';
+      }
+    } catch (_) {}
+    return true;
   }
 }

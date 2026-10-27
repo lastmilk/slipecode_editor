@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/editor_provider.dart';
 import '../providers/git_sync_provider.dart';
 import '../providers/project_provider.dart';
+import '../providers/settings_provider.dart';
 import '../widgets/code_editor.dart';
 import '../widgets/editor_tabs.dart';
 import '../widgets/file_tree.dart';
@@ -21,6 +24,7 @@ class EditorScreen extends StatefulWidget {
 
 class _EditorScreenState extends State<EditorScreen> {
   bool _showFileTree = true;
+  Timer? _autoSaveTimer;
 
   @override
   void initState() {
@@ -32,6 +36,26 @@ class _EditorScreenState extends State<EditorScreen> {
           projectProvider.fileTree == null) {
         projectProvider.refreshFileTree();
       }
+    });
+  }
+
+  @override
+  void dispose() {
+    _autoSaveTimer?.cancel();
+    super.dispose();
+  }
+
+  /// 自动保存（偏好设置开启时，停止输入 1 秒后写入并同步）
+  void _scheduleAutoSave() {
+    if (!context.read<SettingsProvider>().settings.autoSave) return;
+    _autoSaveTimer?.cancel();
+    _autoSaveTimer = Timer(const Duration(seconds: 1), () async {
+      final editorProvider = context.read<EditorProvider>();
+      if (!mounted || !editorProvider.hasActiveFile) return;
+      final path = editorProvider.activeFile!.path;
+      final ok = await editorProvider.saveActiveFile();
+      if (!mounted || !ok) return;
+      context.read<GitSyncProvider>().markChanged(path);
     });
   }
 
@@ -78,6 +102,7 @@ class _EditorScreenState extends State<EditorScreen> {
   Widget build(BuildContext context) {
     final projectProvider = context.watch<ProjectProvider>();
     final editorProvider = context.watch<EditorProvider>();
+    final settings = context.watch<SettingsProvider>().settings;
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
@@ -176,7 +201,11 @@ class _EditorScreenState extends State<EditorScreen> {
                 // 编辑区 / 欢迎提示
                 Expanded(
                   child: editorProvider.hasActiveFile
-                      ? _buildEditor(editorProvider, isDark)
+                      ? _buildEditor(
+                          editorProvider,
+                          isDark,
+                          settings.editorFontSize,
+                        )
                       : _buildWelcome(isDark),
                 ),
 
@@ -190,7 +219,11 @@ class _EditorScreenState extends State<EditorScreen> {
     );
   }
 
-  Widget _buildEditor(EditorProvider editorProvider, bool isDark) {
+  Widget _buildEditor(
+    EditorProvider editorProvider,
+    bool isDark,
+    double fontSize,
+  ) {
     final activeFile = editorProvider.activeFile!;
     final language = _detectLanguage(activeFile.path);
 
@@ -213,8 +246,10 @@ class _EditorScreenState extends State<EditorScreen> {
           child: CodeEditor(
             initialContent: activeFile.content,
             language: language,
+            fontSize: fontSize,
             onChanged: (content) {
               editorProvider.updateActiveContent(content);
+              _scheduleAutoSave();
             },
           ),
         ),

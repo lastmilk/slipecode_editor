@@ -24,6 +24,25 @@
 	<string>????</string>
 	<key>CFBundleVersion</key>
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
+	<!-- OAuth 深链回调：slipecode://oauth/callback（GitHub）与 slipecode://oauth/gitee/callback（Gitee） -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>app.slipecode.editor</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>slipecode</string>
+			</array>
+		</dict>
+	</array>
+	<!-- 允许通过「文件」App 访问应用沙盒中的项目目录 -->
+	<key>UIFileSharingEnabled</key>
+	<true/>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>UIApplicationSceneManifest</key>
