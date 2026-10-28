@@ -1,9 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:provider/provider.dart';
 
 import 'providers/account_provider.dart';
-import 'providers/ai_provider.dart';
 import 'providers/build_provider.dart';
 import 'providers/container_provider.dart';
 import 'providers/editor_provider.dart';
@@ -24,7 +25,8 @@ Future<void> main() async {
   final settingsProvider = SettingsProvider();
   await settingsProvider.load();
 
-  // Git 平台登录态
+  // Git 平台与账号的登录态恢复放后台执行：
+  // 未配置后端/凭据或网络不可达时降级为未登录，绝不阻塞首屏
   final githubProvider = GitHubProvider();
   final giteeProvider = GiteeProvider();
 
@@ -32,21 +34,6 @@ Future<void> main() async {
   final accountProvider = AccountProvider(settingsProvider);
   settingsProvider.attachRemoteSync(
     accountProvider.pushSettingsIfLoggedIn,
-  );
-
-  // 降级策略：账号/Git 平台的 token 校验涉及网络请求，
-  // 在没有真实后端或 token 时可能超时。统一限时，避免卡在首屏。
-  // 超时后各 provider 仍以 signedOut 状态运行，不影响编辑器核心功能。
-  await Future.wait([
-    githubProvider.init(),
-    giteeProvider.init(),
-    accountProvider.init(),
-  ]).timeout(
-    const Duration(seconds: 12),
-    onTimeout: () {
-      debugPrint('[init] 账号/平台登录态恢复超时，降级为未登录启动');
-      return [];
-    },
   );
 
   // 其余 Provider 依赖上面三者，直接实例化后注入
@@ -64,7 +51,6 @@ Future<void> main() async {
     giteeProvider,
     gitSyncProvider,
   );
-  final aiProvider = AiProvider(settingsProvider, editorProvider, buildProvider);
 
   runApp(
     SlipCodeApp(
@@ -78,9 +64,32 @@ Future<void> main() async {
       terminalProvider: terminalProvider,
       gitSyncProvider: gitSyncProvider,
       buildProvider: buildProvider,
-      aiProvider: aiProvider,
     ),
   );
+
+  // 首帧渲染后再恢复登录态；任一初始化失败只影响对应入口
+  unawaited(_initAuthInBackground(githubProvider, giteeProvider, accountProvider));
+}
+
+/// 后台恢复各平台登录态，带超时与异常兜底（降级为未登录）
+Future<void> _initAuthInBackground(
+  GitHubProvider github,
+  GiteeProvider gitee,
+  AccountProvider account,
+) async {
+  Future<void> guard(String name, Future<void> Function() init) async {
+    try {
+      await init().timeout(const Duration(seconds: 15));
+    } catch (e) {
+      debugPrint('$name 登录态恢复失败（已降级为未登录）：$e');
+    }
+  }
+
+  await Future.wait([
+    guard('GitHub', github.init),
+    guard('Gitee', gitee.init),
+    guard('账号', account.init),
+  ]);
 }
 
 class SlipCodeApp extends StatelessWidget {
@@ -96,7 +105,6 @@ class SlipCodeApp extends StatelessWidget {
     required this.terminalProvider,
     required this.gitSyncProvider,
     required this.buildProvider,
-    required this.aiProvider,
   });
 
   final SettingsProvider settingsProvider;
@@ -109,7 +117,6 @@ class SlipCodeApp extends StatelessWidget {
   final TerminalProvider terminalProvider;
   final GitSyncProvider gitSyncProvider;
   final BuildProvider buildProvider;
-  final AiProvider aiProvider;
 
   @override
   Widget build(BuildContext context) {
@@ -126,7 +133,6 @@ class SlipCodeApp extends StatelessWidget {
         ChangeNotifierProvider.value(value: giteeProvider),
         ChangeNotifierProvider.value(value: gitSyncProvider),
         ChangeNotifierProvider.value(value: buildProvider),
-        ChangeNotifierProvider.value(value: aiProvider),
       ],
       child: Consumer<SettingsProvider>(
         builder: (context, settings, _) {

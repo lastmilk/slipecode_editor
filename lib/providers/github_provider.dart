@@ -53,13 +53,19 @@ class GitHubProvider extends ChangeNotifier {
     _token = token;
     _status = GitHubAuthStatus.signedIn;
     notifyListeners();
-    // 校验 token 并拉取用户信息（失败则说明 token 已失效）
+    // 校验 token 并拉取用户信息（网络不可达时降级为未登录，但保留 token 以便下次重试）
     try {
-      _user = await api!.getAuthenticatedUser();
+      _user = await api!
+          .getAuthenticatedUser()
+          .timeout(const Duration(seconds: 10));
     } catch (e) {
       debugPrint('GitHub token 校验失败：$e');
-      await GitHubAuthService.instance.clearToken();
-      _token = null;
+      final isNetworkError = e is TimeoutException || e is SocketException;
+      if (!isNetworkError) {
+        // 401 等确定性失败才清除 token
+        await GitHubAuthService.instance.clearToken();
+        _token = null;
+      }
       _status = GitHubAuthStatus.signedOut;
     }
     notifyListeners();

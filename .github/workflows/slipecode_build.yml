@@ -30,8 +30,22 @@ jobs:
           cache: true
 
       # .env 在 .gitignore 中，但 pubspec 将其声明为 asset，缺失会导致构建失败
-      - name: Create empty .env
-        run: touch .env
+      # 以下均为公开的非机密配置（OAuth 公开 client id 与后端地址），client_secret 仅在服务端
+      - name: Create .env
+        run: |
+          cat > .env <<'EOF'
+          GITHUB_CLIENT_ID=0v23li26aNK8JhfG6weT
+          GITHUB_OAUTH_REDIRECT_URI=slipecode://oauth/callback
+          GITHUB_OAUTH_SCOPES=repo workflow read:user
+          GITHUB_API_BASE=https://api.github.com
+          GITHUB_OAUTH_BASE=https://github.com/login/oauth
+          GITEE_CLIENT_ID=6d44003e515e38e6b6723a9cea8ebe07447e5bd342a5c724555b6af6f69eea4d
+          GITEE_OAUTH_REDIRECT_URI=slipecode://oauth/gitee/callback
+          GITEE_OAUTH_SCOPES=projects user_info
+          GITEE_API_BASE=https://gitee.com/api/v5
+          GITEE_OAUTH_BASE=https://gitee.com/oauth
+          ACCOUNT_BACKEND_BASE_URL=https://ser1996.niav.cn
+          EOF
 
       - name: Pub get
         run: flutter pub get
@@ -63,8 +77,21 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Create empty .env
-        run: touch .env
+      - name: Create .env
+        run: |
+          cat > .env <<'EOF'
+          GITHUB_CLIENT_ID=0v23li26aNK8JhfG6weT
+          GITHUB_OAUTH_REDIRECT_URI=slipecode://oauth/callback
+          GITHUB_OAUTH_SCOPES=repo workflow read:user
+          GITHUB_API_BASE=https://api.github.com
+          GITHUB_OAUTH_BASE=https://github.com/login/oauth
+          GITEE_CLIENT_ID=6d44003e515e38e6b6723a9cea8ebe07447e5bd342a5c724555b6af6f69eea4d
+          GITEE_OAUTH_REDIRECT_URI=slipecode://oauth/gitee/callback
+          GITEE_OAUTH_SCOPES=projects user_info
+          GITEE_API_BASE=https://gitee.com/api/v5
+          GITEE_OAUTH_BASE=https://gitee.com/oauth
+          ACCOUNT_BACKEND_BASE_URL=https://ser1996.niav.cn
+          EOF
 
       - name: Pub get
         run: flutter pub get

@@ -52,12 +52,18 @@ class GiteeProvider extends ChangeNotifier {
     _token = token;
     _status = GiteeAuthStatus.signedIn;
     notifyListeners();
+    // 校验 token；网络不可达时降级为未登录，但保留 token 以便下次重试
     try {
-      _user = await api!.getAuthenticatedUser();
+      _user = await api!
+          .getAuthenticatedUser()
+          .timeout(const Duration(seconds: 10));
     } catch (e) {
       debugPrint('Gitee token 校验失败：$e');
-      await GiteeAuthService.instance.clearToken();
-      _token = null;
+      final isNetworkError = e is TimeoutException || e is SocketException;
+      if (!isNetworkError) {
+        await GiteeAuthService.instance.clearToken();
+        _token = null;
+      }
       _status = GiteeAuthStatus.signedOut;
     }
     notifyListeners();

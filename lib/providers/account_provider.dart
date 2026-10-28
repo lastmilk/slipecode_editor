@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
@@ -48,14 +49,21 @@ class AccountProvider extends ChangeNotifier {
       return;
     }
     try {
-      _user = await AccountService.instance.me(token);
+      _user = await AccountService.instance
+          .me(token)
+          .timeout(const Duration(seconds: 10));
       _token = token;
       _status = AccountStatus.signedIn;
       _safeNotify();
       await _pullSettings();
     } catch (e) {
       debugPrint('恢复账号登录失败：$e');
-      await AccountService.instance.clearToken();
+      // 网络不可达/后端未部署时降级为未登录，但保留 token 以便下次重试；
+      // 只有确定性失败（如 401）才清除
+      final isNetworkError = e is TimeoutException || e is SocketException;
+      if (!isNetworkError) {
+        await AccountService.instance.clearToken();
+      }
       _token = null;
       _status = AccountStatus.signedOut;
       _safeNotify();
