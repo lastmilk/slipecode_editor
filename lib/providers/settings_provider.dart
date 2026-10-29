@@ -9,7 +9,7 @@ import '../services/git_host.dart';
 
 /// 偏好设置状态管理
 ///
-/// 本地使用 SharedPreferences 持久化；登录 SlipCode 账号后，
+/// 本地使用 SharedPreferences 持久化；登录 SLIPE 账号后，
 /// 每次修改会通过 [attachRemoteSync] 注册的回调推送到后端。
 class SettingsProvider extends ChangeNotifier {
   static const _key = 'slipecode_app_settings';
@@ -129,6 +129,28 @@ class SettingsProvider extends ChangeNotifier {
 
   Future<void> setVolumeKeyCompletionEnabled(bool value) async {
     _settings = _settings.copyWith(volumeKeyCompletionEnabled: value);
+    await _save();
+  }
+
+  // ---------------------------------------------------------------------------
+  // 首页个性化（标题 / 头像）
+  // ---------------------------------------------------------------------------
+
+  Future<void> setHomeTitle(String value) async {
+    final title = value.trim();
+    _settings = _settings.copyWith(
+      homeTitle: title.isEmpty ? 'SLIPE' : title,
+    );
+    await _save();
+  }
+
+  Future<void> setAvatarPath(String path) async {
+    _settings = _settings.copyWith(avatarPath: path);
+    await _save();
+  }
+
+  Future<void> clearAvatar() async {
+    _settings = _settings.copyWith(avatarPath: '');
     await _save();
   }
 

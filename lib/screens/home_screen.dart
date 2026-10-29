@@ -6,6 +6,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 
 import '../models/project.dart';
+import '../providers/account_provider.dart';
 import '../providers/gitee_provider.dart';
 import '../providers/github_provider.dart';
 import '../providers/project_provider.dart';
@@ -155,6 +156,75 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     await _loadHistory();
   }
 
+  /// 登录入口（点击头像 / 右上角登录按钮）
+  ///
+  /// 已登录时直接进入账号页；未登录时弹出可选的登录方式。
+  void _showLoginSheet() {
+    final account = context.read<AccountProvider>();
+    final github = context.read<GitHubProvider>();
+    final gitee = context.read<GiteeProvider>();
+    if (account.isSignedIn || github.isSignedIn || gitee.isSignedIn) {
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => const AccountScreen()),
+      );
+      return;
+    }
+
+    showModalBottomSheet<void>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(20, 16, 20, 4),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  '登录 SLIPE',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.account_circle),
+              title: const Text('SLIPE 账号'),
+              subtitle: const Text('邮箱登录，跨设备同步设置'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const AccountScreen()),
+                );
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.code),
+              title: const Text('GitHub'),
+              subtitle: const Text('授权后可直接创建仓库'),
+              onTap: () async {
+                Navigator.pop(sheetContext);
+                await github.signIn();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.code_off),
+              title: const Text('Gitee'),
+              subtitle: const Text('授权后可直接创建仓库'),
+              onTap: () async {
+                Navigator.pop(sheetContext);
+                await gitee.signIn();
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
   Future<void> _confirmRemove(Project project) async {
     final ok = await showDialog<bool>(
       context: context,
@@ -205,7 +275,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             padding: const EdgeInsets.symmetric(horizontal: 24.0),
             child: Column(
               children: [
-                // 右上角入口：偏好设置 / SlipCode 账号
+                // 右上角入口：偏好设置 / SLIPE 账号（登录后隐藏登录按钮）
                 Row(
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
@@ -218,8 +288,24 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                         ),
                       ),
                     ),
+                    Consumer<AccountProvider>(
+                      builder: (context, account, _) => Consumer2<
+                          GitHubProvider, GiteeProvider>(
+                        builder: (context, github, gitee, _) {
+                          final signedIn = account.isSignedIn ||
+                              github.isSignedIn ||
+                              gitee.isSignedIn;
+                          if (signedIn) return const SizedBox.shrink();
+                          return IconButton(
+                            tooltip: '登录',
+                            icon: const Icon(Icons.login),
+                            onPressed: _showLoginSheet,
+                          );
+                        },
+                      ),
+                    ),
                     IconButton(
-                      tooltip: 'SlipCode 账号',
+                      tooltip: 'SLIPE 账号',
                       icon: const Icon(Icons.manage_accounts),
                       onPressed: () => Navigator.of(context).push(
                         MaterialPageRoute(
@@ -230,26 +316,34 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   ],
                 ),
 
-                // Logo/标题（淡入）
+                // 头像 + 自定义标题（点击头像可登录）
                 FadeTransition(
                   opacity: _logoFade,
-                  child: Column(
-                    children: [
-                      const Icon(
-                        Icons.code,
-                        size: 56,
-                        color: Colors.blueAccent,
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'SlipCode',
-                        style: TextStyle(
-                          fontSize: 30,
-                          fontWeight: FontWeight.bold,
-                          color: isDark ? Colors.white : Colors.black87,
-                        ),
-                      ),
-                    ],
+                  child: Consumer<SettingsProvider>(
+                    builder: (context, settingsProvider, _) {
+                      final settings = settingsProvider.settings;
+                      return Column(
+                        children: [
+                          GestureDetector(
+                            onTap: _showLoginSheet,
+                            child: _HomeAvatar(
+                              avatarPath: settings.avatarPath,
+                              isDark: isDark,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            settings.homeTitle,
+                            style: TextStyle(
+                              fontSize: 30,
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: 1.2,
+                              color: isDark ? Colors.white : Colors.black87,
+                            ),
+                          ),
+                        ],
+                      );
+                    },
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -335,10 +429,15 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(
-              Icons.history,
-              size: 48,
-              color: isDark ? Colors.white24 : Colors.black26,
+            // 品牌 logo（空列表时展示）
+            ClipRRect(
+              borderRadius: BorderRadius.circular(18),
+              child: Image.asset(
+                'assets/logo/slipe_logo.jpg',
+                width: 76,
+                height: 76,
+                fit: BoxFit.cover,
+              ),
             ),
             const SizedBox(height: 12),
             Text(
@@ -365,6 +464,76 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           onLongPress: () => _confirmRemove(project),
         );
       },
+    );
+  }
+}
+
+/// 首页头像
+///
+/// 用户设置过头像时显示自定义图片；否则使用默认头像
+/// （渐变圆 + 人像图标，新注册用户即为此样式）。
+class _HomeAvatar extends StatelessWidget {
+  const _HomeAvatar({required this.avatarPath, required this.isDark});
+
+  final String avatarPath;
+  final bool isDark;
+
+  static const double _size = 84;
+
+  @override
+  Widget build(BuildContext context) {
+    final file = avatarPath.isEmpty ? null : File(avatarPath);
+    final hasImage = file != null && file.existsSync();
+
+    return Tooltip(
+      message: '点击登录 / 查看账号',
+      child: Container(
+        width: _size,
+        height: _size,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          border: Border.all(
+            color: Colors.blueAccent.withValues(alpha: 0.45),
+            width: 2,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: isDark ? 0.4 : 0.12),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: ClipOval(
+          child: hasImage
+              ? Image.file(
+                  file,
+                  fit: BoxFit.cover,
+                  width: _size,
+                  height: _size,
+                  errorBuilder: (_, _, _) => _buildDefault(),
+                )
+              : _buildDefault(),
+        ),
+      ),
+    );
+  }
+
+  /// 默认头像（新用户）
+  Widget _buildDefault() {
+    return Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFF0175C2), Color(0xFF13B9FD)],
+        ),
+      ),
+      child: const Icon(
+        Icons.person,
+        size: 46,
+        color: Colors.white,
+      ),
     );
   }
 }

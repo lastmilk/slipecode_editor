@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'dart:math';
 
 import 'package:app_links/app_links.dart';
-import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
@@ -24,10 +23,11 @@ class GitHubAuthResult {
   });
 }
 
-/// GitHub OAuth 授权服务（PKCE）
+/// GitHub OAuth 授权服务（后端换取 token）
 ///
 /// 客户端不保存 client secret：
-/// 授权码交换时通过 code_verifier 证明身份（RFC 7636）。
+/// 授权页只带 client_id 和 state；回调拿到 code 后交给自建后端，
+/// 由后端用 client_secret 换取 access_token（与 Gitee 同一套原理）。
 class GitHubAuthService {
   GitHubAuthService._();
 
@@ -55,28 +55,19 @@ class GitHubAuthService {
     await _storage.delete(key: _scopeKey);
   }
 
-  // ---------------------------------------------------------------------------
-  // PKCE
-  // ---------------------------------------------------------------------------
-
-  String _randomString(int length) {
+  String _randomState() {
     const charset =
-        'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~';
+        'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
     final random = Random.secure();
-    return List.generate(length, (_) => charset[random.nextInt(charset.length)])
+    return List.generate(32, (_) => charset[random.nextInt(charset.length)])
         .join();
-  }
-
-  String _codeChallenge(String verifier) {
-    final digest = sha256.convert(utf8.encode(verifier));
-    return base64Url.encode(digest.bytes).replaceAll('=', '');
   }
 
   // ---------------------------------------------------------------------------
   // 授权流程
   // ---------------------------------------------------------------------------
 
-  /// 发起授权：打开浏览器并等待深链回调，完成后换取并保存 token。
+  /// 发起授权：打开浏览器并等待深链回调，完成后由后端换取并保存 token。
   ///
   /// 必须在 UI 主 Isolate 中调用。超时时间 [timeout] 默认 5 分钟。
   Future<GitHubAuthResult> signIn({
@@ -86,20 +77,20 @@ class GitHubAuthService {
     if (clientId.isEmpty) {
       throw StateError('未配置 GITHUB_CLIENT_ID，请先在 .env 中填写');
     }
+    if (AppConfig.githubTokenEndpoint.isEmpty) {
+      throw StateError('未配置账号后端，GitHub 授权需要后端换取 token');
+    }
 
-    final state = _randomString(32);
-    final verifier = _randomString(64);
-    final challenge = _codeChallenge(verifier);
+    final state = _randomState();
 
-    final authorizeUri =
-        Uri.parse('${AppConfig.oauthBase}/authorize').replace(
+    final authorizeUri = Uri.parse('${AppConfig.oauthBase}/authorize')
+        .replace(
       queryParameters: {
         'client_id': clientId,
         'redirect_uri': AppConfig.oauthRedirectUri,
         'scope': AppConfig.oauthScopes,
         'state': state,
-        'code_challenge': challenge,
-        'code_challenge_method': 'S256',
+        'allow_signup': 'true',
       },
     );
 
@@ -123,8 +114,8 @@ class GitHubAuthService {
       throw StateError('无法打开浏览器完成授权');
     }
 
-    final callback = await _pendingCallback!.future
-        .timeout(timeout, onTimeout: () {
+    final callback = await _pendingCallback!.future.timeout(timeout,
+        onTimeout: () {
       throw TimeoutException('授权超时，请重试');
     });
     await _cleanup();
@@ -139,19 +130,23 @@ class GitHubAuthService {
         '授权被拒绝：$error ${callback.queryParameters['error_description'] ?? ''}',
       );
     }
+
+    // 后端中转回调会带回一次性 ticket（token 已由后端换好），
+    // 直接深链回调则带回 code，两种情况都交给后端接口。
+    final ticket = callback.queryParameters['ticket'];
     final code = callback.queryParameters['code'];
-    if (code == null || code.isEmpty) {
-      throw StateError('授权回调缺少 code');
+    if ((ticket ?? '').isEmpty && (code ?? '').isEmpty) {
+      throw StateError('授权回调缺少 code / ticket');
     }
 
-    final result = await _exchangeCode(code, verifier);
+    final result = await _exchange(ticket: ticket, code: code);
     await _storage.write(key: _tokenKey, value: result.accessToken);
     await _storage.write(key: _scopeKey, value: result.scope);
     return result;
   }
 
   bool _isCallbackUri(Uri uri) {
-    final expected = Uri.parse(AppConfig.oauthRedirectUri);
+    final expected = Uri.parse(AppConfig.oauthDeepLink);
     return uri.scheme == expected.scheme &&
         uri.host == expected.host &&
         uri.path == expected.path;
@@ -171,43 +166,54 @@ class GitHubAuthService {
     await _cleanup();
   }
 
-  /// 用授权码 + code_verifier 换 access token（无需 client secret）
-  Future<GitHubAuthResult> _exchangeCode(
-    String code,
-    String codeVerifier,
-  ) async {
-    final response = await http.post(
-      Uri.parse('${AppConfig.oauthBase}/access_token'),
-      headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: {
-        'client_id': AppConfig.githubClientId,
-        'code': code,
-        'redirect_uri': AppConfig.oauthRedirectUri,
-        'grant_type': 'authorization_code',
-        'code_verifier': codeVerifier,
-      },
-    );
+  /// 把授权结果交给自建后端：由后端用 client_secret 换取 / 领取 access token
+  Future<GitHubAuthResult> _exchange({
+    String? ticket,
+    String? code,
+  }) async {
+    final body = (ticket ?? '').isNotEmpty
+        ? {'ticket': ticket}
+        : {'code': code, 'redirect_uri': AppConfig.oauthRedirectUri};
+
+    final response = await http
+        .post(
+          Uri.parse(AppConfig.githubTokenEndpoint),
+          headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+          },
+          body: jsonEncode(body),
+        )
+        .timeout(const Duration(seconds: 30));
 
     if (response.statusCode != 200) {
       throw HttpExceptionWithBody(
-        '换取 token 失败（HTTP ${response.statusCode}）',
+        '后端换取 GitHub token 失败（HTTP ${response.statusCode}）',
         response.body,
       );
     }
 
-    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    final decoded = jsonDecode(response.body);
+    // 后端可能直接返回，也可能包一层 data
+    final data = decoded is Map<String, dynamic>
+        ? (decoded['data'] is Map<String, dynamic>
+            ? decoded['data'] as Map<String, dynamic>
+            : decoded)
+        : <String, dynamic>{};
+
     if (data['error'] != null) {
       throw HttpExceptionWithBody(
         '换取 token 失败：${data['error_description'] ?? data['error']}',
         response.body,
       );
     }
+    final token = data['access_token'] as String?;
+    if (token == null || token.isEmpty) {
+      throw HttpExceptionWithBody('后端未返回 access_token', response.body);
+    }
 
     return GitHubAuthResult(
-      accessToken: data['access_token'] as String,
+      accessToken: token,
       scope: data['scope'] as String? ?? '',
       tokenType: data['token_type'] as String? ?? 'bearer',
     );

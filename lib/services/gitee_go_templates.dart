@@ -13,7 +13,7 @@ class GiteeGoTemplates {
   static const String flutterBuildPipeline = r'''
 version: '1.0'
 name: slipecode-build
-displayName: SlipCode Build (Android)
+displayName: SLIPE Build (Android)
 triggers:
   push:
     branches:

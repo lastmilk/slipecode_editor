@@ -51,7 +51,7 @@ class AiProvider extends ChangeNotifier {
 
   /// 构建系统提示词：告诉 AI 它的能力与输出规范
   String _systemPrompt() {
-    return '''你是 SlipCode 代码编辑器内置的 AI 助手，运行在 Android 手机上，帮助用户编写 Flutter/Dart 项目。
+    return '''你是 SLIPE 代码编辑器内置的 AI 助手，运行在 Android 手机上，帮助用户编写 Flutter/Dart 项目。
 
 你的能力：
 1. 代码编辑：用户会把当前打开的文件内容发给你。请直接返回修改后的完整文件内容，用 ```dart 代码块包裹（若是其他语言则用对应语言标记）。不要只返回片段，要返回整个文件。

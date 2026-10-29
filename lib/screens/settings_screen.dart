@@ -15,7 +15,7 @@ import 'account_screen.dart';
 /// 偏好设置页面
 ///
 /// 配置 IDE 行为（主题、编辑器字号、自动保存、首页语句、Git 默认平台），
-/// 登录 SlipCode 账号后设置会自动同步到其他设备。
+/// 登录 SLIPE 账号后设置会自动同步到其他设备。
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
 
@@ -329,6 +329,60 @@ class SettingsScreen extends StatelessWidget {
           const SizedBox(height: 16),
 
           _Section(
+            title: '首页个性化',
+            isDark: isDark,
+            children: [
+              // 头像
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Row(
+                  children: [
+                    const Expanded(child: Text('头像')),
+                    if (settings.avatarPath.isNotEmpty &&
+                        File(settings.avatarPath).existsSync())
+                      Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: ClipOval(
+                          child: Image.file(
+                            File(settings.avatarPath),
+                            width: 40,
+                            height: 40,
+                            fit: BoxFit.cover,
+                          ),
+                        ),
+                      ),
+                    TextButton.icon(
+                      onPressed: () => _pickAvatar(context),
+                      icon: const Icon(Icons.image_outlined, size: 16),
+                      label: Text(settings.avatarPath.isEmpty ? '选择头像' : '更换'),
+                    ),
+                    if (settings.avatarPath.isNotEmpty)
+                      TextButton(
+                        onPressed: settingsProvider.clearAvatar,
+                        child: const Text('恢复默认'),
+                      ),
+                  ],
+                ),
+              ),
+              // 标题文案
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('首页标题'),
+                subtitle: Text(settings.homeTitle),
+                trailing: const Icon(Icons.edit, size: 18),
+                onTap: () => _editText(
+                  context,
+                  title: '首页标题',
+                  hint: '留空则使用默认 SLIPE',
+                  value: settings.homeTitle,
+                  onSave: settingsProvider.setHomeTitle,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+
+          _Section(
             title: 'AI 悬浮球',
             isDark: isDark,
             children: [
@@ -381,12 +435,13 @@ class SettingsScreen extends StatelessWidget {
               ),
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
-                title: const Text('音量上键 = Tab / 接受补全'),
+                title: const Text('音量键控制（下键切换 / 上键确认）'),
                 subtitle: Text(
                   Platform.isAndroid
-                      ? '显示建议时接受补全；无建议时插入缩进。'
-                          '关闭后音量上键仅在有建议时生效，其余时候恢复正常音量调节。'
-                      : 'iOS 不支持音量键映射，请使用建议条右侧的「补全」按钮。',
+                      ? '编辑器内音量键不再调节音量。有补全候选时，音量下键切换候选、音量上键确认；'
+                          '无候选时音量下键唤出文件栏。'
+                          '关闭后音量键恢复系统音量调节。'
+                      : 'iOS 不支持音量键映射，请使用建议条上的上一条 / 下一条 / 补全按钮。',
                 ),
                 value: settings.volumeKeyCompletionEnabled,
                 onChanged: Platform.isAndroid
@@ -398,7 +453,7 @@ class SettingsScreen extends StatelessWidget {
           const SizedBox(height: 24),
           Center(
             child: Text(
-              'SlipCode · 偏好设置保存在本地，登录账号后同步到云端',
+              'SLIPE · 偏好设置保存在本地，登录账号后同步到云端',
               style: TextStyle(
                 fontSize: 11,
                 color: isDark ? Colors.white38 : Colors.black38,
@@ -493,7 +548,7 @@ class _SyncCard extends StatelessWidget {
                 child: Text(
                   signedIn
                       ? '设置同步已开启（${account.user?.displayName ?? account.user?.email ?? ''}）'
-                      : '登录 SlipCode 账号以同步设置',
+                      : '登录 SLIPE 账号以同步设置',
                   style: const TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
@@ -558,6 +613,37 @@ class _SyncCard extends StatelessWidget {
   static String _format(DateTime time) {
     return '${time.month}月${time.day}日 ${time.hour.toString().padLeft(2, '0')}:'
         '${time.minute.toString().padLeft(2, '0')}';
+  }
+}
+
+/// 选择头像图片并复制到应用文档目录
+Future<void> _pickAvatar(BuildContext context) async {
+  final settingsProvider = context.read<SettingsProvider>();
+  try {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.image,
+      dialogTitle: '选择头像',
+    );
+    final srcPath = result?.files.single.path;
+    if (srcPath == null || srcPath.isEmpty) return;
+
+    final docsDir = await getApplicationDocumentsDirectory();
+    final avatarDir = Directory('${docsDir.path}/avatars');
+    if (!avatarDir.existsSync()) {
+      avatarDir.createSync(recursive: true);
+    }
+    final ext = srcPath.contains('.') ? srcPath.split('.').last : 'png';
+    final destPath =
+        '${avatarDir.path}/avatar_${DateTime.now().millisecondsSinceEpoch}.$ext';
+    await File(srcPath).copy(destPath);
+
+    await settingsProvider.setAvatarPath(destPath);
+  } catch (e) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('选择头像失败: $e')),
+      );
+    }
   }
 }
 

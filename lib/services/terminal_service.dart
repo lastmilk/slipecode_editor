@@ -30,7 +30,7 @@ class TerminalSession {
   String cwd = '/root';
   bool _closed = false;
 
-  static const String _marker = '@@SLIPCODE_DONE@@';
+  static const String _marker = '@@SLIPE_DONE@@';
 
   Stream<String> get output => _outputController.stream;
   bool get isClosed => _closed;
@@ -82,7 +82,7 @@ class TerminalSession {
   }
 
   void _handleLine(String line) {
-    // 哨兵格式：@@SLIPCODE_DONE@@<exitCode>@@<cwd>
+    // 哨兵格式：@@SLIPE_DONE@@<exitCode>@@<cwd>
     if (line.startsWith(_marker)) {
       final payload = line.substring(_marker.length);
       final parts = payload.split('@@');
@@ -117,7 +117,7 @@ class TerminalSession {
     _process.stdin.writeln(command);
     // 输出结束哨兵：换行 + 退出码 + 当前目录
     _process.stdin.writeln(
-      "printf '\\n@@SLIPCODE_DONE@@%s@@%s\\n' \"\$?\" \"\$PWD\"",
+      "printf '\\n@@SLIPE_DONE@@%s@@%s\\n' \"\$?\" \"\$PWD\"",
     );
     await _process.stdin.flush();
 

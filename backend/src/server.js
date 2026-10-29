@@ -4,7 +4,7 @@
 // 功能：
 //  1. 独立账号体系（注册 / 登录 / 用户信息）
 //  2. 按用户保存偏好设置（多设备同步）
-//  3. Gitee OAuth token 代理（Gitee 不支持 PKCE，必须由后端持有 client_secret）
+//  3. Gitee / GitHub OAuth token 代理（后端持有 client_secret，客户端不做 PKCE）
 //  4. 积分体系（每日签到 +100，积分用于抵扣 LLM 调用）
 //  5. OpenAI 兼容的 LLM 内置代理（按 token 计积分）
 //  6. 管理端（/admin 静态页 + /api/admin/* 接口，Bearer ADMIN_TOKEN）
@@ -32,6 +32,22 @@ const PASSWORD_MIN = 8;
 const GITEE_CLIENT_ID = process.env.GITEE_CLIENT_ID || '';
 const GITEE_CLIENT_SECRET = process.env.GITEE_CLIENT_SECRET || '';
 const GITEE_REDIRECT_URI = process.env.GITEE_REDIRECT_URI || '';
+
+// GitHub OAuth（后端持有 client_secret，客户端不再使用 PKCE）
+const GITHUB_CLIENT_ID = process.env.GITHUB_CLIENT_ID || '';
+const GITHUB_CLIENT_SECRET = process.env.GITHUB_CLIENT_SECRET || '';
+// 后端中转回调（GitHub OAuth App 里登记的 Authorization callback URL）
+const GITHUB_REDIRECT_URI =
+  process.env.GITHUB_REDIRECT_URI ||
+  'https://ser1996.niav.cn/api/oauth/github/callback';
+// 后端换到 token 后 302 回 App 的深链
+const GITHUB_DEEP_LINK =
+  process.env.GITHUB_DEEP_LINK || 'slipecode://oauth/callback';
+const GITHUB_OAUTH_BASE =
+  process.env.GITHUB_OAUTH_BASE || 'https://github.com/login/oauth';
+// 一次性票据：ticket → token（5 分钟有效，用后即焚，避免 token 出现在 URL）
+const OAUTH_TICKET_TTL_MS = 5 * 60 * 1000;
+const oauthTickets = new Map();
 
 // 管理端访问令牌：生产环境务必通过环境变量 ADMIN_TOKEN 覆盖默认值
 const ADMIN_TOKEN =
@@ -401,6 +417,142 @@ async function handleGiteeRefresh(req, res) {
 }
 
 // ---------------------------------------------------------------------------
+// GitHub OAuth 代理（后端持有 client_secret）
+// ---------------------------------------------------------------------------
+
+async function githubTokenRequest(params) {
+  if (!GITHUB_CLIENT_ID || !GITHUB_CLIENT_SECRET) {
+    throw Object.assign(
+      new Error('后端未配置 GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET'),
+      { status: 503 },
+    );
+  }
+  const body = new URLSearchParams({
+    client_id: GITHUB_CLIENT_ID,
+    client_secret: GITHUB_CLIENT_SECRET,
+    ...params,
+  });
+  const upstream = await fetch(`${GITHUB_OAUTH_BASE}/access_token`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      Accept: 'application/json',
+    },
+    body,
+  });
+  const text = await upstream.text();
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    data = { error: 'invalid_response', error_description: text.slice(0, 300) };
+  }
+  if (!upstream.ok || !data.access_token) {
+    throw Object.assign(
+      new Error(
+        data.error_description || data.error || 'GitHub 换取 token 失败',
+      ),
+      { status: 502 },
+    );
+  }
+  return data;
+}
+
+// 只允许 http(s) 回调地址参与换 token；自定义深链无法在 GitHub 侧校验，
+// 这种情况由后端中转回调（/api/oauth/github/callback）统一处理。
+function resolveGithubRedirectUri(candidate) {
+  const value = String(candidate || '');
+  if (value.startsWith('http://') || value.startsWith('https://')) {
+    return value;
+  }
+  return GITHUB_REDIRECT_URI;
+}
+
+function issueOAuthTicket(tokenData) {
+  const now = Date.now();
+  for (const [key, value] of oauthTickets) {
+    if (value.expiresAt < now) oauthTickets.delete(key);
+  }
+  const ticket = randomBytes(32).toString('hex');
+  oauthTickets.set(ticket, { ...tokenData, expiresAt: now + OAUTH_TICKET_TTL_MS });
+  return ticket;
+}
+
+/// GitHub 回调中转：GitHub → 本后端 → 302 回 App 深链（带一次性 ticket）
+async function handleGithubCallback(req, res) {
+  const url = new URL(req.url, 'http://localhost');
+  const state = url.searchParams.get('state') || '';
+  const redirectToApp = (params) => {
+    const query = new URLSearchParams({ state, ...params });
+    res.writeHead(302, {
+      Location: `${GITHUB_DEEP_LINK}?${query.toString()}`,
+      'Cache-Control': 'no-store',
+    });
+    res.end();
+  };
+
+  const error = url.searchParams.get('error');
+  if (error) {
+    return redirectToApp({
+      error,
+      error_description: url.searchParams.get('error_description') || '',
+    });
+  }
+  const code = url.searchParams.get('code');
+  if (!code) return redirectToApp({ error: 'missing_code' });
+
+  try {
+    const data = await githubTokenRequest({
+      code,
+      redirect_uri: GITHUB_REDIRECT_URI,
+    });
+    redirectToApp({
+      ticket: issueOAuthTicket({
+        access_token: data.access_token,
+        scope: data.scope || '',
+        token_type: data.token_type || 'bearer',
+      }),
+    });
+  } catch (err) {
+    console.error('GitHub 回调换取 token 失败：', err.message);
+    redirectToApp({ error: 'exchange_failed', error_description: err.message });
+  }
+}
+
+async function handleGithubToken(req, res) {
+  const body = await readJson(req);
+
+  // 方式一：后端中转 callback 已换好 token，用一次性 ticket 领取
+  const ticket = String(body.ticket || '');
+  if (ticket) {
+    const entry = oauthTickets.get(ticket);
+    oauthTickets.delete(ticket);
+    if (!entry || entry.expiresAt < Date.now()) {
+      return sendJson(res, 400, { error: 'ticket 无效或已过期，请重新授权' });
+    }
+    return sendJson(res, 200, {
+      access_token: entry.access_token,
+      scope: entry.scope,
+      token_type: entry.token_type,
+    });
+  }
+
+  // 方式二：客户端直接拿到 code（深链回调）时由后端换取
+  const code = String(body.code || '');
+  if (!code) return sendJson(res, 400, { error: '缺少 code' });
+
+  const data = await githubTokenRequest({
+    code,
+    redirect_uri: resolveGithubRedirectUri(body.redirect_uri),
+  });
+  sendJson(res, 200, {
+    access_token: data.access_token,
+    scope: data.scope,
+    token_type: data.token_type || 'bearer',
+  });
+}
+
+// ---------------------------------------------------------------------------
 // 积分：每日签到 / 余额查询
 // ---------------------------------------------------------------------------
 
@@ -657,6 +809,8 @@ const ROUTES = {
   'PUT /api/settings': handlePutSettings,
   'POST /api/oauth/gitee/token': handleGiteeToken,
   'POST /api/oauth/gitee/refresh': handleGiteeRefresh,
+  'POST /api/oauth/github/token': handleGithubToken,
+  'GET /api/oauth/github/callback': handleGithubCallback,
   'POST /api/checkin': handleCheckin,
   'GET /api/credits': handleGetCredits,
   'GET /api/llm/models': handleLlmModels,

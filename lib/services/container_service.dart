@@ -473,7 +473,7 @@ class ContainerService {
 
     try {
       final request = await client.getUrl(Uri.parse(url));
-      request.headers.add('User-Agent', 'SlipCode/1.0');
+      request.headers.add('User-Agent', 'SLIPE/1.0');
       final response = await request.close();
 
       if (response.statusCode != HttpStatus.ok) {

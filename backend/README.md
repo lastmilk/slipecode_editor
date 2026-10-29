@@ -1,6 +1,6 @@
-# SlipCode 账号后端
+# SLIPE 账号后端
 
-零第三方依赖的 Node.js 后端，为 SlipCode 提供：
+零第三方依赖的 Node.js 后端，为 SLIPE 提供：
 
 - 独立账号体系（注册 / 登录 / 用户信息）
 - 用户偏好设置的多设备同步
@@ -31,6 +31,10 @@ npm start
 | `GITEE_CLIENT_ID` | Gitee 必填 | Gitee 应用的 Client ID |
 | `GITEE_CLIENT_SECRET` | Gitee 必填 | Gitee 应用的 Client Secret |
 | `GITEE_REDIRECT_URI` | 否 | Gitee 回调地址，默认 `slipecode://oauth/gitee/callback` |
+| `GITHUB_CLIENT_ID` | GitHub 必填 | GitHub OAuth App 的 Client ID |
+| `GITHUB_CLIENT_SECRET` | GitHub 必填 | GitHub OAuth App 的 Client Secret |
+| `GITHUB_REDIRECT_URI` | 否 | GitHub OAuth App 里登记的 callback URL，默认 `https://ser1996.niav.cn/api/oauth/github/callback` |
+| `GITHUB_DEEP_LINK` | 否 | 换 token 后 302 回 App 的深链，默认 `slipecode://oauth/callback` |
 | `ADMIN_TOKEN` | 生产必填 | 管理端访问令牌，**必须改为足够长的随机串**；未设置时使用代码内的开发默认值（启动时会打印警告） |
 
 启动示例：
@@ -55,6 +59,8 @@ node src/server.js
 | `PUT` | `/api/settings` | 需登录，`{settings}` 保存偏好设置 |
 | `POST` | `/api/oauth/gitee/token` | `{code, redirect_uri}` → Gitee token（供 App 使用） |
 | `POST` | `/api/oauth/gitee/refresh` | `{refresh_token}` → 续期 Gitee token |
+| `GET` | `/api/oauth/github/callback` | GitHub 回调中转：后端用 client_secret 换 token，再 302 回 `slipecode://oauth/callback?ticket=...` |
+| `POST` | `/api/oauth/github/token` | `{ticket}`（推荐）或 `{code, redirect_uri}` → GitHub token（供 App 使用） |
 | `POST` | `/api/checkin` | 需登录，每日签到 +100 积分；当天重复签到返回「今日已签到」（`checkedInToday: true`） |
 | `GET` | `/api/credits` | 需登录，返回 `{credits, checkedInToday}` |
 | `GET` | `/api/llm/models` | 需登录，返回可用模型列表（仅 `id`/`name`/`multiplier`，不含 `apiKey`） |

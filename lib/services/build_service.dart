@@ -67,7 +67,7 @@ class BuildService {
           Uint8List.fromList(utf8.encode(GitHubActionsTemplates.flutterBuildWorkflow)),
         ),
       ],
-      message: 'ci: add SlipCode build workflow',
+      message: 'ci: add SLIPE build workflow',
       branch: branch,
     );
   }

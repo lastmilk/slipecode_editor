@@ -3,9 +3,8 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 /// 应用配置
 ///
 /// 从 .env 读取 GitHub / Gitee / 账号后端配置。
-/// 客户端不内置任何 client secret：
-/// - GitHub 使用 PKCE，只需要公开的 Client ID；
-/// - Gitee 原生不支持 PKCE，授权码必须由自建后端用 client_secret 换取 token。
+/// 客户端不内置任何 client secret：GitHub 与 Gitee 都采用「授权页拿 code →
+/// 自建后端用 client_secret 换 token」的常规授权流程。
 class AppConfig {
   AppConfig._();
 
@@ -23,11 +22,23 @@ class AppConfig {
   static String get githubClientId => _env('GITHUB_CLIENT_ID');
 
   /// 是否已配置 GitHub Client ID
-  static bool get isConfigured => githubClientId.isNotEmpty;
+  ///
+  /// GitHub 与 Gitee 一样改为「后端换取 token」的常规授权流程，
+  /// 因此还必须有账号后端（后端持有 client_secret），否则无法完成登录。
+  static bool get isConfigured =>
+      githubClientId.isNotEmpty && accountBackendBase.isNotEmpty;
 
-  /// OAuth 回调地址（深链）
-  static String get oauthRedirectUri =>
-      _env('GITHUB_OAUTH_REDIRECT_URI', 'slipecode://oauth/callback');
+  /// 授权回调地址（GitHub OAuth App 里登记的 URL，通常是后端中转地址）
+  static String get oauthRedirectUri => _env(
+        'GITHUB_OAUTH_REDIRECT_URI',
+        'https://ser1996.niav.cn/api/oauth/github/callback',
+      );
+
+  /// App 自身监听的深链，后端换到 token 后 302 到这里
+  static String get oauthDeepLink => _env(
+        'GITHUB_DEEP_LINK',
+        'slipecode://oauth/callback',
+      );
 
   /// 授权范围
   static String get oauthScopes =>
@@ -88,4 +99,9 @@ class AppConfig {
   static String get giteeRefreshEndpoint => accountBackendBase.isEmpty
       ? ''
       : '$accountBackendBase/api/oauth/gitee/refresh';
+
+  /// GitHub 授权码换取 token 的后端接口（后端持有 client_secret）
+  static String get githubTokenEndpoint => accountBackendBase.isEmpty
+      ? ''
+      : '$accountBackendBase/api/oauth/github/token';
 }

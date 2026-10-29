@@ -254,7 +254,7 @@ class BuildProvider extends ChangeNotifier {
             ),
           ),
         ],
-        message: 'ci: add SlipCode Gitee Go pipeline',
+        message: 'ci: add SLIPE Gitee Go pipeline',
         branch: 'master',
       );
     } else {
@@ -273,7 +273,7 @@ class BuildProvider extends ChangeNotifier {
           ),
         ),
       ],
-      message: 'ci: trigger SlipCode build',
+      message: 'ci: trigger SLIPE build',
       branch: 'master',
     );
 

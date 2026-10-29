@@ -76,6 +76,16 @@ class AppSettings {
   /// 其余时候恢复为正常的音量调节。
   final bool volumeKeyCompletionEnabled;
 
+  // ---------------------------------------------------------------------------
+  // 首页个性化
+  // ---------------------------------------------------------------------------
+
+  /// 首页标题文案（默认 SLIPE）
+  final String homeTitle;
+
+  /// 用户头像图片路径（空字符串表示使用默认头像）
+  final String avatarPath;
+
   const AppSettings({
     this.themeMode = ThemeMode.system,
     this.editorFontSize = 14,
@@ -93,6 +103,8 @@ class AppSettings {
     this.systemOverlayEnabled = false,
     this.completionEnabled = true,
     this.volumeKeyCompletionEnabled = true,
+    this.homeTitle = 'SLIPE',
+    this.avatarPath = '',
   });
 
   static const defaults = AppSettings();
@@ -118,6 +130,8 @@ class AppSettings {
     bool? systemOverlayEnabled,
     bool? completionEnabled,
     bool? volumeKeyCompletionEnabled,
+    String? homeTitle,
+    String? avatarPath,
   }) {
     return AppSettings(
       themeMode: themeMode ?? this.themeMode,
@@ -139,6 +153,8 @@ class AppSettings {
       completionEnabled: completionEnabled ?? this.completionEnabled,
       volumeKeyCompletionEnabled:
           volumeKeyCompletionEnabled ?? this.volumeKeyCompletionEnabled,
+      homeTitle: homeTitle ?? this.homeTitle,
+      avatarPath: avatarPath ?? this.avatarPath,
     );
   }
 
@@ -163,6 +179,8 @@ class AppSettings {
         'systemOverlayEnabled': systemOverlayEnabled,
         'completionEnabled': completionEnabled,
         'volumeKeyCompletionEnabled': volumeKeyCompletionEnabled,
+        'homeTitle': homeTitle,
+        'avatarPath': avatarPath,
       };
 
   factory AppSettings.fromJson(Map<String, dynamic>? json) {
@@ -202,6 +220,8 @@ class AppSettings {
           json['completionEnabled'] as bool? ?? defaults.completionEnabled,
       volumeKeyCompletionEnabled: json['volumeKeyCompletionEnabled'] as bool? ??
           defaults.volumeKeyCompletionEnabled,
+      homeTitle: json['homeTitle'] as String? ?? defaults.homeTitle,
+      avatarPath: json['avatarPath'] as String? ?? defaults.avatarPath,
     );
   }
 }

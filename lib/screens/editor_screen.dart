@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -20,7 +21,8 @@ import 'terminal_screen.dart';
 
 /// 主编辑器界面
 ///
-/// 左侧动效双面板侧边栏（文件 / Agent）+ 右侧标签页 + 编辑区 + 底部状态栏
+/// 侧边栏改为「浮层滑入」，不再挤压编辑区宽度；
+/// 支持从左右边缘滑动唤出，打开文件后自动收起。
 class EditorScreen extends StatefulWidget {
   const EditorScreen({super.key});
 
@@ -30,20 +32,23 @@ class EditorScreen extends StatefulWidget {
 
 class _EditorScreenState extends State<EditorScreen>
     with SingleTickerProviderStateMixin {
-  bool _showSidebar = true;
+  bool _showSidebar = false;
   Timer? _autoSaveTimer;
 
   /// 侧边栏标签控制器（0=文件，1=Agent）
   late final TabController _sidebarTabController;
 
-  /// 当前编辑器的 GlobalKey，用于音量键触发补全/Tab
-  final GlobalKey<CodeEditorState> _codeEditorKey = GlobalKey<CodeEditorState>();
+  /// 当前编辑器状态，用于音量键驱动补全
+  final GlobalKey<CodeEditorState> _codeEditorKey =
+      GlobalKey<CodeEditorState>();
+
+  /// 监听偏好设置变化，实时启停音量键拦截
+  SettingsProvider? _settingsProvider;
 
   @override
   void initState() {
     super.initState();
     _sidebarTabController = TabController(length: 2, vsync: this);
-    // 如果已有项目路径但还没加载文件树
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final projectProvider = context.read<ProjectProvider>();
       if (projectProvider.projectPath != null &&
@@ -51,30 +56,16 @@ class _EditorScreenState extends State<EditorScreen>
         projectProvider.refreshFileTree();
       }
     });
-    _setupVolumeKeyHandler();
-  }
-
-  /// 音量上键 = 接受补全 / 插入 Tab（仅 Android；iOS 走虚拟按钮）
-  void _setupVolumeKeyHandler() {
-    if (!Platform.isAndroid) return;
-    VolumeKeyService.instance.setHandler((keyCode) {
-      // 仅处理音量上键；音量下键始终走系统默认
-      if (keyCode != VolumeKeyService.keyVolumeUp) return false;
-      final settings = context.read<SettingsProvider>().settings;
-      if (!settings.completionEnabled) return false;
-
-      final state = _codeEditorKey.currentState;
-      if (state == null) return false;
-      // 关闭「音量键补全」时，仅在有建议时接受，否则放行音量调节
-      final fallback = settings.volumeKeyCompletionEnabled;
-      return state.acceptSuggestionOrTab(fallbackToTab: fallback);
-    });
+    _settingsProvider = context.read<SettingsProvider>();
+    _settingsProvider!.addListener(_syncVolumeKeyListener);
+    _syncVolumeKeyListener();
   }
 
   @override
   void dispose() {
     _autoSaveTimer?.cancel();
     _sidebarTabController.dispose();
+    _settingsProvider?.removeListener(_syncVolumeKeyListener);
     // 离开编辑器时取消音量键拦截，恢复正常音量调节
     if (Platform.isAndroid) {
       VolumeKeyService.instance.setHandler(null);
@@ -82,7 +73,45 @@ class _EditorScreenState extends State<EditorScreen>
     super.dispose();
   }
 
-  /// 自动保存（偏好设置开启时，停止输入 1 秒后写入并同步）
+  // ---------------------------------------------------------------------------
+  // 音量键（Android）
+  // ---------------------------------------------------------------------------
+
+  /// 根据偏好设置启停音量键拦截
+  ///
+  /// 关闭「音量键补全」后必须注销原生监听，
+  /// 否则音量键会被持续拦截、无法调节音量。
+  void _syncVolumeKeyListener() {
+    if (!Platform.isAndroid) return;
+    final enabled =
+        _settingsProvider?.settings.volumeKeyCompletionEnabled ?? false;
+    VolumeKeyService.instance.setHandler(enabled ? _handleVolumeKey : null);
+  }
+
+  /// 编辑器内音量键永不调节音量：
+  /// - 音量上键：确认当前补全候选（无候选时不做事）
+  /// - 音量下键：有候选时切换下一个；无候选时唤出文件栏
+  bool _handleVolumeKey(int keyCode) {
+    if (!mounted) return false;
+    final state = _codeEditorKey.currentState;
+    if (keyCode == VolumeKeyService.keyVolumeUp) {
+      state?.acceptSelected();
+      return true; // 始终消费，避免触发音量控制
+    }
+    if (keyCode == VolumeKeyService.keyVolumeDown) {
+      if (state != null && state.moveSelection()) return true;
+      // 没有补全候选：唤出左侧文件栏
+      setState(() => _showSidebar = true);
+      _sidebarTabController.animateTo(0);
+      return true;
+    }
+    return false;
+  }
+
+  // ---------------------------------------------------------------------------
+  // 行为
+  // ---------------------------------------------------------------------------
+
   void _scheduleAutoSave() {
     if (!context.read<SettingsProvider>().settings.autoSave) return;
     _autoSaveTimer?.cancel();
@@ -99,7 +128,7 @@ class _EditorScreenState extends State<EditorScreen>
   Future<void> _handleFileTap(String path) async {
     final editorProvider = context.read<EditorProvider>();
     final opened = await editorProvider.openFile(path);
-    // 打开成功后自动收起侧边栏（方便小屏手机）
+    // 打开成功后自动收起侧边栏（小屏手机可立刻看到代码）
     if (opened != null && mounted) {
       setState(() => _showSidebar = false);
     }
@@ -111,24 +140,26 @@ class _EditorScreenState extends State<EditorScreen>
     _sidebarTabController.animateTo(1);
   }
 
+  void _toggleSidebar() {
+    setState(() => _showSidebar = !_showSidebar);
+  }
+
   Future<void> _handleSave() async {
     final editorProvider = context.read<EditorProvider>();
-    if (editorProvider.hasActiveFile) {
-      final savedPath = editorProvider.activeFile!.path;
-      final ok = await editorProvider.saveActiveFile();
-      if (!mounted) return;
-      if (ok) {
-        // 标记变更，防抖后自动 push 到 GitHub（AI 自动同步）
-        context.read<GitSyncProvider>().markChanged(savedPath);
-      }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(ok ? '✓ 已保存' : '保存失败'),
-          backgroundColor: ok ? Colors.green : Colors.red,
-          duration: const Duration(seconds: 1),
-        ),
-      );
+    if (!editorProvider.hasActiveFile) return;
+    final savedPath = editorProvider.activeFile!.path;
+    final ok = await editorProvider.saveActiveFile();
+    if (!mounted) return;
+    if (ok) {
+      context.read<GitSyncProvider>().markChanged(savedPath);
     }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(ok ? '✓ 已保存' : '保存失败'),
+        backgroundColor: ok ? Colors.green : Colors.red,
+        duration: const Duration(seconds: 1),
+      ),
+    );
   }
 
   String _detectLanguage(String path) {
@@ -145,12 +176,23 @@ class _EditorScreenState extends State<EditorScreen>
     return 'plaintext';
   }
 
+  // ---------------------------------------------------------------------------
+  // UI
+  // ---------------------------------------------------------------------------
+
   @override
   Widget build(BuildContext context) {
     final projectProvider = context.watch<ProjectProvider>();
     final editorProvider = context.watch<EditorProvider>();
     final settings = context.watch<SettingsProvider>().settings;
     final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    final showBackground =
+        AppBackground.shouldShow(settings, isIdeScreen: true);
+
+    // 侧边栏宽度：窄屏最多占 82%，避免完全遮住代码
+    final screenWidth = MediaQuery.of(context).size.width;
+    final sidebarWidth = math.min(300.0, screenWidth * 0.82);
 
     return Scaffold(
       appBar: AppBar(
@@ -161,19 +203,14 @@ class _EditorScreenState extends State<EditorScreen>
           IconButton(
             icon: const Icon(Icons.terminal),
             tooltip: '终端 (proot)',
-            onPressed: () {
-              Navigator.of(
-                context,
-              ).push(MaterialPageRoute(builder: (_) => const TerminalScreen()));
-            },
+            onPressed: () => Navigator.of(context)
+                .push(MaterialPageRoute(builder: (_) => const TerminalScreen())),
           ),
           IconButton(
             icon: const Icon(Icons.build),
             tooltip: '构建',
-            onPressed: () {
-              Navigator.of(context)
-                  .push(MaterialPageRoute(builder: (_) => const BuildScreen()));
-            },
+            onPressed: () => Navigator.of(context)
+                .push(MaterialPageRoute(builder: (_) => const BuildScreen())),
           ),
           IconButton(
             icon: const Icon(Icons.auto_awesome),
@@ -193,82 +230,18 @@ class _EditorScreenState extends State<EditorScreen>
           IconButton(
             icon: Icon(_showSidebar ? Icons.menu_open : Icons.menu),
             tooltip: '切换侧边栏',
-            onPressed: () => setState(() => _showSidebar = !_showSidebar),
+            onPressed: _toggleSidebar,
           ),
         ],
       ),
-      // 编辑器界面始终按 IDE 规则叠加背景图（「仅编辑器」范围在此生效）
       body: AppBackground.wrap(
         isIdeScreen: true,
         child: Stack(
           children: [
-            Row(
-        children: [
-          // 左侧动效双面板侧边栏（文件 / Agent）
-          AnimatedContainer(
-            duration: const Duration(milliseconds: 250),
-            curve: Curves.easeInOut,
-            width: _showSidebar ? 300 : 0,
-            clipBehavior: Clip.hardEdge,
-            decoration: BoxDecoration(
-              border: Border(
-                right: BorderSide(
-                  color: isDark
-                      ? const Color(0xFF3C3C3C)
-                      : const Color(0xFFE0E0E0),
-                ),
-              ),
-              color: isDark ? const Color(0xFF252526) : const Color(0xFFF3F3F3),
-            ),
-            child: Column(
+            // 编辑区占满整个宽度（修复侧边栏挤压编辑器的问题）
+            Column(
               children: [
-                // 侧边栏标签栏：文件 / Agent
-                SizedBox(
-                  width: 300,
-                  child: TabBar(
-                    controller: _sidebarTabController,
-                    labelStyle: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                    ),
-                    tabs: const [
-                      Tab(text: '文件'),
-                      Tab(text: 'Agent'),
-                    ],
-                  ),
-                ),
-                const Divider(height: 1),
-                // 标签内容
-                Expanded(
-                  child: SizedBox(
-                    width: 300,
-                    child: TabBarView(
-                      controller: _sidebarTabController,
-                      children: [
-                        // 文件管理器
-                        FileTree(
-                          root: projectProvider.fileTree,
-                          isLoading: projectProvider.isLoading,
-                          onFileTap: _handleFileTap,
-                        ),
-                        // Agent（AI 对话）
-                        const AiChatScreen(),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          // 右侧主编辑区
-          Expanded(
-            child: Column(
-              children: [
-                // 标签页栏
                 const EditorTabs(),
-
-                // 编辑区 / 欢迎提示
                 Expanded(
                   child: editorProvider.hasActiveFile
                       ? _buildEditor(
@@ -276,21 +249,120 @@ class _EditorScreenState extends State<EditorScreen>
                           isDark,
                           settings.editorFontSize,
                           settings.completionEnabled,
+                          showBackground,
                         )
                       : _buildWelcome(isDark),
                 ),
-
-                // 底部状态栏
                 _buildStatusBar(editorProvider, isDark),
               ],
             ),
-          ),
-        ],
-          ),
 
-          // IDE 右下角 AI 悬浮球（偏好设置可关闭）
-          if (settings.aiFloatingBallEnabled)
-            AiFloatingBall(onTap: _openAgentPanel),
+            // 侧边栏打开时的遮罩（点击关闭）
+            if (_showSidebar)
+              Positioned.fill(
+                child: GestureDetector(
+                  onTap: () => setState(() => _showSidebar = false),
+                  child: Container(color: Colors.black.withValues(alpha: 0.28)),
+                ),
+              ),
+
+            // 侧边栏：浮层滑入，不占据编辑区宽度
+            AnimatedPositioned(
+              duration: const Duration(milliseconds: 250),
+              curve: Curves.easeInOutCubic,
+              left: _showSidebar ? 0 : -sidebarWidth,
+              top: 0,
+              bottom: 0,
+              width: sidebarWidth,
+              child: _buildSidebar(
+                projectProvider,
+                isDark,
+                sidebarWidth,
+                translucent: showBackground,
+              ),
+            ),
+
+            // 边缘滑动手势（侧边栏收起时可用）
+            if (!_showSidebar) ...[
+              _buildEdgeSwipe(Alignment.centerLeft, isRight: false),
+              _buildEdgeSwipe(Alignment.centerRight, isRight: true),
+            ],
+
+            // AI 悬浮球
+            if (settings.aiFloatingBallEnabled)
+              AiFloatingBall(onTap: _openAgentPanel),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 左右边缘手势条：向右滑（左边缘）/ 向左滑（右边缘）唤出文件栏
+  Widget _buildEdgeSwipe(Alignment alignment, {required bool isRight}) {
+    return Align(
+      alignment: alignment,
+      child: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onHorizontalDragEnd: (details) {
+          final velocity = details.primaryVelocity ?? 0;
+          final open = isRight ? velocity < -180 : velocity > 180;
+          if (!open) return;
+          setState(() => _showSidebar = true);
+          _sidebarTabController.animateTo(0);
+        },
+        child: Container(
+          width: 22,
+          height: double.infinity,
+          color: Colors.transparent,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSidebar(
+    ProjectProvider projectProvider,
+    bool isDark,
+    double width, {
+    required bool translucent,
+  }) {
+    final panelColor = translucent
+        ? (isDark
+            ? const Color(0xF0202020)
+            : const Color(0xF0FAFAFA))
+        : (isDark ? const Color(0xFF252526) : const Color(0xFFF3F3F3));
+
+    return Material(
+      color: panelColor,
+      elevation: 12,
+      child: SizedBox(
+        width: width,
+        child: Column(
+          children: [
+            TabBar(
+              controller: _sidebarTabController,
+              labelStyle: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+              tabs: const [
+                Tab(text: '文件'),
+                Tab(text: 'Agent'),
+              ],
+            ),
+            const Divider(height: 1),
+            Expanded(
+              child: TabBarView(
+                controller: _sidebarTabController,
+                children: [
+                  FileTree(
+                    root: projectProvider.fileTree,
+                    isLoading: projectProvider.isLoading,
+                    onFileTap: _handleFileTap,
+                  ),
+                  const AiChatScreen(),
+                ],
+              ),
+            ),
           ],
         ),
       ),
@@ -302,20 +374,22 @@ class _EditorScreenState extends State<EditorScreen>
     bool isDark,
     double fontSize,
     bool completionEnabled,
+    bool translucent,
   ) {
     final activeFile = editorProvider.activeFile!;
     final language = _detectLanguage(activeFile.path);
-    // 语法补全仅对 Dart 文件启用
     final enableCompletion = completionEnabled && language == 'dart';
 
     return Column(
       children: [
-        // 文件名 / 语言提示
+        // 文件名 / 语言提示（透明，避免遮挡背景图）
         Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
           alignment: Alignment.centerRight,
           child: Text(
             '$language • ${activeFile.path}',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: TextStyle(
               fontSize: 11,
               fontFamily: 'monospace',
@@ -330,6 +404,7 @@ class _EditorScreenState extends State<EditorScreen>
             language: language,
             fontSize: fontSize,
             enableCompletion: enableCompletion,
+            translucent: translucent,
             onChanged: (content) {
               editorProvider.updateActiveContent(content);
               _scheduleAutoSave();
@@ -352,10 +427,12 @@ class _EditorScreenState extends State<EditorScreen>
           ),
           const SizedBox(height: 16),
           Text(
-            '从左侧文件树选择文件开始编辑',
+            '从左侧文件树选择文件开始编辑\n（左滑或右滑边缘可唤出文件栏）',
+            textAlign: TextAlign.center,
             style: TextStyle(
               color: isDark ? Colors.white38 : Colors.black38,
               fontSize: 14,
+              height: 1.5,
             ),
           ),
         ],
@@ -365,11 +442,10 @@ class _EditorScreenState extends State<EditorScreen>
 
   Widget _buildStatusBar(EditorProvider editorProvider, bool isDark) {
     final activeFile = editorProvider.activeFile;
-    final bgColor = isDark ? const Color(0xFF007ACC) : const Color(0xFF007ACC);
 
     return Container(
       height: 24,
-      color: bgColor,
+      color: const Color(0xFF007ACC),
       padding: const EdgeInsets.symmetric(horizontal: 12),
       child: Row(
         children: [

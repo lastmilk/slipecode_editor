@@ -73,7 +73,7 @@ class MainActivity : FlutterActivity() {
                                 startActivity(intent)
                                 result.success(true)
                             } catch (e: Exception) {
-                                Log.e("SlipCode", "installApk failed", e)
+                                Log.e("SLIPE", "installApk failed", e)
                                 result.error("install_failed", e.message, null)
                             }
                         }
@@ -112,7 +112,7 @@ class MainActivity : FlutterActivity() {
                                 )
                             )
                         } catch (e: Exception) {
-                            Log.e("SlipCode", "termux exec failed", e)
+                            Log.e("SLIPE", "termux exec failed", e)
                             result.error("exec_failed", e.message, null)
                         }
                     }
@@ -129,32 +129,14 @@ class MainActivity : FlutterActivity() {
                     "setVolumeKeyListener" -> {
                         val enabled = call.argument<Boolean>("enabled") ?: false
                         volumeKeyListener = if (enabled) {
-                            // 真正的回调通过 EventChannel 之外的方式不够直接，
-                            // 这里用 MethodChannel.invokeMethod 反向通知 Dart 侧
+                            // 注册后：音量键一律消费（不调节音量），异步通知 Dart 处理。
+                            // 不做同步等待，避免阻塞 UI 线程。
                             { keyCode ->
-                                val messenger = flutterEngine.dartExecutor.binaryMessenger
-                                var consumed = false
-                                val latch = java.util.concurrent.CountDownLatch(1)
-                                MethodChannel(messenger, keyEventChannelName)
-                                    .invokeMethod(
-                                        "onVolumeKey",
-                                        keyCode,
-                                        object : MethodChannel.Result {
-                                            override fun success(value: Any?) {
-                                                consumed = value as? Boolean ?: false
-                                                latch.countDown()
-                                            }
-                                            override fun error(
-                                                code: String,
-                                                msg: String?,
-                                                details: Any?
-                                            ) { latch.countDown() }
-                                            override fun notImplemented() { latch.countDown() }
-                                        }
-                                    )
-                                // 同步等待 Dart 侧返回（最多 50ms，避免阻塞 UI 线程）
-                                latch.await(50, java.util.concurrent.TimeUnit.MILLISECONDS)
-                                consumed
+                                MethodChannel(
+                                    flutterEngine.dartExecutor.binaryMessenger,
+                                    keyEventChannelName
+                                ).invokeMethod("onVolumeKey", keyCode, null)
+                                true
                             }
                         } else null
                         result.success(true)

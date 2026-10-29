@@ -5,6 +5,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:provider/provider.dart';
 
 import 'providers/account_provider.dart';
+import 'providers/ai_provider.dart';
 import 'providers/build_provider.dart';
 import 'providers/container_provider.dart';
 import 'providers/editor_provider.dart';
@@ -51,9 +52,15 @@ Future<void> main() async {
     giteeProvider,
     gitSyncProvider,
   );
+  // AI 助手（Agent 面板依赖它；未注册会导致侧边栏 Agent 页空白）
+  final aiProvider = AiProvider(
+    settingsProvider,
+    editorProvider,
+    buildProvider,
+  );
 
   runApp(
-    SlipCodeApp(
+    SLIPEApp(
       settingsProvider: settingsProvider,
       accountProvider: accountProvider,
       githubProvider: githubProvider,
@@ -64,6 +71,7 @@ Future<void> main() async {
       terminalProvider: terminalProvider,
       gitSyncProvider: gitSyncProvider,
       buildProvider: buildProvider,
+      aiProvider: aiProvider,
     ),
   );
 
@@ -92,8 +100,8 @@ Future<void> _initAuthInBackground(
   ]);
 }
 
-class SlipCodeApp extends StatelessWidget {
-  const SlipCodeApp({
+class SLIPEApp extends StatelessWidget {
+  const SLIPEApp({
     super.key,
     required this.settingsProvider,
     required this.accountProvider,
@@ -105,6 +113,7 @@ class SlipCodeApp extends StatelessWidget {
     required this.terminalProvider,
     required this.gitSyncProvider,
     required this.buildProvider,
+    required this.aiProvider,
   });
 
   final SettingsProvider settingsProvider;
@@ -117,6 +126,7 @@ class SlipCodeApp extends StatelessWidget {
   final TerminalProvider terminalProvider;
   final GitSyncProvider gitSyncProvider;
   final BuildProvider buildProvider;
+  final AiProvider aiProvider;
 
   @override
   Widget build(BuildContext context) {
@@ -133,11 +143,12 @@ class SlipCodeApp extends StatelessWidget {
         ChangeNotifierProvider.value(value: giteeProvider),
         ChangeNotifierProvider.value(value: gitSyncProvider),
         ChangeNotifierProvider.value(value: buildProvider),
+        ChangeNotifierProvider.value(value: aiProvider),
       ],
       child: Consumer<SettingsProvider>(
         builder: (context, settings, _) {
           return MaterialApp(
-            title: 'SlipCode — Flutter Editor',
+            title: 'SLIPE — Flutter Editor',
             debugShowCheckedModeBanner: false,
             themeMode: settings.settings.themeMode,
             theme: _buildLightTheme(),

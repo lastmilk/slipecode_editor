@@ -1,4 +1,4 @@
-name: SlipCode Build
+name: SLIPE Build
 
 on:
   push:
@@ -34,8 +34,9 @@ jobs:
       - name: Create .env
         run: |
           cat > .env <<'EOF'
-          GITHUB_CLIENT_ID=0v23li26aNK8JhfG6weT
-          GITHUB_OAUTH_REDIRECT_URI=slipecode://oauth/callback
+          GITHUB_CLIENT_ID=Ov23li26aNK8JhfG6weT
+          GITHUB_OAUTH_REDIRECT_URI=https://ser1996.niav.cn/api/oauth/github/callback
+          GITHUB_DEEP_LINK=slipecode://oauth/callback
           GITHUB_OAUTH_SCOPES=repo workflow read:user
           GITHUB_API_BASE=https://api.github.com
           GITHUB_OAUTH_BASE=https://github.com/login/oauth
@@ -80,8 +81,9 @@ jobs:
       - name: Create .env
         run: |
           cat > .env <<'EOF'
-          GITHUB_CLIENT_ID=0v23li26aNK8JhfG6weT
-          GITHUB_OAUTH_REDIRECT_URI=slipecode://oauth/callback
+          GITHUB_CLIENT_ID=Ov23li26aNK8JhfG6weT
+          GITHUB_OAUTH_REDIRECT_URI=https://ser1996.niav.cn/api/oauth/github/callback
+          GITHUB_DEEP_LINK=slipecode://oauth/callback
           GITHUB_OAUTH_SCOPES=repo workflow read:user
           GITHUB_API_BASE=https://api.github.com
           GITHUB_OAUTH_BASE=https://github.com/login/oauth

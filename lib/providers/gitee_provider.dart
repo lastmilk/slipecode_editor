@@ -148,7 +148,7 @@ class GiteeProvider extends ChangeNotifier {
     final repo = await client.createRepo(
       repoName,
       private: private,
-      description: 'Created by SlipCode',
+      description: 'Created by SLIPE',
     );
     await linkRepo(projectPath, repo.fullName);
     return repo;
@@ -206,7 +206,7 @@ class GiteeProvider extends ChangeNotifier {
     await client.pushFiles(
       repo.fullName,
       files,
-      message: 'chore: initial commit from SlipCode',
+      message: 'chore: initial commit from SLIPE',
       branch: repo.defaultBranch,
       onProgress: (done, total) {
         if (done == total || done % 10 == 0) {
@@ -232,7 +232,7 @@ class GiteeProvider extends ChangeNotifier {
             ),
           ),
         ],
-        message: 'ci: add SlipCode Gitee Go pipeline',
+        message: 'ci: add SLIPE Gitee Go pipeline',
         branch: repo.defaultBranch,
       );
       onLog?.call('    提示：Gitee Go 不支持 macOS Runner，iOS 请使用 GitHub Actions');

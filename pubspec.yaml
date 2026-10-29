@@ -72,6 +72,7 @@ flutter:
   # assets/templates/ 为本地项目模板，创建项目时直接复制（不依赖本机 flutter 命令）
   assets:
     - .env
+    - assets/logo/slipe_logo.jpg
     - assets/templates/app/pubspec.yaml.tmpl
     - assets/templates/app/main.dart.tmpl
     - assets/templates/app/analysis_options.yaml.tmpl

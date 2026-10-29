@@ -18,7 +18,7 @@ enum GitHubAuthStatus { unknown, signedOut, signingIn, signedIn }
 
 /// GitHub 账号与仓库状态管理
 ///
-/// - 维护 OAuth(PKCE) 登录状态与 token 持久化
+/// - 维护 OAuth(后端换取 token) 登录状态与 token 持久化
 /// - 维护「本地项目路径 → GitHub 仓库」的映射
 class GitHubProvider extends ChangeNotifier {
   GitHubAuthStatus _status = GitHubAuthStatus.unknown;
@@ -72,7 +72,7 @@ class GitHubProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// 发起 OAuth(PKCE) 登录
+  /// 发起 OAuth 登录（后端用 client_secret 换取 token）
   Future<bool> signIn() async {
     if (!isConfigured) {
       _error = '未配置 GITHUB_CLIENT_ID，请先在 .env 中填写后重启应用';
@@ -152,7 +152,7 @@ class GitHubProvider extends ChangeNotifier {
     final repo = await client.createRepo(
       repoName,
       private: private,
-      description: 'Created by SlipCode',
+      description: 'Created by SLIPE',
     );
     await linkRepo(projectPath, repo.fullName);
     return repo;
@@ -212,7 +212,7 @@ class GitHubProvider extends ChangeNotifier {
     await client.pushFiles(
       repo.fullName,
       files,
-      message: 'chore: initial commit from SlipCode',
+      message: 'chore: initial commit from SLIPE',
       branch: repo.defaultBranch,
     );
 
