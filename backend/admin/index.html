@@ -1,0 +1,383 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SlipCode 管理后台</title>
+<style>
+  :root {
+    --bg: #f4f5f7;
+    --card: #ffffff;
+    --border: #e2e5ea;
+    --text: #1f2329;
+    --muted: #6b7280;
+    --primary: #2563eb;
+    --primary-hover: #1d4ed8;
+    --danger: #dc2626;
+    --radius: 8px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+  }
+  header {
+    background: var(--card);
+    border-bottom: 1px solid var(--border);
+    padding: 14px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  header h1 { font-size: 18px; margin: 0; }
+  .wrap { max-width: 1080px; margin: 24px auto; padding: 0 16px; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    margin-bottom: 24px;
+  }
+  .card h2 { font-size: 16px; margin: 0 0 16px; }
+  button {
+    background: var(--primary);
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    padding: 7px 14px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  button:hover { background: var(--primary-hover); }
+  button.secondary { background: #fff; color: var(--text); border: 1px solid var(--border); }
+  button.secondary:hover { background: #f3f4f6; }
+  button.danger { background: var(--danger); }
+  button.danger:hover { background: #b91c1c; }
+  input, select {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 7px 10px;
+    font-size: 13px;
+    width: 100%;
+  }
+  input:focus { outline: 2px solid rgba(37, 99, 235, .25); border-color: var(--primary); }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; white-space: nowrap; }
+  td.num { font-variant-numeric: tabular-nums; }
+  .row-actions { display: flex; gap: 6px; align-items: center; }
+  .row-actions input { width: 90px; }
+  .msg { font-size: 13px; margin-top: 8px; min-height: 1em; }
+  .msg.error { color: var(--danger); }
+  .msg.ok { color: #16a34a; }
+  .form-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+  .form-grid label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+  .muted { color: var(--muted); }
+  #login-section { max-width: 360px; margin: 96px auto; }
+  #login-section .card { display: flex; flex-direction: column; gap: 12px; }
+  .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+  code { background: #f3f4f6; padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>SlipCode 管理后台</h1>
+  <button id="logout-btn" class="secondary" hidden>退出登录</button>
+</header>
+
+<section id="login-section">
+  <div class="card">
+    <h2>管理员登录</h2>
+    <input type="password" id="token-input" placeholder="Admin Token" autocomplete="current-password">
+    <button id="login-btn">登录</button>
+    <p id="login-msg" class="msg error"></p>
+  </div>
+</section>
+
+<main id="app" class="wrap" hidden>
+  <section class="card">
+    <div class="toolbar">
+      <h2>用户列表</h2>
+      <button class="secondary" id="reload-users-btn">刷新</button>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>邮箱</th><th>昵称</th><th>积分</th><th>注册时间</th><th>最后签到</th><th>积分调整</th>
+        </tr>
+      </thead>
+      <tbody id="users-tbody"></tbody>
+    </table>
+    <p id="users-msg" class="msg"></p>
+  </section>
+
+  <section class="card">
+    <div class="toolbar">
+      <h2>LLM 模型</h2>
+      <button class="secondary" id="reload-models-btn">刷新</button>
+    </div>
+    <form id="model-form">
+      <div class="form-grid">
+        <div><label>名称 name</label><input id="f-name" required placeholder="如：DeepSeek V3"></div>
+        <div><label>API Base</label><input id="f-apibase" required placeholder="https://api.example.com/v1"></div>
+        <div><label>API Key</label><input id="f-apikey" required placeholder="sk-..."></div>
+        <div><label>上游模型 model</label><input id="f-model" required placeholder="deepseek-chat"></div>
+        <div><label>消耗倍率 multiplier</label><input id="f-multiplier" type="number" step="0.1" min="0.1" value="1" required></div>
+      </div>
+      <div class="row-actions">
+        <button type="submit" id="model-submit-btn">新增模型</button>
+        <button type="button" class="secondary" id="model-cancel-btn" hidden>取消编辑</button>
+      </div>
+      <p id="model-msg" class="msg"></p>
+    </form>
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th><th>名称</th><th>上游模型</th><th>API Base</th><th>API Key</th><th>倍率</th><th>操作</th>
+        </tr>
+      </thead>
+      <tbody id="models-tbody"></tbody>
+    </table>
+    <p id="models-msg" class="msg"></p>
+  </section>
+</main>
+
+<script>
+(function () {
+  'use strict';
+  var TOKEN_KEY = 'slipecode_admin_token';
+  var state = { token: localStorage.getItem(TOKEN_KEY) || '', editingId: null };
+
+  var $ = function (id) { return document.getElementById(id); };
+
+  function esc(value) {
+    return String(value == null ? '' : value)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  function api(path, options) {
+    options = options || {};
+    return fetch(path, {
+      method: options.method || 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + state.token
+      },
+      body: options.body === undefined ? undefined : JSON.stringify(options.body)
+    }).then(function (res) {
+      return res.json().catch(function () { return {}; }).then(function (data) {
+        if (!res.ok) {
+          var err = new Error(data.error || ('HTTP ' + res.status));
+          err.status = res.status;
+          throw err;
+        }
+        return data;
+      });
+    });
+  }
+
+  function setMsg(id, text, ok) {
+    var el = $(id);
+    el.textContent = text || '';
+    el.className = 'msg ' + (text ? (ok ? 'ok' : 'error') : '');
+  }
+
+  function showApp(show) {
+    $('app').hidden = !show;
+    $('login-section').hidden = show;
+    $('logout-btn').hidden = !show;
+  }
+
+  function fmtTime(iso) {
+    if (!iso) return '-';
+    var d = new Date(iso);
+    return isNaN(d) ? iso : d.toLocaleString('zh-CN', { hour12: false });
+  }
+
+  // ---------- 用户 ----------
+  function loadUsers() {
+    return api('/api/admin/users').then(function (data) {
+      var tbody = $('users-tbody');
+      tbody.innerHTML = '';
+      (data.users || []).forEach(function (u) {
+        var tr = document.createElement('tr');
+        tr.innerHTML =
+          '<td>' + esc(u.email) + '</td>' +
+          '<td>' + esc(u.displayName) + '</td>' +
+          '<td class="num">' + esc(u.credits) + '</td>' +
+          '<td>' + esc(fmtTime(u.createdAt)) + '</td>' +
+          '<td>' + esc(u.lastCheckinDate || '-') + '</td>' +
+          '<td><div class="row-actions">' +
+            '<input type="number" step="1" placeholder="±积分" data-delta-for="' + esc(u.email) + '">' +
+            '<button data-adjust="' + esc(u.email) + '">确定</button>' +
+          '</div></td>';
+        tbody.appendChild(tr);
+      });
+      setMsg('users-msg', '共 ' + (data.users || []).length + ' 个用户', true);
+    }).catch(function (err) {
+      setMsg('users-msg', err.message, false);
+      if (err.status === 401) logout();
+    });
+  }
+
+  function adjustCredits(email) {
+    var input = document.querySelector('input[data-delta-for="' + CSS.escape(email) + '"]');
+    var delta = Number(input.value);
+    if (!Number.isInteger(delta) || delta === 0) {
+      setMsg('users-msg', '请输入非零整数积分增量', false);
+      return;
+    }
+    api('/api/admin/users/' + encodeURIComponent(email) + '/credits', {
+      method: 'POST',
+      body: { delta: delta }
+    }).then(function (data) {
+      setMsg('users-msg', email + ' 积分已调整为 ' + data.credits, true);
+      loadUsers();
+    }).catch(function (err) {
+      setMsg('users-msg', err.message, false);
+    });
+  }
+
+  // ---------- LLM 模型 ----------
+  function maskKey(key) {
+    key = String(key || '');
+    if (key.length <= 8) return key;
+    return key.slice(0, 4) + '…' + key.slice(-4);
+  }
+
+  function loadModels() {
+    return api('/api/admin/llm/models').then(function (data) {
+      var tbody = $('models-tbody');
+      tbody.innerHTML = '';
+      (data.models || []).forEach(function (m) {
+        var tr = document.createElement('tr');
+        tr.innerHTML =
+          '<td><code>' + esc(m.id) + '</code></td>' +
+          '<td>' + esc(m.name) + '</td>' +
+          '<td>' + esc(m.model) + '</td>' +
+          '<td>' + esc(m.apiBase) + '</td>' +
+          '<td title="' + esc(m.apiKey) + '">' + esc(maskKey(m.apiKey)) + '</td>' +
+          '<td class="num">' + esc(m.multiplier) + '</td>' +
+          '<td><div class="row-actions">' +
+            '<button class="secondary" data-edit="' + esc(m.id) + '">编辑</button>' +
+            '<button class="danger" data-del="' + esc(m.id) + '">删除</button>' +
+          '</div></td>';
+        tbody.appendChild(tr);
+      });
+      state.models = data.models || [];
+      setMsg('models-msg', '共 ' + state.models.length + ' 个模型', true);
+    }).catch(function (err) {
+      setMsg('models-msg', err.message, false);
+      if (err.status === 401) logout();
+    });
+  }
+
+  function resetForm() {
+    state.editingId = null;
+    $('model-form').reset();
+    $('f-multiplier').value = '1';
+    $('model-submit-btn').textContent = '新增模型';
+    $('model-cancel-btn').hidden = true;
+  }
+
+  function editModel(id) {
+    var m = (state.models || []).find(function (x) { return x.id === id; });
+    if (!m) return;
+    state.editingId = id;
+    $('f-name').value = m.name;
+    $('f-apibase').value = m.apiBase;
+    $('f-apikey').value = m.apiKey;
+    $('f-model').value = m.model;
+    $('f-multiplier').value = m.multiplier;
+    $('model-submit-btn').textContent = '保存修改';
+    $('model-cancel-btn').hidden = false;
+    window.scrollTo({ top: $('model-form').getBoundingClientRect().top + window.scrollY - 80, behavior: 'smooth' });
+  }
+
+  function deleteModel(id) {
+    if (!confirm('确定删除模型 ' + id + ' ？')) return;
+    api('/api/admin/llm/models/' + encodeURIComponent(id), { method: 'DELETE' })
+      .then(function () {
+        setMsg('models-msg', '已删除 ' + id, true);
+        if (state.editingId === id) resetForm();
+        loadModels();
+      })
+      .catch(function (err) { setMsg('models-msg', err.message, false); });
+  }
+
+  function submitModel(evt) {
+    evt.preventDefault();
+    var body = {
+      name: $('f-name').value.trim(),
+      apiBase: $('f-apibase').value.trim(),
+      apiKey: $('f-apikey').value.trim(),
+      model: $('f-model').value.trim(),
+      multiplier: Number($('f-multiplier').value)
+    };
+    var req = state.editingId
+      ? api('/api/admin/llm/models/' + encodeURIComponent(state.editingId), { method: 'PUT', body: body })
+      : api('/api/admin/llm/models', { method: 'POST', body: body });
+    req.then(function () {
+      setMsg('model-msg', state.editingId ? '已保存修改' : '已新增模型', true);
+      resetForm();
+      loadModels();
+    }).catch(function (err) { setMsg('model-msg', err.message, false); });
+  }
+
+  // ---------- 登录 ----------
+  function login(token) {
+    state.token = token;
+    localStorage.setItem(TOKEN_KEY, token);
+    Promise.all([loadUsers(), loadModels()])
+      .then(function () { showApp(true); })
+      .catch(function () { /* load* 内部已处理 401 */ });
+  }
+
+  function logout() {
+    state.token = '';
+    localStorage.removeItem(TOKEN_KEY);
+    showApp(false);
+  }
+
+  // ---------- 事件绑定 ----------
+  $('login-btn').addEventListener('click', function () {
+    var token = $('token-input').value.trim();
+    if (!token) { setMsg('login-msg', '请输入 Admin Token', false); return; }
+    setMsg('login-msg', '', false);
+    login(token);
+  });
+  $('token-input').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') $('login-btn').click();
+  });
+  $('logout-btn').addEventListener('click', logout);
+  $('reload-users-btn').addEventListener('click', loadUsers);
+  $('reload-models-btn').addEventListener('click', loadModels);
+  $('model-form').addEventListener('submit', submitModel);
+  $('model-cancel-btn').addEventListener('click', resetForm);
+
+  $('users-tbody').addEventListener('click', function (e) {
+    var email = e.target.getAttribute('data-adjust');
+    if (email) adjustCredits(email);
+  });
+  $('models-tbody').addEventListener('click', function (e) {
+    var editId = e.target.getAttribute('data-edit');
+    var delId = e.target.getAttribute('data-del');
+    if (editId) editModel(editId);
+    if (delId) deleteModel(delId);
+  });
+
+  // 已保存 token 则自动进入
+  if (state.token) login(state.token);
+})();
+</script>
+</body>
+</html>

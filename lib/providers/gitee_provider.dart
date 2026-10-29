@@ -10,6 +10,7 @@ import '../config/app_config.dart';
 import '../services/gitee_api_service.dart';
 import '../services/gitee_auth_service.dart';
 import '../services/gitee_go_templates.dart';
+import '../services/git_host.dart';
 import '../services/github_api_service.dart' show RepoFile;
 import '../services/project_snapshot.dart';
 
@@ -176,9 +177,14 @@ class GiteeProvider extends ChangeNotifier {
     final client = api;
     if (client == null) throw StateError('尚未登录 Gitee');
 
-    final resolvedName = await uniqueRepoName(repoName);
-    if (resolvedName != repoName) {
-      onLog?.call('    仓库 $repoName 已存在，改用 $resolvedName');
+    // Gitee 仓库名只允许字母/数字/_/-/.,中文名需先清洗，否则服务端 400
+    final safeName = sanitizeRepoName(repoName);
+    if (safeName != repoName) {
+      onLog?.call('    仓库名 "$repoName" 含非法字符，改用 $safeName');
+    }
+    final resolvedName = await uniqueRepoName(safeName);
+    if (resolvedName != safeName) {
+      onLog?.call('    仓库 $safeName 已存在，改用 $resolvedName');
     }
 
     onLog?.call('==> 创建 Gitee 仓库：$resolvedName');

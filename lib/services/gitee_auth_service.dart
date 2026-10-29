@@ -125,7 +125,8 @@ class GiteeAuthService {
 
     final launched = await launchUrl(
       authorizeUri,
-      mode: LaunchMode.externalApplication,
+      // 同 GitHub：用应用内浏览器视图，避免第三方浏览器/App 拦截导致 404
+      mode: LaunchMode.inAppBrowserView,
     );
     if (!launched) {
       await _cleanup();

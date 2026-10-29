@@ -12,6 +12,7 @@ import '../providers/project_provider.dart';
 import '../providers/settings_provider.dart';
 import '../services/project_history_service.dart';
 import '../services/saying_service.dart';
+import '../widgets/app_background.dart';
 import '../widgets/typewriter_text.dart';
 import 'account_screen.dart';
 import 'create_project_screen.dart';
@@ -178,18 +179,27 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    // 首页按显示范围决定是否叠加背景图；显示时降低渐变不透明度让背景可见
+    final settings = context.watch<SettingsProvider>().settings;
+    final showBackground =
+        AppBackground.shouldShow(settings, isIdeScreen: false);
 
     return Scaffold(
-      body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: isDark
-                ? [const Color(0xFF1E1E1E), const Color(0xFF121212)]
-                : [const Color(0xFFF5F7FA), const Color(0xFFE4E8EC)],
+      body: AppBackground.wrap(
+        isIdeScreen: false,
+        child: Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: (isDark
+                      ? [const Color(0xFF1E1E1E), const Color(0xFF121212)]
+                      : [const Color(0xFFF5F7FA), const Color(0xFFE4E8EC)])
+                  .map((c) =>
+                      showBackground ? c.withValues(alpha: 0.75) : c)
+                  .toList(),
+            ),
           ),
-        ),
         child: SafeArea(
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 24.0),
@@ -308,6 +318,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               ],
             ),
           ),
+        ),
         ),
       ),
       // 底部 Git 平台登录状态栏（GitHub / Gitee）
@@ -534,6 +545,7 @@ class _GitStatusBar extends StatelessWidget {
                       }
                     }),
                     onSignOut: github.signOut,
+                    onCancel: github.cancelSignIn,
                   ),
                 ),
               ),
@@ -557,6 +569,7 @@ class _GitStatusBar extends StatelessWidget {
                       }
                     }),
                     onSignOut: gitee.signOut,
+                    onCancel: gitee.cancelSignIn,
                   ),
                 ),
               ),
@@ -579,6 +592,7 @@ class _HostAuthTile extends StatelessWidget {
     required this.signedIn,
     required this.onSignIn,
     required this.onSignOut,
+    required this.onCancel,
     this.login,
     this.avatarUrl,
   });
@@ -591,30 +605,38 @@ class _HostAuthTile extends StatelessWidget {
   final bool signedIn;
   final VoidCallback onSignIn;
   final VoidCallback onSignOut;
+  final VoidCallback onCancel;
   final String? login;
   final String? avatarUrl;
 
   @override
   Widget build(BuildContext context) {
     if (signingIn) {
+      // 授权中点击可取消（例如浏览器被拦截、用户中途返回时不会一直转圈）
       return _shell(
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const SizedBox(
-              width: 14,
-              height: 14,
-              child: CircularProgressIndicator(strokeWidth: 2),
+        GestureDetector(
+          onTap: onCancel,
+          child: Tooltip(
+            message: '点击取消登录',
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text(
+                    '登录 $label…（点击取消）',
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(width: 8),
-            Flexible(
-              child: Text(
-                '登录 $label…',
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 12),
-              ),
-            ),
-          ],
+          ),
         ),
       );
     }

@@ -63,3 +63,17 @@ enum GitHost {
         GitHost.gitee => 'https://gitee.com/$fullName/gitee_go',
       };
 }
+
+/// 清洗仓库名：GitHub / Gitee 都只接受字母、数字、`_`、`-`、`.`，
+/// 且不允许以 `.` 开头。中文项目名等会被转换为合法名称。
+String sanitizeRepoName(String raw) {
+  var name = raw.trim().replaceAll(RegExp(r'[^A-Za-z0-9._-]+'), '-');
+  // 折叠连续分隔符，去掉开头的 . / - / _
+  name = name.replaceAll(RegExp(r'-{2,}'), '-');
+  name = name.replaceFirst(RegExp(r'^[.\-_]+'), '');
+  name = name.replaceAll(RegExp(r'[.\-_]+$'), '');
+  if (name.isEmpty) name = 'slipecode-project';
+  // Gitee 限制 100 字符以内，留一点余量
+  if (name.length > 80) name = name.substring(0, 80);
+  return name;
+}

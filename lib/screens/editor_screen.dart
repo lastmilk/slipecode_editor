@@ -1,11 +1,16 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+
 import '../providers/editor_provider.dart';
 import '../providers/git_sync_provider.dart';
 import '../providers/project_provider.dart';
 import '../providers/settings_provider.dart';
+import '../services/volume_key_service.dart';
+import '../widgets/ai_floating_ball.dart';
+import '../widgets/app_background.dart';
 import '../widgets/code_editor.dart';
 import '../widgets/editor_tabs.dart';
 import '../widgets/file_tree.dart';
@@ -15,7 +20,7 @@ import 'terminal_screen.dart';
 
 /// 主编辑器界面
 ///
-/// 左侧文件树 + 右侧标签页 + 编辑区 + 底部状态栏
+/// 左侧动效双面板侧边栏（文件 / Agent）+ 右侧标签页 + 编辑区 + 底部状态栏
 class EditorScreen extends StatefulWidget {
   const EditorScreen({super.key});
 
@@ -23,13 +28,21 @@ class EditorScreen extends StatefulWidget {
   State<EditorScreen> createState() => _EditorScreenState();
 }
 
-class _EditorScreenState extends State<EditorScreen> {
-  bool _showFileTree = true;
+class _EditorScreenState extends State<EditorScreen>
+    with SingleTickerProviderStateMixin {
+  bool _showSidebar = true;
   Timer? _autoSaveTimer;
+
+  /// 侧边栏标签控制器（0=文件，1=Agent）
+  late final TabController _sidebarTabController;
+
+  /// 当前编辑器的 GlobalKey，用于音量键触发补全/Tab
+  final GlobalKey<CodeEditorState> _codeEditorKey = GlobalKey<CodeEditorState>();
 
   @override
   void initState() {
     super.initState();
+    _sidebarTabController = TabController(length: 2, vsync: this);
     // 如果已有项目路径但还没加载文件树
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final projectProvider = context.read<ProjectProvider>();
@@ -38,11 +51,34 @@ class _EditorScreenState extends State<EditorScreen> {
         projectProvider.refreshFileTree();
       }
     });
+    _setupVolumeKeyHandler();
+  }
+
+  /// 音量上键 = 接受补全 / 插入 Tab（仅 Android；iOS 走虚拟按钮）
+  void _setupVolumeKeyHandler() {
+    if (!Platform.isAndroid) return;
+    VolumeKeyService.instance.setHandler((keyCode) {
+      // 仅处理音量上键；音量下键始终走系统默认
+      if (keyCode != VolumeKeyService.keyVolumeUp) return false;
+      final settings = context.read<SettingsProvider>().settings;
+      if (!settings.completionEnabled) return false;
+
+      final state = _codeEditorKey.currentState;
+      if (state == null) return false;
+      // 关闭「音量键补全」时，仅在有建议时接受，否则放行音量调节
+      final fallback = settings.volumeKeyCompletionEnabled;
+      return state.acceptSuggestionOrTab(fallbackToTab: fallback);
+    });
   }
 
   @override
   void dispose() {
     _autoSaveTimer?.cancel();
+    _sidebarTabController.dispose();
+    // 离开编辑器时取消音量键拦截，恢复正常音量调节
+    if (Platform.isAndroid) {
+      VolumeKeyService.instance.setHandler(null);
+    }
     super.dispose();
   }
 
@@ -62,7 +98,17 @@ class _EditorScreenState extends State<EditorScreen> {
 
   Future<void> _handleFileTap(String path) async {
     final editorProvider = context.read<EditorProvider>();
-    await editorProvider.openFile(path);
+    final opened = await editorProvider.openFile(path);
+    // 打开成功后自动收起侧边栏（方便小屏手机）
+    if (opened != null && mounted) {
+      setState(() => _showSidebar = false);
+    }
+  }
+
+  /// 展开侧边栏并切换到 Agent 标签
+  void _openAgentPanel() {
+    setState(() => _showSidebar = true);
+    _sidebarTabController.animateTo(1);
   }
 
   Future<void> _handleSave() async {
@@ -116,26 +162,23 @@ class _EditorScreenState extends State<EditorScreen> {
             icon: const Icon(Icons.terminal),
             tooltip: '终端 (proot)',
             onPressed: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const TerminalScreen()),
-              );
+              Navigator.of(
+                context,
+              ).push(MaterialPageRoute(builder: (_) => const TerminalScreen()));
             },
           ),
           IconButton(
             icon: const Icon(Icons.build),
             tooltip: '构建',
             onPressed: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const BuildScreen()),
-              );
+              Navigator.of(context)
+                  .push(MaterialPageRoute(builder: (_) => const BuildScreen()));
             },
           ),
           IconButton(
             icon: const Icon(Icons.auto_awesome),
-            tooltip: 'AI 助手（右滑）',
-            onPressed: () {
-              Scaffold.of(context).openEndDrawer();
-            },
+            tooltip: 'AI 助手（侧边栏 Agent）',
+            onPressed: _openAgentPanel,
           ),
           IconButton(
             icon: const Icon(Icons.refresh),
@@ -148,56 +191,75 @@ class _EditorScreenState extends State<EditorScreen> {
             onPressed: _handleSave,
           ),
           IconButton(
-            icon: Icon(_showFileTree ? Icons.menu_open : Icons.menu),
+            icon: Icon(_showSidebar ? Icons.menu_open : Icons.menu),
             tooltip: '切换侧边栏',
-            onPressed: () => setState(() => _showFileTree = !_showFileTree),
+            onPressed: () => setState(() => _showSidebar = !_showSidebar),
           ),
         ],
       ),
-      body: Row(
+      // 编辑器界面始终按 IDE 规则叠加背景图（「仅编辑器」范围在此生效）
+      body: AppBackground.wrap(
+        isIdeScreen: true,
+        child: Stack(
+          children: [
+            Row(
         children: [
-          // 左侧文件树
-          if (_showFileTree)
-            Container(
-              width: 240,
-              decoration: BoxDecoration(
-                border: Border(
-                  right: BorderSide(
-                    color: isDark
-                        ? const Color(0xFF3C3C3C)
-                        : const Color(0xFFE0E0E0),
+          // 左侧动效双面板侧边栏（文件 / Agent）
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 250),
+            curve: Curves.easeInOut,
+            width: _showSidebar ? 300 : 0,
+            clipBehavior: Clip.hardEdge,
+            decoration: BoxDecoration(
+              border: Border(
+                right: BorderSide(
+                  color: isDark
+                      ? const Color(0xFF3C3C3C)
+                      : const Color(0xFFE0E0E0),
+                ),
+              ),
+              color: isDark ? const Color(0xFF252526) : const Color(0xFFF3F3F3),
+            ),
+            child: Column(
+              children: [
+                // 侧边栏标签栏：文件 / Agent
+                SizedBox(
+                  width: 300,
+                  child: TabBar(
+                    controller: _sidebarTabController,
+                    labelStyle: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    tabs: const [
+                      Tab(text: '文件'),
+                      Tab(text: 'Agent'),
+                    ],
                   ),
                 ),
-                color: isDark ? const Color(0xFF252526) : const Color(0xFFF3F3F3),
-              ),
-              child: Column(
-                children: [
-                  // 侧边栏标题
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      '资源管理器',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: isDark ? Colors.white54 : Colors.black45,
-                        letterSpacing: 0.5,
-                      ),
+                const Divider(height: 1),
+                // 标签内容
+                Expanded(
+                  child: SizedBox(
+                    width: 300,
+                    child: TabBarView(
+                      controller: _sidebarTabController,
+                      children: [
+                        // 文件管理器
+                        FileTree(
+                          root: projectProvider.fileTree,
+                          isLoading: projectProvider.isLoading,
+                          onFileTap: _handleFileTap,
+                        ),
+                        // Agent（AI 对话）
+                        const AiChatScreen(),
+                      ],
                     ),
                   ),
-                  const Divider(height: 1),
-                  // 文件树
-                  Expanded(
-                    child: FileTree(
-                      root: projectProvider.fileTree,
-                      isLoading: projectProvider.isLoading,
-                      onFileTap: _handleFileTap,
-                    ),
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
+          ),
 
           // 右侧主编辑区
           Expanded(
@@ -213,6 +275,7 @@ class _EditorScreenState extends State<EditorScreen> {
                           editorProvider,
                           isDark,
                           settings.editorFontSize,
+                          settings.completionEnabled,
                         )
                       : _buildWelcome(isDark),
                 ),
@@ -223,9 +286,14 @@ class _EditorScreenState extends State<EditorScreen> {
             ),
           ),
         ],
+          ),
+
+          // IDE 右下角 AI 悬浮球（偏好设置可关闭）
+          if (settings.aiFloatingBallEnabled)
+            AiFloatingBall(onTap: _openAgentPanel),
+          ],
+        ),
       ),
-      // 右侧 AI 助手面板（右滑打开）
-      endDrawer: const AiChatScreen(),
     );
   }
 
@@ -233,9 +301,12 @@ class _EditorScreenState extends State<EditorScreen> {
     EditorProvider editorProvider,
     bool isDark,
     double fontSize,
+    bool completionEnabled,
   ) {
     final activeFile = editorProvider.activeFile!;
     final language = _detectLanguage(activeFile.path);
+    // 语法补全仅对 Dart 文件启用
+    final enableCompletion = completionEnabled && language == 'dart';
 
     return Column(
       children: [
@@ -254,9 +325,11 @@ class _EditorScreenState extends State<EditorScreen> {
         ),
         Expanded(
           child: CodeEditor(
+            key: _codeEditorKey,
             initialContent: activeFile.content,
             language: language,
             fontSize: fontSize,
+            enableCompletion: enableCompletion,
             onChanged: (content) {
               editorProvider.updateActiveContent(content);
               _scheduleAutoSave();
@@ -303,26 +376,17 @@ class _EditorScreenState extends State<EditorScreen> {
           if (activeFile != null) ...[
             Text(
               activeFile.isModified ? '● 已修改' : '● 已保存',
-              style: const TextStyle(
-                fontSize: 11,
-                color: Colors.white,
-              ),
+              style: const TextStyle(fontSize: 11, color: Colors.white),
             ),
             const SizedBox(width: 20),
             Text(
               _detectLanguage(activeFile.path),
-              style: const TextStyle(
-                fontSize: 11,
-                color: Colors.white,
-              ),
+              style: const TextStyle(fontSize: 11, color: Colors.white),
             ),
             const SizedBox(width: 20),
             Text(
               '${activeFile.content.split('\n').length} 行',
-              style: const TextStyle(
-                fontSize: 11,
-                color: Colors.white,
-              ),
+              style: const TextStyle(fontSize: 11, color: Colors.white),
             ),
           ] else
             const Text(

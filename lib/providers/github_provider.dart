@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../config/app_config.dart';
 import '../services/build_service.dart';
+import '../services/git_host.dart';
 import '../services/github_api_service.dart';
 import '../services/github_auth_service.dart';
 import '../services/project_snapshot.dart';
@@ -84,7 +85,8 @@ class GitHubProvider extends ChangeNotifier {
     try {
       final result = await GitHubAuthService.instance.signIn();
       _token = result.accessToken;
-      _user = await api!.getAuthenticatedUser();
+      // api getter 依赖 signedIn 状态，必须直接构造，否则 api! 会空指针崩溃
+      _user = await GitHubApiService(result.accessToken).getAuthenticatedUser();
       _status = GitHubAuthStatus.signedIn;
       notifyListeners();
       return true;
@@ -181,9 +183,14 @@ class GitHubProvider extends ChangeNotifier {
     final client = api;
     if (client == null) throw StateError('尚未登录 GitHub');
 
-    final resolvedName = await uniqueRepoName(repoName);
-    if (resolvedName != repoName) {
-      onLog?.call('    仓库 $repoName 已存在，改用 $resolvedName');
+    // GitHub 仓库名只允许字母/数字/_/-/.，中文名需先清洗
+    final safeName = sanitizeRepoName(repoName);
+    if (safeName != repoName) {
+      onLog?.call('    仓库名 "$repoName" 含非法字符，改用 $safeName');
+    }
+    final resolvedName = await uniqueRepoName(safeName);
+    if (resolvedName != safeName) {
+      onLog?.call('    仓库 $safeName 已存在，改用 $resolvedName');
     }
 
     onLog?.call('==> 创建 GitHub 仓库：$resolvedName');

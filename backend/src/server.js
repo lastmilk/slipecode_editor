@@ -5,6 +5,9 @@
 //  1. 独立账号体系（注册 / 登录 / 用户信息）
 //  2. 按用户保存偏好设置（多设备同步）
 //  3. Gitee OAuth token 代理（Gitee 不支持 PKCE，必须由后端持有 client_secret）
+//  4. 积分体系（每日签到 +100，积分用于抵扣 LLM 调用）
+//  5. OpenAI 兼容的 LLM 内置代理（按 token 计积分）
+//  6. 管理端（/admin 静态页 + /api/admin/* 接口，Bearer ADMIN_TOKEN）
 //
 // 启动：node src/server.js
 // 环境变量见 backend/README.md
@@ -19,6 +22,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 8787);
 const DATA_DIR = process.env.DATA_DIR || join(__dirname, '..', 'data');
 const DB_FILE = join(DATA_DIR, 'db.json');
+const ADMIN_HTML_FILE = join(__dirname, '..', 'admin', 'index.html');
 const JWT_SECRET =
   process.env.JWT_SECRET || 'dev-only-change-me-slipecode-secret';
 const TOKEN_TTL_SECONDS = 60 * 60 * 24 * 30; // 30 天
@@ -29,11 +33,19 @@ const GITEE_CLIENT_ID = process.env.GITEE_CLIENT_ID || '';
 const GITEE_CLIENT_SECRET = process.env.GITEE_CLIENT_SECRET || '';
 const GITEE_REDIRECT_URI = process.env.GITEE_REDIRECT_URI || '';
 
+// 管理端访问令牌：生产环境务必通过环境变量 ADMIN_TOKEN 覆盖默认值
+const ADMIN_TOKEN =
+  process.env.ADMIN_TOKEN || 'dev-only-admin-token-7f3a9c1e5b2d48f0-change-me';
+
+const CHECKIN_REWARD = 100;
+// 积分计价：1 积分 = 2000 token
+const TOKENS_PER_CREDIT = 2000;
+
 // ---------------------------------------------------------------------------
 // 存储（单文件 JSON，写入时原子替换；数据量小且单实例部署足够）
 // ---------------------------------------------------------------------------
 
-let db = { users: [], settings: {} };
+let db = { users: [], settings: {}, llmModels: [] };
 let writeQueue = Promise.resolve();
 
 async function loadDb() {
@@ -46,6 +58,7 @@ async function loadDb() {
       settings: parsed.settings && typeof parsed.settings === 'object'
         ? parsed.settings
         : {},
+      llmModels: Array.isArray(parsed.llmModels) ? parsed.llmModels : [],
     };
   } catch (err) {
     if (err.code !== 'ENOENT') throw err;
@@ -116,7 +129,7 @@ function verifyToken(token) {
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': process.env.CORS_ORIGIN || '*',
-  'Access-Control-Allow-Methods': 'GET,POST,PUT,OPTIONS',
+  'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type,Authorization',
 };
 
@@ -177,6 +190,27 @@ function publicUser(user) {
   return { id: user.id, email: user.email, displayName: user.displayName };
 }
 
+function requireAdmin(req) {
+  const token = Buffer.from(bearer(req));
+  const expected = Buffer.from(ADMIN_TOKEN);
+  if (token.length !== expected.length || !timingSafeEqual(token, expected)) {
+    throw Object.assign(new Error('无管理员权限'), { status: 401 });
+  }
+}
+
+// 积分 / 日期工具
+function getCredits(user) {
+  return Number.isFinite(user.credits) ? user.credits : 0;
+}
+
+// 服务器本地日期，YYYY-MM-DD
+function todayStr() {
+  const d = new Date();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${m}-${day}`;
+}
+
 function normalizeEmail(value) {
   return String(value || '').trim().toLowerCase();
 }
@@ -231,6 +265,8 @@ async function handleRegister(req, res) {
     email,
     displayName,
     passwordHash: hashPassword(password),
+    credits: 0,
+    lastCheckinDate: null,
     createdAt: new Date().toISOString(),
   };
   db.users.push(user);
@@ -365,6 +401,250 @@ async function handleGiteeRefresh(req, res) {
 }
 
 // ---------------------------------------------------------------------------
+// 积分：每日签到 / 余额查询
+// ---------------------------------------------------------------------------
+
+async function handleCheckin(req, res) {
+  const user = requireUser(req);
+  const today = todayStr();
+  if (user.lastCheckinDate === today) {
+    return sendJson(res, 200, {
+      ok: false,
+      message: '今日已签到',
+      credits: getCredits(user),
+      checkedInToday: true,
+    });
+  }
+  user.credits = getCredits(user) + CHECKIN_REWARD;
+  user.lastCheckinDate = today;
+  await saveDb();
+  sendJson(res, 200, {
+    ok: true,
+    message: `签到成功 +${CHECKIN_REWARD} 积分`,
+    credits: user.credits,
+    checkedInToday: true,
+  });
+}
+
+async function handleGetCredits(req, res) {
+  const user = requireUser(req);
+  sendJson(res, 200, {
+    credits: getCredits(user),
+    checkedInToday: user.lastCheckinDate === todayStr(),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// LLM 内置代理（OpenAI 兼容 /chat/completions，按 token 扣积分）
+// ---------------------------------------------------------------------------
+
+function publicLlmModel(m) {
+  return { id: m.id, name: m.name, multiplier: m.multiplier ?? 1 };
+}
+
+async function handleLlmModels(req, res) {
+  requireUser(req);
+  sendJson(res, 200, { models: db.llmModels.map(publicLlmModel) });
+}
+
+// 上游没有返回 usage 时按字符数粗略估算 token（约 4 字符 ≈ 1 token）
+function estimateTokens(messages, data) {
+  const promptChars = messages.reduce((sum, m) => {
+    if (typeof m?.content === 'string') return sum + m.content.length;
+    return sum + JSON.stringify(m?.content ?? '').length;
+  }, 0);
+  const completionChars = Array.isArray(data?.choices)
+    ? data.choices.reduce(
+        (sum, c) =>
+          sum + (typeof c?.message?.content === 'string' ? c.message.content.length : 0),
+        0,
+      )
+    : 0;
+  return Math.ceil(promptChars / 4) + Math.ceil(completionChars / 4);
+}
+
+async function handleLlmChat(req, res) {
+  const user = requireUser(req);
+  const body = await readJson(req);
+  const modelId = String(body.model || '');
+  const config = db.llmModels.find((m) => m.id === modelId);
+  if (!config) return sendJson(res, 400, { error: '模型不存在或已下线' });
+  if (!Array.isArray(body.messages) || body.messages.length === 0) {
+    return sendJson(res, 400, { error: 'messages 不能为空' });
+  }
+
+  const balance = getCredits(user);
+  if (balance <= 0) {
+    return sendJson(res, 402, { error: '积分不足', credits: balance });
+  }
+
+  const upstreamBody = { model: config.model, messages: body.messages };
+  if (body.temperature !== undefined) upstreamBody.temperature = body.temperature;
+
+  let upstream;
+  let text;
+  try {
+    upstream = await fetch(`${String(config.apiBase).replace(/\/+$/, '')}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${config.apiKey}`,
+      },
+      body: JSON.stringify(upstreamBody),
+    });
+    text = await upstream.text();
+  } catch {
+    return sendJson(res, 502, { error: '无法连接上游模型服务' });
+  }
+
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    data = null;
+  }
+  if (!upstream.ok || !data) {
+    return sendJson(res, 502, {
+      error: '上游模型调用失败',
+      upstreamStatus: upstream.status,
+      detail: text.slice(0, 300),
+    });
+  }
+
+  const totalTokens =
+    data.usage && Number.isFinite(data.usage.total_tokens)
+      ? data.usage.total_tokens
+      : estimateTokens(body.messages, data);
+  const multiplier = Number.isFinite(config.multiplier) ? config.multiplier : 1;
+  const cost = Math.ceil((totalTokens / TOKENS_PER_CREDIT) * multiplier);
+
+  if (getCredits(user) < cost) {
+    return sendJson(res, 402, { error: '积分不足', credits: getCredits(user) });
+  }
+  user.credits = getCredits(user) - cost;
+  await saveDb();
+
+  data._credits = { used: cost, remaining: user.credits };
+  sendJson(res, 200, data);
+}
+
+// ---------------------------------------------------------------------------
+// 管理端（Authorization: Bearer <ADMIN_TOKEN>）
+// ---------------------------------------------------------------------------
+
+async function handleAdminPage(req, res) {
+  try {
+    const html = await readFile(ADMIN_HTML_FILE, 'utf8');
+    res.writeHead(200, {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Content-Length': Buffer.byteLength(html),
+      ...CORS_HEADERS,
+    });
+    res.end(html);
+  } catch (err) {
+    if (err.code === 'ENOENT') {
+      return sendJson(res, 404, { error: '管理页面不存在' });
+    }
+    throw err;
+  }
+}
+
+async function handleAdminUsers(req, res) {
+  requireAdmin(req);
+  sendJson(res, 200, {
+    users: db.users.map((u) => ({
+      id: u.id,
+      email: u.email,
+      displayName: u.displayName,
+      credits: getCredits(u),
+      createdAt: u.createdAt,
+      lastCheckinDate: u.lastCheckinDate || null,
+    })),
+  });
+}
+
+async function handleAdminUserCredits(req, res, email) {
+  requireAdmin(req);
+  const body = await readJson(req);
+  const delta = Number(body.delta);
+  if (!Number.isFinite(delta) || !Number.isInteger(delta) || delta === 0) {
+    return sendJson(res, 400, { error: 'delta 必须是非零整数（可正可负）' });
+  }
+  const user = db.users.find((u) => u.email === normalizeEmail(email));
+  if (!user) return sendJson(res, 404, { error: '用户不存在' });
+  user.credits = getCredits(user) + delta;
+  await saveDb();
+  sendJson(res, 200, { ok: true, email: user.email, credits: user.credits });
+}
+
+async function handleAdminListModels(req, res) {
+  requireAdmin(req);
+  sendJson(res, 200, { models: db.llmModels });
+}
+
+function readModelFields(body) {
+  return {
+    name: String(body.name ?? '').trim(),
+    apiBase: String(body.apiBase ?? '').trim(),
+    apiKey: String(body.apiKey ?? '').trim(),
+    model: String(body.model ?? '').trim(),
+  };
+}
+
+function validateMultiplier(value) {
+  const multiplier = Number(value);
+  if (!Number.isFinite(multiplier) || multiplier <= 0) {
+    throw Object.assign(new Error('multiplier 必须是大于 0 的数字'), { status: 400 });
+  }
+  return multiplier;
+}
+
+async function handleAdminCreateModel(req, res) {
+  requireAdmin(req);
+  const body = await readJson(req);
+  const fields = readModelFields(body);
+  if (!fields.name || !fields.apiBase || !fields.apiKey || !fields.model) {
+    return sendJson(res, 400, { error: 'name / apiBase / apiKey / model 均不能为空' });
+  }
+  const multiplier =
+    body.multiplier === undefined ? 1 : validateMultiplier(body.multiplier);
+  const item = { id: `m_${randomBytes(6).toString('hex')}`, ...fields, multiplier };
+  db.llmModels.push(item);
+  await saveDb();
+  sendJson(res, 201, { model: item });
+}
+
+async function handleAdminUpdateModel(req, res, id) {
+  requireAdmin(req);
+  const item = db.llmModels.find((m) => m.id === id);
+  if (!item) return sendJson(res, 404, { error: '模型不存在' });
+  const body = await readJson(req);
+  const fields = readModelFields(body);
+  for (const key of ['name', 'apiBase', 'apiKey', 'model']) {
+    if (body[key] !== undefined) {
+      if (!fields[key]) {
+        return sendJson(res, 400, { error: `${key} 不能为空` });
+      }
+      item[key] = fields[key];
+    }
+  }
+  if (body.multiplier !== undefined) {
+    item.multiplier = validateMultiplier(body.multiplier);
+  }
+  await saveDb();
+  sendJson(res, 200, { model: item });
+}
+
+async function handleAdminDeleteModel(req, res, id) {
+  requireAdmin(req);
+  const index = db.llmModels.findIndex((m) => m.id === id);
+  if (index === -1) return sendJson(res, 404, { error: '模型不存在' });
+  const [removed] = db.llmModels.splice(index, 1);
+  await saveDb();
+  sendJson(res, 200, { ok: true, id: removed.id });
+}
+
+// ---------------------------------------------------------------------------
 // 服务器
 // ---------------------------------------------------------------------------
 
@@ -377,7 +657,35 @@ const ROUTES = {
   'PUT /api/settings': handlePutSettings,
   'POST /api/oauth/gitee/token': handleGiteeToken,
   'POST /api/oauth/gitee/refresh': handleGiteeRefresh,
+  'POST /api/checkin': handleCheckin,
+  'GET /api/credits': handleGetCredits,
+  'GET /api/llm/models': handleLlmModels,
+  'POST /api/llm/chat': handleLlmChat,
+  'GET /admin': handleAdminPage,
+  'GET /api/admin/users': handleAdminUsers,
+  'GET /api/admin/llm/models': handleAdminListModels,
+  'POST /api/admin/llm/models': handleAdminCreateModel,
 };
+
+// 带路径参数的路由（正则捕获，handler 第三个参数为 match 结果）
+const DYNAMIC_ROUTES = [
+  {
+    method: 'POST',
+    pattern: /^\/api\/admin\/users\/([^/]+)\/credits$/,
+    handler: (req, res, match) =>
+      handleAdminUserCredits(req, res, decodeURIComponent(match[1])),
+  },
+  {
+    method: 'PUT',
+    pattern: /^\/api\/admin\/llm\/models\/([^/]+)$/,
+    handler: (req, res, match) => handleAdminUpdateModel(req, res, match[1]),
+  },
+  {
+    method: 'DELETE',
+    pattern: /^\/api\/admin\/llm\/models\/([^/]+)$/,
+    handler: (req, res, match) => handleAdminDeleteModel(req, res, match[1]),
+  },
+];
 
 const server = createServer(async (req, res) => {
   if (req.method === 'OPTIONS') {
@@ -386,7 +694,17 @@ const server = createServer(async (req, res) => {
     return;
   }
   const path = new URL(req.url, 'http://localhost').pathname.replace(/\/+$/, '') || '/';
-  const handler = ROUTES[`${req.method} ${path}`];
+  let handler = ROUTES[`${req.method} ${path}`];
+  if (!handler) {
+    for (const route of DYNAMIC_ROUTES) {
+      if (route.method !== req.method) continue;
+      const match = route.pattern.exec(path);
+      if (match) {
+        handler = (rq, rs) => route.handler(rq, rs, match);
+        break;
+      }
+    }
+  }
   if (!handler) {
     sendJson(res, 404, { error: '接口不存在' });
     return;
@@ -405,5 +723,8 @@ server.listen(PORT, () => {
   console.log(`SlipCode backend listening on http://localhost:${PORT}`);
   if (!process.env.JWT_SECRET) {
     console.warn('[WARN] 未设置 JWT_SECRET，当前使用开发默认值，生产环境必须设置');
+  }
+  if (!process.env.ADMIN_TOKEN) {
+    console.warn('[WARN] 未设置 ADMIN_TOKEN，当前使用开发默认值，生产环境必须设置');
   }
 });

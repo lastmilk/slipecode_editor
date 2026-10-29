@@ -1,9 +1,15 @@
+import 'dart:io';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 
+import '../models/app_settings.dart';
 import '../providers/account_provider.dart';
 import '../providers/settings_provider.dart';
 import '../services/git_host.dart';
+import '../widgets/ai_floating_ball.dart';
 import 'account_screen.dart';
 
 /// 偏好设置页面
@@ -62,6 +68,92 @@ class SettingsScreen extends StatelessWidget {
                   ],
                 ),
               ),
+              const Divider(height: 16),
+
+              // 背景图片：选择 / 预览缩略图 / 清除
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Row(
+                  children: [
+                    const Expanded(child: Text('背景图片')),
+                    if (settings.backgroundImagePath.isNotEmpty &&
+                        File(settings.backgroundImagePath).existsSync())
+                      Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(6),
+                          child: Image.file(
+                            File(settings.backgroundImagePath),
+                            width: 40,
+                            height: 40,
+                            fit: BoxFit.cover,
+                          ),
+                        ),
+                      ),
+                    TextButton.icon(
+                      onPressed: () => _pickBackgroundImage(context),
+                      icon: const Icon(Icons.image_outlined, size: 16),
+                      label: Text(
+                        settings.backgroundImagePath.isEmpty ? '选择图片' : '更换',
+                      ),
+                    ),
+                    if (settings.backgroundImagePath.isNotEmpty)
+                      TextButton(
+                        onPressed: settingsProvider.clearBackgroundImage,
+                        child: const Text('清除'),
+                      ),
+                  ],
+                ),
+              ),
+
+              // 已设置背景图时才显示范围与不透明度选项
+              if (settings.backgroundImagePath.isNotEmpty) ...[
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: Row(
+                    children: [
+                      const Expanded(child: Text('显示范围')),
+                      SegmentedButton<String>(
+                        segments: const [
+                          ButtonSegment(
+                            value: AppSettings.backgroundScopeGlobal,
+                            label: Text('全局'),
+                          ),
+                          ButtonSegment(
+                            value: AppSettings.backgroundScopeIdeOnly,
+                            label: Text('仅编辑器'),
+                          ),
+                        ],
+                        selected: {settings.backgroundImageScope},
+                        onSelectionChanged: (value) =>
+                            settingsProvider.setBackgroundScope(value.first),
+                      ),
+                    ],
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Row(
+                    children: [
+                      const Expanded(child: Text('不透明度')),
+                      Text(
+                        settings.backgroundImageOpacity.toStringAsFixed(2),
+                        style: const TextStyle(fontFeatures: [
+                          FontFeature.tabularFigures(),
+                        ]),
+                      ),
+                    ],
+                  ),
+                ),
+                Slider(
+                  min: 0,
+                  max: 1,
+                  divisions: 20,
+                  value: settings.backgroundImageOpacity,
+                  label: settings.backgroundImageOpacity.toStringAsFixed(2),
+                  onChanged: settingsProvider.setBackgroundOpacity,
+                ),
+              ],
             ],
           ),
           const SizedBox(height: 16),
@@ -234,6 +326,75 @@ class SettingsScreen extends StatelessWidget {
               ),
             ],
           ),
+          const SizedBox(height: 16),
+
+          _Section(
+            title: 'AI 悬浮球',
+            isDark: isDark,
+            children: [
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('应用内悬浮球'),
+                subtitle: const Text('在 IDE 右下角显示 AI 悬浮球，点击呼出 Agent 面板'),
+                value: settings.aiFloatingBallEnabled,
+                onChanged: settingsProvider.setAiFloatingBallEnabled,
+              ),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('系统悬浮球'),
+                subtitle: Text(
+                  Platform.isAndroid
+                      ? 'App 退到后台后仍显示悬浮球（需授予悬浮窗权限）'
+                      : 'iOS 不支持系统悬浮窗，仅可使用应用内悬浮球',
+                ),
+                value: settings.systemOverlayEnabled,
+                onChanged: Platform.isAndroid
+                    ? (value) async {
+                        final ok = await toggleSystemOverlay(value);
+                        if (!context.mounted) return;
+                        if (value && !ok) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('未授予悬浮窗权限，无法开启系统悬浮球'),
+                            ),
+                          );
+                          return;
+                        }
+                        settingsProvider.setSystemOverlayEnabled(ok);
+                      }
+                    : null,
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+
+          _Section(
+            title: '代码补全',
+            isDark: isDark,
+            children: [
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('语法补全建议'),
+                subtitle: const Text('输入时在编辑器顶部显示关键字 / 组件 / 代码片段建议'),
+                value: settings.completionEnabled,
+                onChanged: settingsProvider.setCompletionEnabled,
+              ),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('音量上键 = Tab / 接受补全'),
+                subtitle: Text(
+                  Platform.isAndroid
+                      ? '显示建议时接受补全；无建议时插入缩进。'
+                          '关闭后音量上键仅在有建议时生效，其余时候恢复正常音量调节。'
+                      : 'iOS 不支持音量键映射，请使用建议条右侧的「补全」按钮。',
+                ),
+                value: settings.volumeKeyCompletionEnabled,
+                onChanged: Platform.isAndroid
+                    ? settingsProvider.setVolumeKeyCompletionEnabled
+                    : null,
+              ),
+            ],
+          ),
           const SizedBox(height: 24),
           Center(
             child: Text(
@@ -397,6 +558,38 @@ class _SyncCard extends StatelessWidget {
   static String _format(DateTime time) {
     return '${time.month}月${time.day}日 ${time.hour.toString().padLeft(2, '0')}:'
         '${time.minute.toString().padLeft(2, '0')}';
+  }
+}
+
+/// 选择本地图片并复制到应用文档目录，再保存持久化路径到偏好设置
+Future<void> _pickBackgroundImage(BuildContext context) async {
+  final settingsProvider = context.read<SettingsProvider>();
+  try {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.image,
+      dialogTitle: '选择背景图片',
+    );
+    final srcPath = result?.files.single.path;
+    if (srcPath == null || srcPath.isEmpty) return; // 用户取消
+
+    // 复制到应用文档目录持久化，避免源图片被移动/删除后背景丢失
+    final docsDir = await getApplicationDocumentsDirectory();
+    final bgDir = Directory('${docsDir.path}/backgrounds');
+    if (!bgDir.existsSync()) {
+      bgDir.createSync(recursive: true);
+    }
+    final ext = srcPath.contains('.') ? srcPath.split('.').last : 'png';
+    final destPath =
+        '${bgDir.path}/background_${DateTime.now().millisecondsSinceEpoch}.$ext';
+    await File(srcPath).copy(destPath);
+
+    await settingsProvider.setBackgroundImage(destPath);
+  } catch (e) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('选择背景图片失败: $e')),
+      );
+    }
   }
 }
 

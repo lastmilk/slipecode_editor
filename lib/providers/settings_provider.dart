@@ -104,6 +104,64 @@ class SettingsProvider extends ChangeNotifier {
     await _save();
   }
 
+  // ---------------------------------------------------------------------------
+  // AI 悬浮球 / 系统悬浮窗
+  // ---------------------------------------------------------------------------
+
+  Future<void> setAiFloatingBallEnabled(bool value) async {
+    _settings = _settings.copyWith(aiFloatingBallEnabled: value);
+    await _save();
+  }
+
+  Future<void> setSystemOverlayEnabled(bool value) async {
+    _settings = _settings.copyWith(systemOverlayEnabled: value);
+    await _save();
+  }
+
+  // ---------------------------------------------------------------------------
+  // 代码补全 / 音量键
+  // ---------------------------------------------------------------------------
+
+  Future<void> setCompletionEnabled(bool value) async {
+    _settings = _settings.copyWith(completionEnabled: value);
+    await _save();
+  }
+
+  Future<void> setVolumeKeyCompletionEnabled(bool value) async {
+    _settings = _settings.copyWith(volumeKeyCompletionEnabled: value);
+    await _save();
+  }
+
+  // ---------------------------------------------------------------------------
+  // 主题背景图片
+  // ---------------------------------------------------------------------------
+
+  /// 设置背景图片（传入已复制到应用文档目录的持久化路径）
+  Future<void> setBackgroundImage(String path) async {
+    _settings = _settings.copyWith(backgroundImagePath: path);
+    await _save();
+  }
+
+  /// 设置背景图片显示范围（AppSettings.backgroundScopeGlobal / backgroundScopeIdeOnly）
+  Future<void> setBackgroundScope(String scope) async {
+    _settings = _settings.copyWith(backgroundImageScope: scope);
+    await _save();
+  }
+
+  /// 设置背景图片不透明度（0.0–1.0）
+  Future<void> setBackgroundOpacity(double value) async {
+    _settings = _settings.copyWith(
+      backgroundImageOpacity: value.clamp(0.0, 1.0).toDouble(),
+    );
+    await _save();
+  }
+
+  /// 清除背景图片，恢复默认
+  Future<void> clearBackgroundImage() async {
+    _settings = _settings.copyWith(backgroundImagePath: '');
+    await _save();
+  }
+
   Future<void> _save() async {
     await _persist();
     notifyListeners();

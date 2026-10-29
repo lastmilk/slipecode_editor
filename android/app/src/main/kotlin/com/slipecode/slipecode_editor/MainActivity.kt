@@ -13,6 +13,11 @@ import java.io.File
 class MainActivity : FlutterActivity() {
     private val channelName = "slipecode/container"
     private val termuxChannelName = "slipecode/termux"
+    private val keyEventChannelName = "slipecode/keyevent"
+    private val overlayChannelName = "slipecode/overlay"
+
+    /// Flutter 侧注册的音量键监听器；为 null 表示未监听（按键走系统默认）
+    private var volumeKeyListener: ((Int) -> Boolean)? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -115,6 +120,115 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+
+        // 音量键拦截通道：Flutter 侧注册监听器后，音量上/下键先回调 Flutter，
+        // 由 Flutter 决定是否消费（true=已处理，false=交还给系统调节音量）
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, keyEventChannelName)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "setVolumeKeyListener" -> {
+                        val enabled = call.argument<Boolean>("enabled") ?: false
+                        volumeKeyListener = if (enabled) {
+                            // 真正的回调通过 EventChannel 之外的方式不够直接，
+                            // 这里用 MethodChannel.invokeMethod 反向通知 Dart 侧
+                            { keyCode ->
+                                val messenger = flutterEngine.dartExecutor.binaryMessenger
+                                var consumed = false
+                                val latch = java.util.concurrent.CountDownLatch(1)
+                                MethodChannel(messenger, keyEventChannelName)
+                                    .invokeMethod(
+                                        "onVolumeKey",
+                                        keyCode,
+                                        object : MethodChannel.Result {
+                                            override fun success(value: Any?) {
+                                                consumed = value as? Boolean ?: false
+                                                latch.countDown()
+                                            }
+                                            override fun error(
+                                                code: String,
+                                                msg: String?,
+                                                details: Any?
+                                            ) { latch.countDown() }
+                                            override fun notImplemented() { latch.countDown() }
+                                        }
+                                    )
+                                // 同步等待 Dart 侧返回（最多 50ms，避免阻塞 UI 线程）
+                                latch.await(50, java.util.concurrent.TimeUnit.MILLISECONDS)
+                                consumed
+                            }
+                        } else null
+                        result.success(true)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+
+        // 系统悬浮窗通道：AI 悬浮球可在 App 退到后台后仍然显示
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, overlayChannelName)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "checkPermission" -> {
+                        result.success(
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M)
+                                android.provider.Settings.canDrawOverlays(this)
+                            else true
+                        )
+                    }
+                    "requestPermission" -> {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                            try {
+                                val intent = Intent(
+                                    android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                    android.net.Uri.parse("package:$packageName")
+                                )
+                                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                startActivity(intent)
+                                result.success(true)
+                            } catch (e: Exception) {
+                                result.error("request_failed", e.message, null)
+                            }
+                        } else {
+                            result.success(true)
+                        }
+                    }
+                    "showOverlay" -> {
+                        try {
+                            AiOverlayService.start(this)
+                            result.success(true)
+                        } catch (e: Exception) {
+                            result.error("show_failed", e.message, null)
+                        }
+                    }
+                    "hideOverlay" -> {
+                        try {
+                            AiOverlayService.stop(this)
+                            result.success(true)
+                        } catch (e: Exception) {
+                            result.error("hide_failed", e.message, null)
+                        }
+                    }
+                    "isOverlayShowing" -> {
+                        result.success(AiOverlayService.isShowing)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+    }
+
+    /// 音量键分发：仅在 Flutter 侧注册了监听且确认消费时才拦截，
+    /// 否则保持系统默认行为（调节音量）
+    override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+        val listener = volumeKeyListener
+        if (listener != null && event.action == android.view.KeyEvent.ACTION_DOWN) {
+            val keyCode = event.keyCode
+            if (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP ||
+                keyCode == android.view.KeyEvent.KEYCODE_VOLUME_DOWN
+            ) {
+                // 回调 Flutter 询问是否消费；消费则不再走系统音量调节
+                if (listener(keyCode)) return true
+            }
+        }
+        return super.dispatchKeyEvent(event)
     }
 
     // ---------------------------------------------------------------------------

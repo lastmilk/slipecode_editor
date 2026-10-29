@@ -11,7 +11,7 @@ import 'settings_screen.dart';
 
 /// AI 助手对话面板
 ///
-/// 从编辑器右侧滑入。支持：
+/// 作为普通面板内嵌到编辑器侧边栏的「Agent」标签页。支持：
 /// - 自然语言对话
 /// - 把当前文件发给 AI 编辑
 /// - 应用 AI 返回的代码到当前文件
@@ -76,22 +76,15 @@ class _AiChatScreenState extends State<AiChatScreen> {
   Future<void> _triggerBuild() async {
     final build = context.read<BuildProvider>();
     if (build.isRunning) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('构建已在进行中')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('构建已在进行中')));
       return;
     }
-    // 关闭面板，回到编辑器再跳构建页
-    Navigator.of(context).pop();
-    // 延迟执行，确保导航完成
-    await Future.delayed(const Duration(milliseconds: 300));
-    if (!mounted) return;
-    // 直接启动构建（需要项目路径，从 BuildProvider 上下文获取）
+    // 侧边栏内嵌面板，无需关闭抽屉，直接启动构建
     final projectPath = context.read<ProjectProvider>().projectPath;
     if (projectPath == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('未打开项目，无法构建')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('未打开项目，无法构建')));
       return;
     }
     await build.startBuild(projectDir: projectPath);
@@ -104,233 +97,236 @@ class _AiChatScreenState extends State<AiChatScreen> {
     final editor = context.watch<EditorProvider>();
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    return Drawer(
-      width: MediaQuery.of(context).size.width * 0.85,
-      child: SafeArea(
-        child: Column(
-          children: [
-            // 标题栏
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              decoration: BoxDecoration(
-                color: isDark ? const Color(0xFF252526) : Colors.white,
-                border: Border(
-                  bottom: BorderSide(
-                    color: isDark ? const Color(0xFF3C3C3C) : const Color(0xFFE0E0E0),
-                  ),
-                ),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.auto_awesome, color: Colors.blueAccent, size: 20),
-                  const SizedBox(width: 8),
-                  const Expanded(
-                    child: Text(
-                      'AI 助手',
-                      style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
-                    ),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.clear_all, size: 18),
-                    tooltip: '清空对话',
-                    onPressed: ai.clear,
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.settings, size: 18),
-                    tooltip: '配置 LLM',
-                    onPressed: () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => const SettingsScreen(),
-                      ),
-                    ),
-                  ),
-                ],
+    return Column(
+      children: [
+        // 标题栏
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF252526) : Colors.white,
+            border: Border(
+              bottom: BorderSide(
+                color: isDark
+                    ? const Color(0xFF3C3C3C)
+                    : const Color(0xFFE0E0E0),
               ),
             ),
-
-            // 配置提示
-            if (!settings.isLlmConfigured)
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(12),
-                color: Colors.orange.withValues(alpha: 0.1),
-                child: Row(
-                  children: [
-                    const Icon(Icons.warning_amber, color: Colors.orange, size: 18),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        '未配置 LLM。点击右上角设置填写 API 地址、Key 和模型。',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: isDark ? Colors.orange.shade200 : Colors.orange.shade800,
-                        ),
-                      ),
-                    ),
-                  ],
+          ),
+          child: Row(
+            children: [
+              const Icon(
+                Icons.auto_awesome,
+                color: Colors.blueAccent,
+                size: 20,
+              ),
+              const SizedBox(width: 8),
+              const Expanded(
+                child: Text(
+                  'AI 助手',
+                  style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
                 ),
               ),
-
-            // 快捷操作
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-              child: Wrap(
-                spacing: 6,
-                runSpacing: 4,
-                children: [
-                  _QuickChip(
-                    icon: Icons.description,
-                    label: '解释当前文件',
-                    onTap: editor.hasActiveFile
-                        ? () => _sendWithFile('请解释这个文件的代码逻辑')
-                        : null,
-                  ),
-                  _QuickChip(
-                    icon: Icons.bug_report,
-                    label: '修复问题',
-                    onTap: editor.hasActiveFile
-                        ? () => _sendWithFile('检查并修复这个文件中的问题，返回完整修复后的文件')
-                        : null,
-                  ),
-                  _QuickChip(
-                    icon: Icons.auto_fix_high,
-                    label: '优化代码',
-                    onTap: editor.hasActiveFile
-                        ? () => _sendWithFile('优化这个文件的代码，返回完整优化后的文件')
-                        : null,
-                  ),
-                  _QuickChip(
-                    icon: Icons.cloud_upload,
-                    label: '构建 APK',
-                    onTap: _triggerBuild,
-                  ),
-                ],
+              IconButton(
+                icon: const Icon(Icons.clear_all, size: 18),
+                tooltip: '清空对话',
+                onPressed: ai.clear,
               ),
-            ),
-
-            // 消息列表
-            Expanded(
-              child: ai.messages.isEmpty
-                  ? Center(
-                      child: Padding(
-                        padding: const EdgeInsets.all(24),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Icons.auto_awesome,
-                              size: 48,
-                              color: isDark ? Colors.white24 : Colors.black12,
-                            ),
-                            const SizedBox(height: 12),
-                            Text(
-                              '有什么可以帮你的？\n试试让我解释、修复或优化当前打开的文件。',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                fontSize: 13,
-                                color: isDark ? Colors.white38 : Colors.black45,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    )
-                  : ListView.builder(
-                      controller: _scrollController,
-                      padding: const EdgeInsets.all(12),
-                      itemCount: ai.messages.length,
-                      itemBuilder: (context, index) {
-                        final msg = ai.messages[index];
-                        return _MessageBubble(message: msg, isDark: isDark);
-                      },
-                    ),
-            ),
-
-            // 应用代码按钮（当最后一条是 AI 回复且含代码时）
-            if (_hasCodeInLastAssistant(ai))
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
-                child: SizedBox(
-                  width: double.infinity,
-                  child: FilledButton.icon(
-                    onPressed: _applyCode,
-                    icon: const Icon(Icons.edit, size: 16),
-                    label: const Text('应用 AI 代码到当前文件'),
-                  ),
+              IconButton(
+                icon: const Icon(Icons.settings, size: 18),
+                tooltip: '配置 LLM',
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const SettingsScreen()),
                 ),
               ),
+            ],
+          ),
+        ),
 
-            // 错误提示
-            if (ai.error != null)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
-                child: Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: Colors.red.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(6),
-                  ),
+        // 配置提示
+        if (!settings.isLlmConfigured)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            color: Colors.orange.withValues(alpha: 0.1),
+            child: Row(
+              children: [
+                const Icon(Icons.warning_amber, color: Colors.orange, size: 18),
+                const SizedBox(width: 8),
+                Expanded(
                   child: Text(
-                    ai.error!,
-                    style: TextStyle(fontSize: 12, color: Colors.red.shade700),
+                    '未配置 LLM。点击右上角设置填写 API 地址、Key 和模型。',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: isDark
+                          ? Colors.orange.shade200
+                          : Colors.orange.shade800,
+                    ),
                   ),
                 ),
-              ),
+              ],
+            ),
+          ),
 
-            // 输入区
-            Container(
+        // 快捷操作
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          child: Wrap(
+            spacing: 6,
+            runSpacing: 4,
+            children: [
+              _QuickChip(
+                icon: Icons.description,
+                label: '解释当前文件',
+                onTap: editor.hasActiveFile
+                    ? () => _sendWithFile('请解释这个文件的代码逻辑')
+                    : null,
+              ),
+              _QuickChip(
+                icon: Icons.bug_report,
+                label: '修复问题',
+                onTap: editor.hasActiveFile
+                    ? () => _sendWithFile('检查并修复这个文件中的问题，返回完整修复后的文件')
+                    : null,
+              ),
+              _QuickChip(
+                icon: Icons.auto_fix_high,
+                label: '优化代码',
+                onTap: editor.hasActiveFile
+                    ? () => _sendWithFile('优化这个文件的代码，返回完整优化后的文件')
+                    : null,
+              ),
+              _QuickChip(
+                icon: Icons.cloud_upload,
+                label: '构建 APK',
+                onTap: _triggerBuild,
+              ),
+            ],
+          ),
+        ),
+
+        // 消息列表
+        Expanded(
+          child: ai.messages.isEmpty
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.auto_awesome,
+                          size: 48,
+                          color: isDark ? Colors.white24 : Colors.black12,
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          '有什么可以帮你的？\n试试让我解释、修复或优化当前打开的文件。',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: isDark ? Colors.white38 : Colors.black45,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                )
+              : ListView.builder(
+                  controller: _scrollController,
+                  padding: const EdgeInsets.all(12),
+                  itemCount: ai.messages.length,
+                  itemBuilder: (context, index) {
+                    final msg = ai.messages[index];
+                    return _MessageBubble(message: msg, isDark: isDark);
+                  },
+                ),
+        ),
+
+        // 应用代码按钮（当最后一条是 AI 回复且含代码时）
+        if (_hasCodeInLastAssistant(ai))
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
+            child: SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: _applyCode,
+                icon: const Icon(Icons.edit, size: 16),
+                label: const Text('应用 AI 代码到当前文件'),
+              ),
+            ),
+          ),
+
+        // 错误提示
+        if (ai.error != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
+            child: Container(
+              width: double.infinity,
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: isDark ? const Color(0xFF1E1E1E) : const Color(0xFFF5F5F5),
-                border: Border(
-                  top: BorderSide(
-                    color: isDark ? const Color(0xFF3C3C3C) : const Color(0xFFE0E0E0),
-                  ),
-                ),
+                color: Colors.red.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(6),
               ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _inputController,
-                      maxLines: null,
-                      keyboardType: TextInputType.multiline,
-                      decoration: InputDecoration(
-                        hintText: ai.isThinking ? 'AI 正在思考...' : '输入消息...',
-                        isDense: true,
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 10,
-                        ),
-                      ),
-                      enabled: !ai.isThinking,
-                      onSubmitted: (_) => _send(),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  IconButton.filled(
-                    onPressed: ai.isThinking ? null : _send,
-                    icon: ai.isThinking
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.white,
-                            ),
-                          )
-                        : const Icon(Icons.send, size: 18),
-                  ),
-                ],
+              child: Text(
+                ai.error!,
+                style: TextStyle(fontSize: 12, color: Colors.red.shade700),
               ),
             ),
-          ],
+          ),
+
+        // 输入区
+        Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF1E1E1E) : const Color(0xFFF5F5F5),
+            border: Border(
+              top: BorderSide(
+                color: isDark
+                    ? const Color(0xFF3C3C3C)
+                    : const Color(0xFFE0E0E0),
+              ),
+            ),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _inputController,
+                  maxLines: null,
+                  keyboardType: TextInputType.multiline,
+                  decoration: InputDecoration(
+                    hintText: ai.isThinking ? 'AI 正在思考...' : '输入消息...',
+                    isDense: true,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 10,
+                    ),
+                  ),
+                  enabled: !ai.isThinking,
+                  onSubmitted: (_) => _send(),
+                ),
+              ),
+              const SizedBox(width: 8),
+              IconButton.filled(
+                onPressed: ai.isThinking ? null : _send,
+                icon: ai.isThinking
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Icon(Icons.send, size: 18),
+              ),
+            ],
+          ),
         ),
-      ),
+      ],
     );
   }
 
@@ -373,7 +369,9 @@ class _MessageBubble extends StatelessWidget {
             border: isUser
                 ? null
                 : Border.all(
-                    color: isDark ? const Color(0xFF3C3C3C) : const Color(0xFFE0E0E0),
+                    color: isDark
+                        ? const Color(0xFF3C3C3C)
+                        : const Color(0xFFE0E0E0),
                   ),
           ),
           child: Column(
@@ -422,11 +420,7 @@ class _MessageBubble extends StatelessWidget {
 
 /// 快捷操作芯片
 class _QuickChip extends StatelessWidget {
-  const _QuickChip({
-    required this.icon,
-    required this.label,
-    this.onTap,
-  });
+  const _QuickChip({required this.icon, required this.label, this.onTap});
 
   final IconData icon;
   final String label;

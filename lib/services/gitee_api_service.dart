@@ -77,11 +77,25 @@ class GiteeApiService {
   /// 统一的网络请求超时时间，避免首屏因网络卡死。
   static const _timeout = Duration(seconds: 10);
 
+  /// 把响应体解码为 Map；Gitee 部分错误场景会返回 List（如参数校验失败），
+  /// 直接 as Map 会抛出难以定位的 type cast 错误，这里统一转为可读异常。
+  Map<String, dynamic> _decodeMap(http.Response res, String what) {
+    if (res.body.isEmpty) return {};
+    final decoded = jsonDecode(res.body);
+    if (decoded is Map<String, dynamic>) return decoded;
+    final preview =
+        res.body.length > 200 ? '${res.body.substring(0, 200)}…' : res.body;
+    throw HttpExceptionWithBody(
+      '$what 返回了非对象数据（${decoded.runtimeType}）：$preview',
+      res.body,
+    );
+  }
+
   Future<Map<String, dynamic>> _getJson(String path,
       [Map<String, String>? query]) async {
     final res = await _client.get(_u(path, query)).timeout(_timeout);
     _check(res, 'GET $path');
-    return jsonDecode(res.body) as Map<String, dynamic>;
+    return _decodeMap(res, 'GET $path');
   }
 
   Future<Map<String, dynamic>> _sendJson(
@@ -95,8 +109,7 @@ class GiteeApiService {
     final streamed = await _client.send(req).timeout(_timeout);
     final res = await http.Response.fromStream(streamed);
     _check(res, '$method $path');
-    if (res.body.isEmpty) return {};
-    return jsonDecode(res.body) as Map<String, dynamic>;
+    return _decodeMap(res, '$method $path');
   }
 
   Never _throw(String what, http.Response res) {
@@ -147,7 +160,7 @@ class GiteeApiService {
     final res = await _client.get(_u('/repos/$fullName'));
     if (res.statusCode == 404) return null;
     _check(res, 'GET /repos/$fullName');
-    return GiteeRepo.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
+    return GiteeRepo.fromJson(_decodeMap(res, 'GET /repos/$fullName'));
   }
 
   /// 判断仓库中是否存在某个文件
@@ -174,8 +187,10 @@ class GiteeApiService {
     );
     if (res.statusCode == 404) return null;
     _check(res, 'GET contents/$path');
-    final json = jsonDecode(res.body) as Map<String, dynamic>;
-    // 文件返回单个对象；目录返回数组（视为没有可覆盖的同名文件）
+    final decoded = jsonDecode(res.body);
+    // 目录返回数组（视为没有可覆盖的同名文件）
+    if (decoded is List) return null;
+    final json = decoded as Map<String, dynamic>;
     if (json['sha'] is String) return json['sha'] as String;
     return null;
   }

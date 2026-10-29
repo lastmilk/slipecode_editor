@@ -114,7 +114,9 @@ class GitHubAuthService {
 
     final launched = await launchUrl(
       authorizeUri,
-      mode: LaunchMode.externalApplication,
+      // 用 Custom Tab / SFSafariViewController 打开，避免被 GitHub App
+      // 等已注册 github.com 链接的应用拦截（拦截后授权页会显示 404）
+      mode: LaunchMode.inAppBrowserView,
     );
     if (!launched) {
       await _cleanup();
