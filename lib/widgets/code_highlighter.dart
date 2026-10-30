@@ -95,6 +95,18 @@ class HighlightingController extends TextEditingController {
     'true', 'false', 'null', 'yes', 'no', 'on', 'off',
   };
 
+  /// JavaScript / TypeScript 关键字（Node.js、HTML、Taro 载荷）
+  static const _jsKeywords = <String>{
+    'abstract', 'any', 'as', 'async', 'await', 'break', 'case', 'catch',
+    'class', 'const', 'continue', 'debugger', 'declare', 'default', 'delete',
+    'do', 'else', 'enum', 'export', 'extends', 'false', 'finally', 'for',
+    'from', 'function', 'if', 'implements', 'import', 'in', 'instanceof',
+    'interface', 'keyof', 'let', 'new', 'null', 'of', 'private', 'protected',
+    'public', 'readonly', 'return', 'static', 'super', 'switch', 'this',
+    'throw', 'true', 'try', 'type', 'typeof', 'undefined', 'var', 'void',
+    'while', 'yield',
+  };
+
   /// 单个正则覆盖所有可上色片段（顺序即优先级）
   static final _tokenPattern = RegExp(
     r'''//[^\n]*|/\*[\s\S]*?\*/|'(?:[^'\\\n]|\\.)*'|"(?:[^"\\\n]|\\.)*"|@[A-Za-z_]\w*|\b\d+(?:\.\d+)?\b|\b[A-Za-z_]\w*\b''',
@@ -105,6 +117,7 @@ class HighlightingController extends TextEditingController {
         'kotlin' || 'java' => _jvmKeywords,
         'yaml' => _yamlKeywords,
         'json' => _yamlKeywords,
+        'javascript' || 'typescript' => _jsKeywords,
         _ => const <String>{},
       };
 
