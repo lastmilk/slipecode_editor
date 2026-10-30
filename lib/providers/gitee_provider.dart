@@ -1,12 +1,12 @@
 import 'dart:async';
-import 'dart:convert';
-import 'dart:io';
+import 'dart:convert' show utf8;
+import 'dart:io' show SocketException;
 
 import 'package:flutter/foundation.dart';
-import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../config/app_config.dart';
+import '../payloads/project_payload.dart';
 import '../services/gitee_api_service.dart';
 import '../services/gitee_auth_service.dart';
 import '../services/gitee_go_templates.dart';
@@ -215,7 +215,9 @@ class GiteeProvider extends ChangeNotifier {
       },
     );
 
-    if (_isAppTemplate(projectPath) &&
+    // Gitee Go 目前只有 Flutter 流水线，其它载荷不推送
+    final payload = await PayloadRegistry.detect(projectPath);
+    if (payload.supportsGitee &&
         !await client.fileExists(
           repo.fullName,
           GiteeGoTemplates.workflowPath,
@@ -239,17 +241,5 @@ class GiteeProvider extends ChangeNotifier {
     }
     onLog?.call('==> 完成');
     return repo;
-  }
-
-  bool _isAppTemplate(String projectPath) {
-    try {
-      final metaFile = File(p.join(projectPath, '.slipecode.json'));
-      if (!metaFile.existsSync()) return true;
-      final meta = jsonDecode(metaFile.readAsStringSync());
-      if (meta is Map && meta['template'] is String) {
-        return meta['template'] == 'app';
-      }
-    } catch (_) {}
-    return true;
   }
 }

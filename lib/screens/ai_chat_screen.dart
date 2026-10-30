@@ -172,19 +172,19 @@ class _AiChatScreenState extends State<AiChatScreen> {
                 icon: Icons.bug_report,
                 label: '修复问题',
                 onTap: editor.hasActiveFile
-                    ? () => _sendWithFile('检查并修复这个文件中的问题，返回完整修复后的文件')
+                    ? () => _sendWithFile('检查并修复这个文件中的问题，直接用工具修改文件')
                     : null,
               ),
               _QuickChip(
                 icon: Icons.auto_fix_high,
                 label: '优化代码',
                 onTap: editor.hasActiveFile
-                    ? () => _sendWithFile('优化这个文件的代码，返回完整优化后的文件')
+                    ? () => _sendWithFile('优化这个文件的代码，直接用工具修改文件')
                     : null,
               ),
               _QuickChip(
                 icon: Icons.cloud_upload,
-                label: '构建 APK',
+                label: '云端构建',
                 onTap: _triggerBuild,
               ),
             ],
