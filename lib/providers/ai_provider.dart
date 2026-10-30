@@ -1,33 +1,51 @@
 import 'package:flutter/foundation.dart';
 
+import '../agent/agent_service.dart';
+import '../agent/mcp_tools.dart';
 import '../models/app_settings.dart';
+import '../providers/build_provider.dart';
+import '../providers/editor_provider.dart';
+import '../providers/project_provider.dart';
+import '../providers/settings_provider.dart';
 import '../services/llm_service.dart';
-import 'build_provider.dart';
-import 'editor_provider.dart';
-import 'settings_provider.dart';
 
 /// AI 助手状态
 enum AiStatus { idle, thinking, error }
 
 /// AI 助手 Provider
 ///
-/// 管理与大模型的对话，支持：
-/// 1. 代码编辑 —— 把当前文件内容发给 AI，应用返回的代码
-/// 2. 触发构建 —— 调用 BuildProvider 启动 GitHub Actions 云端构建
+/// 基于 Skill.md + MCP 工具集运行的 Agent：
+/// 1. 读取项目文件、搜索代码、创建/修改/删除文件
+/// 2. 触发云端构建
+/// 3. 多轮「调用工具 → 观察结果 → 继续」循环
 class AiProvider extends ChangeNotifier {
-  AiProvider(this._settings, this._editor, this._build);
+  AiProvider(this._settings, this._editor, BuildProvider build, this._project)
+      : _toolbox = McpToolbox(
+          project: _project,
+          editor: _editor,
+          build: build,
+        ) {
+    _agent = AgentService(_project, _toolbox);
+  }
 
   final SettingsProvider _settings;
   final EditorProvider _editor;
-  final BuildProvider _build;
+  final ProjectProvider _project;
+
+  final McpToolbox _toolbox;
+  late final AgentService _agent;
 
   final List<ChatMessage> _messages = [];
+  final List<AgentToolStep> _steps = [];
   AiStatus _status = AiStatus.idle;
   String? _error;
   bool _disposed = false;
 
   /// 对话历史（只读）
   List<ChatMessage> get messages => List.unmodifiable(_messages);
+
+  /// 本轮 Agent 已执行的工具调用
+  List<AgentToolStep> get steps => List.unmodifiable(_steps);
 
   AiStatus get status => _status;
   String? get error => _error;
@@ -45,26 +63,13 @@ class AiProvider extends ChangeNotifier {
   /// 清空对话
   void clear() {
     _messages.clear();
+    _steps.clear();
     _error = null;
+    _status = AiStatus.idle;
     _safeNotify();
   }
 
-  /// 构建系统提示词：告诉 AI 它的能力与输出规范
-  String _systemPrompt() {
-    return '''你是 SLIPE 代码编辑器内置的 AI 助手，运行在 Android 手机上，帮助用户编写 Flutter/Dart 项目。
-
-你的能力：
-1. 代码编辑：用户会把当前打开的文件内容发给你。请直接返回修改后的完整文件内容，用 ```dart 代码块包裹（若是其他语言则用对应语言标记）。不要只返回片段，要返回整个文件。
-2. 代码解释：回答用户关于代码的问题，简洁清晰。
-3. 触发构建：当用户要求"构建"、"打包"、"build"时，回复会触发云端 GitHub Actions 构建（APK）。
-
-输出规范：
-- 修改代码时，必须用 ```语言名 ... ``` 包裹完整文件内容。
-- 非代码内容用自然语言说明。
-- 不要编造不存在的 API。''';
-  }
-
-  /// 发送一条用户消息并获取 AI 回复
+  /// 发送一条用户消息，Agent 会自动调用工具完成任务
   Future<void> sendMessage(String text) async {
     if (text.trim().isEmpty) return;
     if (!isConfigured) {
@@ -75,27 +80,30 @@ class AiProvider extends ChangeNotifier {
     }
 
     _messages.add(ChatMessage(role: ChatRole.user, content: text));
+    _steps.clear();
     _status = AiStatus.thinking;
     _error = null;
     _safeNotify();
 
-    // 构造请求消息：system + 历史（最近 20 条，避免 token 爆炸）
+    // 只带最近 20 条，避免 token 爆炸
     final history = _messages.length > 20
         ? _messages.sublist(_messages.length - 20)
         : _messages;
-    final requestMessages = <ChatMessage>[
-      ChatMessage(role: ChatRole.system, content: _systemPrompt()),
-      ...history,
-    ];
 
     try {
-      final reply = await LlmService.instance.chat(
+      final result = await _agent.run(
         apiBase: _s.llmApiBase,
         apiKey: _s.llmApiKey,
         model: _s.llmModel,
-        messages: requestMessages,
+        history: List<ChatMessage>.from(history),
+        onStep: (step) {
+          _steps.add(step);
+          _safeNotify();
+        },
       );
-      _messages.add(ChatMessage(role: ChatRole.assistant, content: reply));
+      _messages.add(
+        ChatMessage(role: ChatRole.assistant, content: result.content),
+      );
       _status = AiStatus.idle;
     } catch (e) {
       _error = '$e';
@@ -114,47 +122,10 @@ class AiProvider extends ChangeNotifier {
       return;
     }
     final fileName = active.path.split(RegExp(r'[/\\]')).last;
-    final lang = _detectLang(active.path);
+    final lang = _project.payload.languageFor(active.path);
     final text =
         '$instruction\n\n当前文件：`$fileName`\n\n```$lang\n${active.content}\n```';
     await sendMessage(text);
-  }
-
-  /// 把 AI 最近一条回复中的代码应用到当前活动文件
-  ///
-  /// 返回是否成功应用。
-  bool applyLatestCodeToActiveFile() {
-    if (!_editor.hasActiveFile) return false;
-    final lastAssistant = _messages.reversed
-        .where((m) => m.role == ChatRole.assistant)
-        .firstOrNull;
-    if (lastAssistant == null) return false;
-
-    final lang = _detectLang(_editor.activeFile!.path);
-    var code = LlmService.extractCodeByLang(lastAssistant.content, lang);
-    code ??= LlmService.extractCode(lastAssistant.content);
-    if (code.isEmpty) return false;
-
-    _editor.updateActiveContent(code);
-    return true;
-  }
-
-  /// 触发云端构建（GitHub Actions）
-  Future<String> triggerBuild() async {
-    if (_build.isRunning) return '构建已在进行中';
-    // build 需要项目目录，由调用方（UI）传入；这里返回状态提示
-    return 'build';
-  }
-
-  String _detectLang(String path) {
-    final lower = path.toLowerCase();
-    if (lower.endsWith('.dart')) return 'dart';
-    if (lower.endsWith('.yaml') || lower.endsWith('.yml')) return 'yaml';
-    if (lower.endsWith('.json')) return 'json';
-    if (lower.endsWith('.xml')) return 'xml';
-    if (lower.endsWith('.kt') || lower.endsWith('.java')) return 'kotlin';
-    if (lower.endsWith('.md')) return 'markdown';
-    return 'text';
   }
 
   @override

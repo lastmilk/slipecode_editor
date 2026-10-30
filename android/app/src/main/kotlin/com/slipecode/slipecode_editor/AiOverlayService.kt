@@ -76,7 +76,7 @@ class AiOverlayService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         val notification = Notification.Builder(this, CHANNEL_ID)
-            .setContentTitle("SLIPE AI 悬浮球运行中")
+            .setContentTitle("SlipCode AI 悬浮球运行中")
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentIntent(pending)
             .build()

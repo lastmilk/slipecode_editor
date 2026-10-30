@@ -76,6 +76,69 @@ class EditorProvider extends ChangeNotifier {
     }
   }
 
+  /// 刷新已打开文件的内容（Agent 直接改盘后调用）
+  Future<void> reloadFile(String path) async {
+    final file = _openFiles.where((f) => f.path == path).firstOrNull;
+    if (file == null) return;
+    try {
+      final content = await _fileService.readFile(path);
+      final fresh = OpenFile(path: path, content: content);
+      final index = _openFiles.indexOf(file);
+      _openFiles[index] = fresh;
+      if (_activeFile?.path == path) _activeFile = fresh;
+      notifyListeners();
+    } catch (_) {
+      // 读取失败（例如文件已被删除）保持原状态
+    }
+  }
+
+  /// 文件被重命名：同步更新已打开的标签
+  void renameOpenFile(String oldPath, String newPath) {
+    for (var i = 0; i < _openFiles.length; i++) {
+      final file = _openFiles[i];
+      if (file.path != oldPath) continue;
+      final renamed = OpenFile(
+        path: newPath,
+        content: file.content,
+        originalContent: file.originalContent,
+      );
+      _openFiles[i] = renamed;
+      if (_activeFile?.path == oldPath) _activeFile = renamed;
+    }
+    notifyListeners();
+  }
+
+  /// 目录被重命名：同步更新目录下已打开的标签
+  void renameDirectory(String oldDir, String newDir) {
+    for (var i = 0; i < _openFiles.length; i++) {
+      final file = _openFiles[i];
+      final oldPrefix = '$oldDir/';
+      final winPrefix = '$oldDir\\';
+      if (file.path.startsWith(oldPrefix) || file.path.startsWith(winPrefix)) {
+        final suffix = file.path.substring(oldDir.length);
+        final renamed = OpenFile(
+          path: '$newDir$suffix',
+          content: file.content,
+          originalContent: file.originalContent,
+        );
+        _openFiles[i] = renamed;
+        if (_activeFile?.path == file.path) _activeFile = renamed;
+      }
+    }
+    notifyListeners();
+  }
+
+  /// 文件或目录被删除：关闭受影响的标签
+  void closeFilesUnder(String path) {
+    final deleted = _openFiles
+        .where((f) => f.path == path || f.path.startsWith('$path/') || f.path.startsWith('$path\\'))
+        .map((f) => f.path)
+        .toList();
+    for (final filePath in deleted) {
+      closeFile(filePath);
+    }
+  }
+
   /// 保存活动文件
   Future<bool> saveActiveFile() async {
     if (_activeFile == null) return false;

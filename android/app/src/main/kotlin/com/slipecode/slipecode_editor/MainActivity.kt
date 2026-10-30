@@ -73,7 +73,7 @@ class MainActivity : FlutterActivity() {
                                 startActivity(intent)
                                 result.success(true)
                             } catch (e: Exception) {
-                                Log.e("SLIPE", "installApk failed", e)
+                                Log.e("SlipCode", "installApk failed", e)
                                 result.error("install_failed", e.message, null)
                             }
                         }
@@ -112,7 +112,7 @@ class MainActivity : FlutterActivity() {
                                 )
                             )
                         } catch (e: Exception) {
-                            Log.e("SLIPE", "termux exec failed", e)
+                            Log.e("SlipCode", "termux exec failed", e)
                             result.error("exec_failed", e.message, null)
                         }
                     }

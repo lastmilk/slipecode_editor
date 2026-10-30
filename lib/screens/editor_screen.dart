@@ -3,12 +3,16 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:path/path.dart' as p;
 import 'package:provider/provider.dart';
 
+import '../models/file_node.dart';
 import '../providers/editor_provider.dart';
 import '../providers/git_sync_provider.dart';
 import '../providers/project_provider.dart';
 import '../providers/settings_provider.dart';
+import '../services/dart_class_template.dart';
+import '../services/file_service.dart';
 import '../services/volume_key_service.dart';
 import '../widgets/ai_floating_ball.dart';
 import '../widgets/app_background.dart';
@@ -41,6 +45,8 @@ class _EditorScreenState extends State<EditorScreen>
   /// 当前编辑器状态，用于音量键驱动补全
   final GlobalKey<CodeEditorState> _codeEditorKey =
       GlobalKey<CodeEditorState>();
+
+  final FileService _fileService = FileService();
 
   /// 监听偏好设置变化，实时启停音量键拦截
   SettingsProvider? _settingsProvider;
@@ -163,17 +169,272 @@ class _EditorScreenState extends State<EditorScreen>
   }
 
   String _detectLanguage(String path) {
-    final lower = path.toLowerCase();
-    if (lower.endsWith('.dart')) return 'dart';
-    if (lower.endsWith('.yaml') || lower.endsWith('.yml')) return 'yaml';
-    if (lower.endsWith('.json')) return 'json';
-    if (lower.endsWith('.xml')) return 'xml';
-    if (lower.endsWith('.gradle') || lower.endsWith('.kts')) return 'kotlin';
-    if (lower.endsWith('.html')) return 'xml';
-    if (lower.endsWith('.md')) return 'markdown';
-    if (lower.endsWith('.kt')) return 'kotlin';
-    if (lower.endsWith('.java')) return 'java';
-    return 'plaintext';
+    final payload = context.read<ProjectProvider>().payload;
+    return payload.languageFor(path);
+  }
+
+  // ---------------------------------------------------------------------------
+  // 文件管理
+  // ---------------------------------------------------------------------------
+
+  void _snack(String message, {bool error = false}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: error ? Colors.red : null,
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  Future<String?> _promptName({
+    required String title,
+    required String hint,
+    String initial = '',
+    String? helper,
+  }) async {
+    final controller = TextEditingController(text: initial);
+    final result = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(title),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: InputDecoration(hintText: hint, helperText: helper),
+          onSubmitted: (value) => Navigator.of(ctx).pop(value.trim()),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(controller.text.trim()),
+            child: const Text('确定'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    return result;
+  }
+
+  Future<void> _refreshTree() async {
+    if (!mounted) return;
+    await context.read<ProjectProvider>().refreshFileTree();
+  }
+
+  Future<void> _createFileDialog(String dirPath) async {
+    final name = await _promptName(
+      title: '新建文件',
+      hint: 'example.dart',
+      helper: '支持任意扩展名',
+    );
+    if (name == null || name.isEmpty || !mounted) return;
+    try {
+      final file = await _fileService.createFile(dirPath, name);
+      await _refreshTree();
+      await _handleFileTap(file.path);
+    } catch (e) {
+      _snack('创建失败：$e', error: true);
+    }
+  }
+
+  Future<void> _createDirDialog(String parentPath) async {
+    final name = await _promptName(title: '新建文件夹', hint: 'lib');
+    if (name == null || name.isEmpty || !mounted) return;
+    try {
+      await _fileService.createDirectory(parentPath, name);
+      await _refreshTree();
+    } catch (e) {
+      _snack('创建失败：$e', error: true);
+    }
+  }
+
+  Future<DartClassKind?> _pickDartClassKind() async {
+    return showDialog<DartClassKind>(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        title: const Text('选择 Dart 模板'),
+        children: DartClassKind.values
+            .map(
+              (kind) => SimpleDialogOption(
+                onPressed: () => Navigator.of(ctx).pop(kind),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: Text(kind.label),
+                ),
+              ),
+            )
+            .toList(),
+      ),
+    );
+  }
+
+  Future<void> _createDartClassDialog(String dirPath) async {
+    final name = await _promptName(
+      title: '新建 Dart 类',
+      hint: 'MyWidget',
+      helper: '自动生成类名与 {{snake_case}}.dart 文件名',
+    );
+    if (name == null || name.isEmpty || !mounted) return;
+    final kind = await _pickDartClassKind();
+    if (kind == null || !mounted) return;
+    try {
+      final fileName = DartClassTemplate.fileNameFor(name);
+      final content = DartClassTemplate.generate(kind, name);
+      final file = await _fileService.createFile(
+        dirPath,
+        fileName,
+        content: content,
+      );
+      await _refreshTree();
+      await _handleFileTap(file.path);
+    } catch (e) {
+      _snack('创建失败：$e', error: true);
+    }
+  }
+
+  Future<void> _renameNode(FileNode node) async {
+    final editor = context.read<EditorProvider>();
+    final newName = await _promptName(
+      title: '重命名',
+      hint: node.name,
+      initial: node.name,
+    );
+    if (newName == null || newName.isEmpty || !mounted) return;
+    if (newName == node.name) return;
+    try {
+      final newPath = await _fileService.renameEntity(node.path, newName);
+      if (node.isDirectory) {
+        editor.renameDirectory(node.path, newPath);
+      } else {
+        editor.renameOpenFile(node.path, newPath);
+      }
+      await _refreshTree();
+      _snack('✓ 已重命名为 $newName');
+    } catch (e) {
+      _snack('重命名失败：$e', error: true);
+    }
+  }
+
+  Future<void> _deleteNode(FileNode node) async {
+    final editor = context.read<EditorProvider>();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('删除确认'),
+        content: Text(
+          node.isDirectory
+              ? '确定删除文件夹「${node.name}」及其全部内容？此操作不可撤销。'
+              : '确定删除文件「${node.name}」？此操作不可撤销。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    try {
+      await _fileService.deleteEntity(node.path);
+      editor.closeFilesUnder(node.path);
+      await _refreshTree();
+      _snack('✓ 已删除 ${node.name}');
+    } catch (e) {
+      _snack('删除失败：$e', error: true);
+    }
+  }
+
+  /// 长按文件 / 文件夹：弹出操作菜单
+  Future<void> _showNodeMenu(FileNode node) async {
+    final payload = context.read<ProjectProvider>().payload;
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      builder: (ctx) {
+        final isDark = Theme.of(ctx).brightness == Brightness.dark;
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: Icon(
+                  node.isDirectory ? Icons.folder : Icons.insert_drive_file,
+                  color: Colors.amber,
+                ),
+                title: Text(node.name),
+                subtitle: Text(
+                  node.path,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                dense: true,
+              ),
+              Divider(
+                height: 1,
+                color: isDark ? Colors.white12 : Colors.black12,
+              ),
+              if (node.isDirectory) ...[
+                ListTile(
+                  leading: const Icon(Icons.note_add),
+                  title: const Text('新建文件'),
+                  onTap: () => Navigator.of(ctx).pop('newFile'),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.create_new_folder),
+                  title: const Text('新建文件夹'),
+                  onTap: () => Navigator.of(ctx).pop('newFolder'),
+                ),
+                if (payload.isFlutter)
+                  ListTile(
+                    leading: const Icon(Icons.widgets),
+                    title: const Text('新建 Dart 类'),
+                    subtitle: const Text('自动生成模板代码'),
+                    onTap: () => Navigator.of(ctx).pop('newDartClass'),
+                  ),
+              ],
+              ListTile(
+                leading: const Icon(Icons.drive_file_rename_outline),
+                title: const Text('重命名'),
+                onTap: () => Navigator.of(ctx).pop('rename'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.delete_outline, color: Colors.red),
+                title: const Text(
+                  '删除',
+                  style: TextStyle(color: Colors.red),
+                ),
+                onTap: () => Navigator.of(ctx).pop('delete'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+    if (!mounted || action == null) return;
+
+    final dirPath = node.isDirectory ? node.path : p.dirname(node.path);
+    switch (action) {
+      case 'newFile':
+        await _createFileDialog(dirPath);
+      case 'newFolder':
+        await _createDirDialog(dirPath);
+      case 'newDartClass':
+        await _createDartClassDialog(dirPath);
+      case 'rename':
+        await _renameNode(node);
+      case 'delete':
+        await _deleteNode(node);
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -354,11 +615,7 @@ class _EditorScreenState extends State<EditorScreen>
               child: TabBarView(
                 controller: _sidebarTabController,
                 children: [
-                  FileTree(
-                    root: projectProvider.fileTree,
-                    isLoading: projectProvider.isLoading,
-                    onFileTap: _handleFileTap,
-                  ),
+                  _buildFilePanel(projectProvider, isDark),
                   const AiChatScreen(),
                 ],
               ),
@@ -366,6 +623,74 @@ class _EditorScreenState extends State<EditorScreen>
           ],
         ),
       ),
+    );
+  }
+
+  /// 文件面板：顶部操作栏 + 文件树（长按可重命名 / 删除）
+  Widget _buildFilePanel(ProjectProvider projectProvider, bool isDark) {
+    final payload = projectProvider.payload;
+    final rootPath = projectProvider.projectPath;
+
+    return Column(
+      children: [
+        Container(
+          height: 38,
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          decoration: BoxDecoration(
+            border: Border(
+              bottom: BorderSide(
+                color: isDark ? Colors.white12 : Colors.black12,
+              ),
+            ),
+          ),
+          child: Row(
+            children: [
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                icon: const Icon(Icons.note_add, size: 18),
+                tooltip: '新建文件',
+                onPressed: rootPath == null ? null : () => _createFileDialog(rootPath),
+              ),
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                icon: const Icon(Icons.create_new_folder, size: 18),
+                tooltip: '新建文件夹',
+                onPressed: rootPath == null ? null : () => _createDirDialog(rootPath),
+              ),
+              if (payload.isFlutter)
+                IconButton(
+                  visualDensity: VisualDensity.compact,
+                  icon: const Icon(Icons.widgets, size: 18),
+                  tooltip: '新建 Dart 类',
+                  onPressed:
+                      rootPath == null ? null : () => _createDartClassDialog(rootPath),
+                ),
+              const Spacer(),
+              Text(
+                payload.name,
+                style: TextStyle(
+                  fontSize: 10,
+                  color: isDark ? Colors.white38 : Colors.black38,
+                ),
+              ),
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                icon: const Icon(Icons.refresh, size: 18),
+                tooltip: '刷新',
+                onPressed: projectProvider.refreshFileTree,
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: FileTree(
+            root: projectProvider.fileTree,
+            isLoading: projectProvider.isLoading,
+            onFileTap: _handleFileTap,
+            onLongPress: _showNodeMenu,
+          ),
+        ),
+      ],
     );
   }
 

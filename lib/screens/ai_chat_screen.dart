@@ -14,8 +14,7 @@ import 'settings_screen.dart';
 /// 作为普通面板内嵌到编辑器侧边栏的「Agent」标签页。支持：
 /// - 自然语言对话
 /// - 把当前文件发给 AI 编辑
-/// - 应用 AI 返回的代码到当前文件
-/// - 触发云端构建（GitHub Actions）
+/// - Agent 通过 MCP 工具自动读写文件、创建 Dart 类、触发云端构建
 class AiChatScreen extends StatefulWidget {
   const AiChatScreen({super.key});
 
@@ -58,18 +57,6 @@ class _AiChatScreenState extends State<AiChatScreen> {
   Future<void> _sendWithFile(String instruction) async {
     await context.read<AiProvider>().sendWithCurrentFile(instruction);
     _scrollToBottom();
-  }
-
-  /// 应用 AI 最新代码到当前文件
-  Future<void> _applyCode() async {
-    final ok = context.read<AiProvider>().applyLatestCodeToActiveFile();
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(ok ? '✓ 已将 AI 代码应用到当前文件' : '未找到可应用的代码'),
-        backgroundColor: ok ? Colors.green : Colors.orange,
-      ),
-    );
   }
 
   /// 触发云端构建
@@ -242,17 +229,51 @@ class _AiChatScreenState extends State<AiChatScreen> {
                 ),
         ),
 
-        // 应用代码按钮（当最后一条是 AI 回复且含代码时）
-        if (_hasCodeInLastAssistant(ai))
-          Padding(
+        // Agent 工具调用轨迹
+        if (ai.steps.isNotEmpty)
+          Container(
+            width: double.infinity,
             padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
-            child: SizedBox(
-              width: double.infinity,
-              child: FilledButton.icon(
-                onPressed: _applyCode,
-                icon: const Icon(Icons.edit, size: 16),
-                label: const Text('应用 AI 代码到当前文件'),
-              ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      Icons.build_circle_outlined,
+                      size: 14,
+                      color: isDark ? Colors.white54 : Colors.black45,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      '工具调用（${ai.steps.length}）',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: isDark ? Colors.white54 : Colors.black45,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 4,
+                  children: ai.steps
+                      .map(
+                        (step) => Chip(
+                          visualDensity: VisualDensity.compact,
+                          materialTapTargetSize:
+                              MaterialTapTargetSize.shrinkWrap,
+                          label: Text(
+                            '${step.tool} · ${step.summary}',
+                            style: const TextStyle(fontSize: 10),
+                          ),
+                        ),
+                      )
+                      .toList(),
+                ),
+              ],
             ),
           ),
 
@@ -328,13 +349,6 @@ class _AiChatScreenState extends State<AiChatScreen> {
         ),
       ],
     );
-  }
-
-  bool _hasCodeInLastAssistant(AiProvider ai) {
-    if (ai.messages.isEmpty) return false;
-    final last = ai.messages.last;
-    if (last.role != ChatRole.assistant) return false;
-    return LlmService.extractCode(last.content).isNotEmpty;
   }
 }
 

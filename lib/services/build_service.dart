@@ -17,7 +17,11 @@ enum BuildType {
 
   /// iOS 构建需要 macOS Runner；Gitee Go 不支持，只能在 GitHub 上执行。
   /// 证书暂未配置，使用 `--no-codesign` 产出未签名的 Runner.app（zip）。
-  iosRelease('ios-release', 'iOS (无签名)', '.app');
+  iosRelease('ios-release', 'iOS (无签名)', '.app'),
+
+  /// 通用产物（Node.js / HTML / Taro 等非移动端载荷）。
+  /// workflow 直接上传构建目录，产物为 zip。
+  generic('release', '构建产物', '.zip');
 
   /// workflow inputs.build_type 取值
   final String inputValue;
@@ -29,6 +33,17 @@ enum BuildType {
   const BuildType(this.inputValue, this.label, this.artifactExt);
 
   bool get isIos => this == BuildType.iosRelease;
+
+  /// 是否直接保存原始 zip（不解压寻找产物文件）
+  bool get savesRawZip => isIos || this == BuildType.generic;
+
+  /// 按 workflow_dispatch 的 build_type 取值查找构建类型
+  static BuildType? byInput(String id) {
+    for (final type in values) {
+      if (type.inputValue == id) return type;
+    }
+    return null;
+  }
 
   /// Gitee Go 可用的构建类型（无 macOS Runner）
   static List<BuildType> forHost({required bool supportsIos}) =>
@@ -51,23 +66,27 @@ class BuildService {
 
   static const String workflowFile = GitHubActionsTemplates.workflowPath;
 
-  /// 确保仓库中存在构建 workflow，缺失时自动推送
+  /// 确保仓库中存在构建 workflow，缺失时自动推送。
+  ///
+  /// [path] / [content] 由项目载荷（Payload）决定。
   Future<void> ensureWorkflow(
     GitHubApiService api,
     String repoFullName, {
     String branch = 'main',
+    String path = GitHubActionsTemplates.workflowPath,
+    String content = GitHubActionsTemplates.flutterBuildWorkflow,
   }) async {
-    final exists = await api.fileExists(repoFullName, workflowFile, branch);
+    final exists = await api.fileExists(repoFullName, path, branch);
     if (exists) return;
     await api.pushFiles(
       repoFullName,
       [
         RepoFile(
-          workflowFile,
-          Uint8List.fromList(utf8.encode(GitHubActionsTemplates.flutterBuildWorkflow)),
+          path,
+          Uint8List.fromList(utf8.encode(content)),
         ),
       ],
-      message: 'ci: add SLIPE build workflow',
+      message: 'ci: add SlipCode build workflow',
       branch: branch,
     );
   }
@@ -78,11 +97,12 @@ class BuildService {
     String repoFullName,
     BuildType type, {
     String branch = 'main',
+    String path = GitHubActionsTemplates.workflowPath,
   }) async {
     final triggeredAt = DateTime.now();
     await api.dispatchWorkflow(
       repoFullName,
-      workflowFile,
+      path,
       ref: branch,
       inputs: {'build_type': type.inputValue},
     );
@@ -140,7 +160,8 @@ class BuildService {
 
   /// 下载产物 zip 并解压出 APK/AAB 到 `项目目录/build/github/`
   ///
-  /// iOS 产物是未签名的 Runner.app 目录，直接保存原始 zip。
+  /// iOS 产物是未签名的 Runner.app 目录，通用载荷（Node/HTML/Taro）是
+  /// 构建目录，二者都直接保存原始 zip。
   Future<String?> downloadAndExtractArtifact(
     GitHubApiService api,
     String repoFullName,
@@ -153,8 +174,9 @@ class BuildService {
     final outDir = Directory(p.join(projectDir, 'build', 'github'));
     await outDir.create(recursive: true);
 
-    if (type.isIos) {
-      final outPath = p.join(outDir.path, 'slipecode-ios-unsigned.zip');
+    if (type.savesRawZip) {
+      final suffix = type.isIos ? 'ios-unsigned' : '${type.inputValue}-artifacts';
+      final outPath = p.join(outDir.path, 'slipecode-$suffix.zip');
       await File(outPath).writeAsBytes(zipBytes, flush: true);
       return outPath;
     }

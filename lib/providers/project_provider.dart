@@ -1,11 +1,12 @@
 import 'package:flutter/foundation.dart';
 import '../models/file_node.dart';
+import '../payloads/project_payload.dart';
 import '../services/file_service.dart';
 import '../services/project_history_service.dart';
 
 /// 项目状态 Provider
 ///
-/// 管理当前打开的项目路径和文件树
+/// 管理当前打开的项目路径、文件树与项目载荷（Payload）
 class ProjectProvider extends ChangeNotifier {
   final FileService _fileService = FileService();
 
@@ -14,6 +15,11 @@ class ProjectProvider extends ChangeNotifier {
 
   FileNode? _fileTree;
   FileNode? get fileTree => _fileTree;
+
+  ProjectPayload? _payload;
+
+  /// 当前项目载荷（决定模板 / 高亮 / Actions）
+  ProjectPayload get payload => _payload ?? PayloadRegistry.byId(null);
 
   bool _isLoading = false;
   bool get isLoading => _isLoading;
@@ -24,6 +30,7 @@ class ProjectProvider extends ChangeNotifier {
   /// 打开已有项目
   Future<void> openProject(String path) async {
     _projectPath = path;
+    _payload = await PayloadRegistry.detect(path);
     await refreshFileTree();
   }
 
@@ -31,6 +38,7 @@ class ProjectProvider extends ChangeNotifier {
   void closeProject() {
     _projectPath = null;
     _fileTree = null;
+    _payload = null;
     _error = null;
     notifyListeners();
   }

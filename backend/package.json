@@ -2,7 +2,7 @@
   "name": "slipecode-backend",
   "version": "1.0.0",
   "private": true,
-  "description": "SLIPE 账号与设置同步后端（同时为 Gitee OAuth 代理换取 token）",
+  "description": "SlipCode 账号与设置同步后端（同时为 Gitee OAuth 代理换取 token）",
   "type": "module",
   "main": "src/server.js",
   "engines": {

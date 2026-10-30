@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 
+import '../payloads/project_payload.dart';
 import '../services/build_service.dart';
 import '../services/git_host.dart';
 import '../services/gitee_go_templates.dart';
@@ -9,6 +10,7 @@ import '../services/github_api_service.dart' show RepoFile, RunArtifact;
 import 'git_sync_provider.dart';
 import 'gitee_provider.dart';
 import 'github_provider.dart';
+import 'project_provider.dart';
 
 /// 构建状态
 enum BuildStatus { idle, running, success, failed, cancelled }
@@ -22,11 +24,17 @@ enum BuildStatus { idle, running, success, failed, cancelled }
 /// Gitee 流程：同步代码 → 确保 Gitee Go 流水线 → push 触发 → 打开 Gitee 查看。
 /// （Gitee Go 没有公开的运行状态/产物下载 API）
 class BuildProvider extends ChangeNotifier {
-  BuildProvider(this._github, this._gitee, this._gitSync);
+  BuildProvider(this._github, this._gitee, this._gitSync, [this._project]);
 
   final GitHubProvider _github;
   final GiteeProvider _gitee;
   final GitSyncProvider _gitSync;
+
+  /// 用于读取当前项目的载荷（模板 / workflow / 构建类型）
+  final ProjectProvider? _project;
+
+  /// 当前项目载荷，未打开项目时退回默认载荷
+  ProjectPayload get payload => _project?.payload ?? PayloadRegistry.fallback;
 
   BuildStatus _status = BuildStatus.idle;
   BuildType _type = BuildType.apkRelease;
@@ -43,7 +51,13 @@ class BuildProvider extends ChangeNotifier {
   bool _disposed = false;
 
   BuildStatus get status => _status;
-  BuildType get type => _type;
+
+  /// 当前构建类型（当前载荷不支持时自动回退到第一个可用类型）
+  BuildType get type {
+    final types = availableTypes;
+    if (types.isEmpty || types.contains(_type)) return _type;
+    return types.first;
+  }
   List<String> get logs => List.unmodifiable(_logs);
   String? get artifactPath => _artifactPath;
   String get error => _error;
@@ -58,11 +72,22 @@ class BuildProvider extends ChangeNotifier {
   GitHost? get host => _gitSync.currentLink?.host;
 
   /// 当前平台可选的构建类型
-  List<BuildType> get availableTypes => switch (host) {
-        GitHost.github => BuildType.values,
-        GitHost.gitee => const [BuildType.apkRelease],
-        null => BuildType.values,
-      };
+  ///
+  /// 由项目载荷（Payload）声明，再按代码托管平台能力过滤。
+  List<BuildType> get availableTypes {
+    final types = payload.buildTypes
+        .map((t) => BuildType.byInput(t.id))
+        .whereType<BuildType>()
+        .toList();
+    if (types.isEmpty) return const [];
+    return switch (host) {
+      // Gitee Go 只有 Flutter 流水线，且没有 macOS Runner
+      GitHost.gitee =>
+        payload.supportsGitee ? types.where((t) => !t.isIos).toList() : const [],
+      GitHost.github => types,
+      null => types,
+    };
+  }
 
   Duration? get duration {
     if (_startedAt == null) return null;
@@ -113,8 +138,17 @@ class BuildProvider extends ChangeNotifier {
       return;
     }
     final host = link.host;
-    if (!availableTypes.contains(_type)) {
-      _type = BuildType.apkRelease;
+    final types = availableTypes;
+    if (types.isEmpty) {
+      _fail('当前项目载荷（${payload.name}）在 ${host.ciName} 上没有可用的构建类型');
+      return;
+    }
+    if (!types.contains(_type)) {
+      _type = types.first;
+    }
+    if (host == GitHost.gitee && !payload.supportsGitee) {
+      _fail('${payload.name} 项目暂不支持 Gitee Go 构建，请使用 GitHub');
+      return;
     }
     if (host == GitHost.gitee && !_gitee.isSignedIn) {
       _fail('尚未登录 Gitee');
@@ -173,13 +207,23 @@ class BuildProvider extends ChangeNotifier {
     final api = _github.api!;
 
     _currentTask = '检查构建 workflow';
-    _append('==> 检查 GitHub Actions workflow');
-    await BuildService.instance.ensureWorkflow(api, repo);
+    _append('==> 检查 GitHub Actions workflow（${payload.name}）');
+    await BuildService.instance.ensureWorkflow(
+      api,
+      repo,
+      path: payload.workflowPath,
+      content: payload.workflowContent,
+    );
     _append('    workflow 已就绪');
 
     _currentTask = '触发云端构建';
     _append('==> 触发 workflow_dispatch（build_type=${_type.inputValue}）');
-    final triggeredAt = await BuildService.instance.dispatch(api, repo, _type);
+    final triggeredAt = await BuildService.instance.dispatch(
+      api,
+      repo,
+      _type,
+      path: payload.workflowPath,
+    );
     _append('    已触发，等待运行开始...');
 
     _currentTask = '云端构建中';
@@ -254,7 +298,7 @@ class BuildProvider extends ChangeNotifier {
             ),
           ),
         ],
-        message: 'ci: add SLIPE Gitee Go pipeline',
+        message: 'ci: add SlipCode Gitee Go pipeline',
         branch: 'master',
       );
     } else {
@@ -273,7 +317,7 @@ class BuildProvider extends ChangeNotifier {
           ),
         ),
       ],
-      message: 'ci: trigger SLIPE build',
+      message: 'ci: trigger SlipCode build',
       branch: 'master',
     );
 
@@ -328,7 +372,7 @@ class BuildProvider extends ChangeNotifier {
   Future<bool> installArtifact() async {
     if (_artifactPath == null) return false;
     if (!_artifactPath!.endsWith('.apk')) {
-      _error = '该产物无法直接安装（iOS 产物为未签名 zip）';
+      _error = '该产物无法直接安装（仅 APK 可安装）';
       _safeNotify();
       return false;
     }

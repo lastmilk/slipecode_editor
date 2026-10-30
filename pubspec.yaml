@@ -73,6 +73,7 @@ flutter:
   assets:
     - .env
     - assets/logo/slipe_logo.jpg
+    - assets/skills/skill.md
     - assets/templates/app/pubspec.yaml.tmpl
     - assets/templates/app/main.dart.tmpl
     - assets/templates/app/analysis_options.yaml.tmpl

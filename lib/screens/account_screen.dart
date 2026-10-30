@@ -3,7 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../providers/account_provider.dart';
 
-/// SLIPE 独立账号页面（注册 / 登录 / 退出）
+/// SlipCode 独立账号页面（注册 / 登录 / 退出）
 class AccountScreen extends StatefulWidget {
   const AccountScreen({super.key});
 
@@ -69,7 +69,7 @@ class _AccountScreenState extends State<AccountScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('SLIPE 账号'),
+        title: const Text('SlipCode 账号'),
         elevation: 0,
       ),
       body: account.isSignedIn
@@ -184,7 +184,7 @@ class _AccountScreenState extends State<AccountScreen> {
               await account.signOut();
               if (!mounted) return;
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('已退出 SLIPE 账号')),
+                const SnackBar(content: Text('已退出 SlipCode 账号')),
               );
             },
             icon: const Icon(Icons.logout, size: 18),
@@ -268,7 +268,7 @@ class _AccountScreenState extends State<AccountScreen> {
           const SizedBox(height: 8),
           Center(
             child: Text(
-              _registerMode ? '创建 SLIPE 账号' : '登录 SLIPE 账号',
+              _registerMode ? '创建 SlipCode 账号' : '登录 SlipCode 账号',
               style: const TextStyle(
                 fontSize: 20,
                 fontWeight: FontWeight.bold,

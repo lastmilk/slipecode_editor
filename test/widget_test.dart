@@ -1,4 +1,4 @@
-// SLIPE 偏好设置模型测试
+// SlipCode 偏好设置模型测试
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:slipecode_editor/models/app_settings.dart';

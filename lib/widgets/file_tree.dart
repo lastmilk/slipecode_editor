@@ -3,16 +3,19 @@ import '../models/file_node.dart';
 
 /// 文件树组件
 ///
-/// 使用 ExpansionTile 递归实现，点击文件时回调
+/// 使用 ExpansionTile 递归实现，点击文件时回调；
+/// 长按文件/文件夹弹出重命名、删除等操作菜单。
 class FileTree extends StatelessWidget {
   final FileNode? root;
   final Function(String path) onFileTap;
+  final ValueChanged<FileNode>? onLongPress;
   final bool isLoading;
 
   const FileTree({
     super.key,
     this.root,
     required this.onFileTap,
+    this.onLongPress,
     this.isLoading = false,
   });
 
@@ -43,12 +46,14 @@ class FileTree extends StatelessWidget {
         node: node,
         depth: depth,
         onFileTap: onFileTap,
+        onLongPress: onLongPress,
       );
     } else {
       return _FileNode(
         node: node,
         depth: depth,
         onTap: () => onFileTap(node.path),
+        onLongPress: onLongPress == null ? null : () => onLongPress!(node),
       );
     }
   }
@@ -58,11 +63,13 @@ class _DirectoryNode extends StatefulWidget {
   final FileNode node;
   final int depth;
   final Function(String path) onFileTap;
+  final ValueChanged<FileNode>? onLongPress;
 
   const _DirectoryNode({
     required this.node,
     required this.depth,
     required this.onFileTap,
+    this.onLongPress,
   });
 
   @override
@@ -87,6 +94,9 @@ class _DirectoryNodeState extends State<_DirectoryNode> {
               _expanded = !_expanded;
             });
           },
+          onLongPress: widget.onLongPress == null
+              ? null
+              : () => widget.onLongPress!(widget.node),
           child: Container(
             padding: const EdgeInsets.symmetric(vertical: 4),
             child: Row(
@@ -133,12 +143,16 @@ class _DirectoryNodeState extends State<_DirectoryNode> {
         node: child,
         depth: widget.depth + 1,
         onFileTap: widget.onFileTap,
+        onLongPress: widget.onLongPress,
       );
     } else {
       return _FileNode(
         node: child,
         depth: widget.depth + 1,
         onTap: () => widget.onFileTap(child.path),
+        onLongPress: widget.onLongPress == null
+            ? null
+            : () => widget.onLongPress!(child),
       );
     }
   }
@@ -148,11 +162,13 @@ class _FileNode extends StatelessWidget {
   final FileNode node;
   final int depth;
   final VoidCallback onTap;
+  final VoidCallback? onLongPress;
 
   const _FileNode({
     required this.node,
     required this.depth,
     required this.onTap,
+    this.onLongPress,
   });
 
   @override
@@ -163,6 +179,7 @@ class _FileNode extends StatelessWidget {
 
     return InkWell(
       onTap: onTap,
+      onLongPress: onLongPress,
       hoverColor: Colors.grey.withValues(alpha: 0.1),
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 4),
@@ -211,7 +228,13 @@ class _FileNode extends StatelessWidget {
       case 'html':
       case 'kt':
       case 'java':
+      case 'tsx':
+      case 'ts':
         return Icons.code;
+      case 'css':
+        return Icons.brush;
+      case 'js':
+        return Icons.javascript;
       case 'png':
       case 'jpg':
       case 'gif':

@@ -632,6 +632,11 @@ async function handleLlmChat(req, res) {
 
   const upstreamBody = { model: config.model, messages: body.messages };
   if (body.temperature !== undefined) upstreamBody.temperature = body.temperature;
+  // Agent 的 MCP 工具调用需要透传 function-calling 参数
+  if (Array.isArray(body.tools) && body.tools.length > 0) {
+    upstreamBody.tools = body.tools;
+    if (body.tool_choice !== undefined) upstreamBody.tool_choice = body.tool_choice;
+  }
 
   let upstream;
   let text;

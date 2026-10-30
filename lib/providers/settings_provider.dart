@@ -9,7 +9,7 @@ import '../services/git_host.dart';
 
 /// 偏好设置状态管理
 ///
-/// 本地使用 SharedPreferences 持久化；登录 SLIPE 账号后，
+/// 本地使用 SharedPreferences 持久化；登录 SlipCode 账号后，
 /// 每次修改会通过 [attachRemoteSync] 注册的回调推送到后端。
 class SettingsProvider extends ChangeNotifier {
   static const _key = 'slipecode_app_settings';

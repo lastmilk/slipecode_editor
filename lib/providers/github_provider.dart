@@ -1,12 +1,11 @@
 import 'dart:async';
-import 'dart:convert';
-import 'dart:io';
+import 'dart:io' show SocketException;
 
 import 'package:flutter/foundation.dart';
-import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../config/app_config.dart';
+import '../payloads/project_payload.dart';
 import '../services/build_service.dart';
 import '../services/git_host.dart';
 import '../services/github_api_service.dart';
@@ -216,32 +215,20 @@ class GitHubProvider extends ChangeNotifier {
       branch: repo.defaultBranch,
     );
 
-    // 仅 app 模板项目需要 Android 构建 workflow
-    if (_isAppTemplate(projectPath) &&
-        !await client.fileExists(
-            repo.fullName, BuildService.workflowFile, repo.defaultBranch)) {
-      onLog?.call('==> 推送 GitHub Actions 构建 workflow');
+    // 按项目载荷推送对应的构建 workflow
+    final payload = await PayloadRegistry.detect(projectPath);
+    if (!await client.fileExists(
+        repo.fullName, payload.workflowPath, repo.defaultBranch)) {
+      onLog?.call('==> 推送 GitHub Actions 构建 workflow（${payload.name}）');
       await BuildService.instance.ensureWorkflow(
         client,
         repo.fullName,
         branch: repo.defaultBranch,
+        path: payload.workflowPath,
+        content: payload.workflowContent,
       );
     }
     onLog?.call('==> 完成');
     return repo;
-  }
-
-  /// 读取项目根目录 .slipecode.json，判断是否为 app 模板项目。
-  /// 文件缺失或解析失败时按 app 处理（保持旧行为）。
-  bool _isAppTemplate(String projectPath) {
-    try {
-      final metaFile = File(p.join(projectPath, '.slipecode.json'));
-      if (!metaFile.existsSync()) return true;
-      final meta = jsonDecode(metaFile.readAsStringSync());
-      if (meta is Map && meta['template'] is String) {
-        return meta['template'] == 'app';
-      }
-    } catch (_) {}
-    return true;
   }
 }

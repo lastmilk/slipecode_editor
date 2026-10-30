@@ -87,7 +87,11 @@ class FileService {
   }
 
   /// 创建新文件
-  Future<File> createFile(String dirPath, String fileName) async {
+  Future<File> createFile(
+    String dirPath,
+    String fileName, {
+    String content = '',
+  }) async {
     final dir = Directory(dirPath);
     if (!await dir.exists()) {
       await dir.create(recursive: true);
@@ -96,7 +100,7 @@ class FileService {
     if (await file.exists()) {
       throw Exception('File already exists: ${file.path}');
     }
-    return await file.create();
+    return await file.writeAsString(content, flush: true);
   }
 
   /// 创建新目录
@@ -120,6 +124,31 @@ class FileService {
     } else {
       throw Exception('Path not found: $path');
     }
+  }
+
+  /// 重命名文件或目录，返回新路径
+  Future<String> renameEntity(String path, String newName) async {
+    final name = newName.trim();
+    if (name.isEmpty) throw Exception('名称不能为空');
+    if (name.contains('/') || name.contains(r'\')) {
+      throw Exception('名称不能包含路径分隔符');
+    }
+
+    final parent = p.dirname(path);
+    final target = p.join(parent, name);
+    if (target == path) return path;
+    if (await File(target).exists() || await Directory(target).exists()) {
+      throw Exception('同名文件或目录已存在: $name');
+    }
+
+    if (await File(path).exists()) {
+      await File(path).rename(target);
+    } else if (await Directory(path).exists()) {
+      await Directory(path).rename(target);
+    } else {
+      throw Exception('Path not found: $path');
+    }
+    return target;
   }
 
   /// 判断文件是否是代码文件

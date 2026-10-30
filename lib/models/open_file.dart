@@ -7,7 +7,8 @@ class OpenFile {
   OpenFile({
     required this.path,
     required this.content,
-  }) : originalContent = content;
+    String? originalContent,
+  }) : originalContent = originalContent ?? content;
 
   bool get isModified => content != originalContent;
 

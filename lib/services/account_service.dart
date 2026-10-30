@@ -5,7 +5,7 @@ import 'package:http/http.dart' as http;
 
 import '../config/app_config.dart';
 
-/// SLIPE 账号用户
+/// SlipCode 账号用户
 class AccountUser {
   final String id;
   final String email;

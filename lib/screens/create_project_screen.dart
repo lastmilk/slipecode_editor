@@ -8,8 +8,9 @@ import '../providers/gitee_provider.dart';
 import '../providers/github_provider.dart';
 import '../providers/project_provider.dart';
 import '../providers/settings_provider.dart';
-import '../services/flutter_service.dart';
+import '../payloads/project_payload.dart';
 import '../services/git_host.dart';
+import '../services/project_create_service.dart';
 
 /// 创建新项目页面
 class CreateProjectScreen extends StatefulWidget {
@@ -28,6 +29,11 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
 
   String _template = 'app';
   bool _isCreating = false;
+
+  /// 当前选中的项目载荷（决定模板、高亮与 GitHub Actions）
+  String _payloadId = PayloadRegistry.fallback.id;
+
+  ProjectPayload get _payload => PayloadRegistry.byId(_payloadId);
 
   /// 是否创建远程仓库并推送模板文件
   bool _createRepo = true;
@@ -89,11 +95,12 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
       _outputLines.clear();
     });
 
-    final flutterService = FlutterService();
+    final createService = ProjectCreateService();
     final projectProvider = context.read<ProjectProvider>();
 
     try {
-      await for (final line in flutterService.createProject(
+      await for (final line in createService.createProject(
+        payload: _payload,
         projectName: _nameController.text.trim(),
         targetPath: _targetPath,
         org: _orgController.text.trim(),
@@ -213,11 +220,11 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
             TextFormField(
               controller: _nameController,
               enabled: !_isCreating,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 labelText: '项目名称',
-                hintText: 'my_flutter_app',
-                border: OutlineInputBorder(),
-                prefixIcon: Icon(Icons.badge),
+                hintText: _payload.projectNameHint,
+                border: const OutlineInputBorder(),
+                prefixIcon: const Icon(Icons.badge),
               ),
               textInputAction: TextInputAction.next,
               validator: (value) {
@@ -277,9 +284,9 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
             ),
             const SizedBox(height: 20),
 
-            // 模板选择
+            // 项目载荷（决定模板代码 / 语法高亮 / GitHub Actions）
             Text(
-              '模板类型',
+              '项目类型（Payload）',
               style: TextStyle(
                 fontSize: 14,
                 fontWeight: FontWeight.w500,
@@ -290,13 +297,42 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
             Wrap(
               spacing: 8,
               runSpacing: 8,
-              children: [
-                _buildTemplateChip('app', '应用', isDark),
-                _buildTemplateChip('package', '包', isDark),
-                _buildTemplateChip('plugin', '插件', isDark),
-              ],
+              children: PayloadRegistry.all
+                  .map((payload) => _buildPayloadChip(payload, isDark))
+                  .toList(),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              _payload.description,
+              style: TextStyle(
+                fontSize: 11,
+                color: isDark ? Colors.white38 : Colors.black45,
+              ),
             ),
             const SizedBox(height: 20),
+
+            // Flutter 载荷的模板细分（应用 / 包 / 插件）
+            if (_payload.isFlutter) ...[
+              Text(
+                '模板类型',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                  color: isDark ? Colors.white70 : Colors.black54,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  _buildTemplateChip('app', '应用', isDark),
+                  _buildTemplateChip('package', '包', isDark),
+                  _buildTemplateChip('plugin', '插件', isDark),
+                ],
+              ),
+              const SizedBox(height: 20),
+            ],
 
             // 远程仓库选项
             _buildRepoOptions(isDark),
@@ -490,6 +526,25 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
             ),
           ],
         ],
+      ),
+    );
+  }
+
+  Widget _buildPayloadChip(ProjectPayload payload, bool isDark) {
+    final isSelected = _payloadId == payload.id;
+    return ChoiceChip(
+      avatar: Icon(
+        payload.icon,
+        size: 16,
+        color: isSelected ? Colors.white : (isDark ? Colors.white70 : Colors.black87),
+      ),
+      label: Text(payload.name),
+      selected: isSelected,
+      onSelected: _isCreating ? null : (_) => setState(() => _payloadId = payload.id),
+      selectedColor: Colors.blueAccent,
+      backgroundColor: isDark ? const Color(0xFF2D2D30) : const Color(0xFFF0F0F0),
+      labelStyle: TextStyle(
+        color: isSelected ? Colors.white : (isDark ? Colors.white70 : Colors.black87),
       ),
     );
   }

@@ -12,7 +12,7 @@ class GitHubActionsTemplates {
 
   /// Flutter 构建工作流
   static const String flutterBuildWorkflow = r'''
-name: SLIPE Build
+name: SlipCode Build
 
 on:
   push:

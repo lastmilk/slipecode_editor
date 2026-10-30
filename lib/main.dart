@@ -51,16 +51,18 @@ Future<void> main() async {
     githubProvider,
     giteeProvider,
     gitSyncProvider,
+    projectProvider,
   );
   // AI 助手（Agent 面板依赖它；未注册会导致侧边栏 Agent 页空白）
   final aiProvider = AiProvider(
     settingsProvider,
     editorProvider,
     buildProvider,
+    projectProvider,
   );
 
   runApp(
-    SLIPEApp(
+    SlipCodeApp(
       settingsProvider: settingsProvider,
       accountProvider: accountProvider,
       githubProvider: githubProvider,
@@ -100,8 +102,8 @@ Future<void> _initAuthInBackground(
   ]);
 }
 
-class SLIPEApp extends StatelessWidget {
-  const SLIPEApp({
+class SlipCodeApp extends StatelessWidget {
+  const SlipCodeApp({
     super.key,
     required this.settingsProvider,
     required this.accountProvider,
