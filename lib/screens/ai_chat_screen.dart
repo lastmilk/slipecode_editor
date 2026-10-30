@@ -1,20 +1,20 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:markdown/markdown.dart' as md;
 import 'package:provider/provider.dart';
 
 import '../providers/ai_provider.dart';
-import '../providers/build_provider.dart';
-import '../providers/editor_provider.dart';
-import '../providers/project_provider.dart';
 import '../providers/settings_provider.dart';
 import '../services/llm_service.dart';
 import 'settings_screen.dart';
 
 /// AI 助手对话面板
 ///
-/// 作为普通面板内嵌到编辑器侧边栏的「Agent」标签页。支持：
-/// - 自然语言对话
-/// - 把当前文件发给 AI 编辑
+/// 作为普通面板内嵌到编辑器侧边栏的「Agent」标签页：
+/// - 流式输出 + Markdown 渲染
 /// - Agent 通过 MCP 工具自动读写文件、创建 Dart 类、触发云端构建
+/// - 对话记录本地保存（可选同步云端）
 class AiChatScreen extends StatefulWidget {
   const AiChatScreen({super.key});
 
@@ -27,6 +27,16 @@ class _AiChatScreenState extends State<AiChatScreen> {
   final ScrollController _scrollController = ScrollController();
 
   @override
+  void initState() {
+    super.initState();
+    // 首次打开时加载本地记录（开启云同步则拉取云端）
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      context.read<AiProvider>().ensureCloudHistoryLoaded();
+    });
+  }
+
+  @override
   void dispose() {
     _inputController.dispose();
     _scrollController.dispose();
@@ -35,13 +45,12 @@ class _AiChatScreenState extends State<AiChatScreen> {
 
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients) {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeOut,
-        );
-      }
+      if (!_scrollController.hasClients) return;
+      _scrollController.animateTo(
+        _scrollController.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeOut,
+      );
     });
   }
 
@@ -53,36 +62,19 @@ class _AiChatScreenState extends State<AiChatScreen> {
     _scrollToBottom();
   }
 
-  /// 把当前文件附带指令一起发给 AI
-  Future<void> _sendWithFile(String instruction) async {
-    await context.read<AiProvider>().sendWithCurrentFile(instruction);
-    _scrollToBottom();
-  }
-
-  /// 触发云端构建
-  Future<void> _triggerBuild() async {
-    final build = context.read<BuildProvider>();
-    if (build.isRunning) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('构建已在进行中')));
-      return;
-    }
-    // 侧边栏内嵌面板，无需关闭抽屉，直接启动构建
-    final projectPath = context.read<ProjectProvider>().projectPath;
-    if (projectPath == null) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('未打开项目，无法构建')));
-      return;
-    }
-    await build.startBuild(projectDir: projectPath);
-  }
-
   @override
   Widget build(BuildContext context) {
     final ai = context.watch<AiProvider>();
     final settings = context.watch<SettingsProvider>().settings;
-    final editor = context.watch<EditorProvider>();
     final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    // 流式输出时保持滚动到底部
+    if (ai.isStreaming) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!_scrollController.hasClients) return;
+        _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
+      });
+    }
 
     return Column(
       children: [
@@ -141,7 +133,7 @@ class _AiChatScreenState extends State<AiChatScreen> {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    '未配置 LLM。点击右上角设置填写 API 地址、Key 和模型。',
+                    '未配置 LLM。点击右上角设置添加模型（支持 OpenAI / DeepSeek / 通义等）。',
                     style: TextStyle(
                       fontSize: 12,
                       color: isDark
@@ -154,46 +146,9 @@ class _AiChatScreenState extends State<AiChatScreen> {
             ),
           ),
 
-        // 快捷操作
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-          child: Wrap(
-            spacing: 6,
-            runSpacing: 4,
-            children: [
-              _QuickChip(
-                icon: Icons.description,
-                label: '解释当前文件',
-                onTap: editor.hasActiveFile
-                    ? () => _sendWithFile('请解释这个文件的代码逻辑')
-                    : null,
-              ),
-              _QuickChip(
-                icon: Icons.bug_report,
-                label: '修复问题',
-                onTap: editor.hasActiveFile
-                    ? () => _sendWithFile('检查并修复这个文件中的问题，直接用工具修改文件')
-                    : null,
-              ),
-              _QuickChip(
-                icon: Icons.auto_fix_high,
-                label: '优化代码',
-                onTap: editor.hasActiveFile
-                    ? () => _sendWithFile('优化这个文件的代码，直接用工具修改文件')
-                    : null,
-              ),
-              _QuickChip(
-                icon: Icons.cloud_upload,
-                label: '云端构建',
-                onTap: _triggerBuild,
-              ),
-            ],
-          ),
-        ),
-
         // 消息列表
         Expanded(
-          child: ai.messages.isEmpty
+          child: ai.messages.isEmpty && !ai.isStreaming
               ? Center(
                   child: Padding(
                     padding: const EdgeInsets.all(24),
@@ -207,10 +162,11 @@ class _AiChatScreenState extends State<AiChatScreen> {
                         ),
                         const SizedBox(height: 12),
                         Text(
-                          '有什么可以帮你的？\n试试让我解释、修复或优化当前打开的文件。',
+                          '有什么可以帮你的？\nAgent 可以直接读写项目文件、创建 Dart 类并触发云端构建。',
                           textAlign: TextAlign.center,
                           style: TextStyle(
                             fontSize: 13,
+                            height: 1.5,
                             color: isDark ? Colors.white38 : Colors.black45,
                           ),
                         ),
@@ -221,10 +177,25 @@ class _AiChatScreenState extends State<AiChatScreen> {
               : ListView.builder(
                   controller: _scrollController,
                   padding: const EdgeInsets.all(12),
-                  itemCount: ai.messages.length,
+                  itemCount: ai.messages.length + (ai.isStreaming ? 1 : 0),
                   itemBuilder: (context, index) {
+                    if (index >= ai.messages.length) {
+                      return _MessageBubble(
+                        content: ai.streamingText.isEmpty
+                            ? '思考中…'
+                            : ai.streamingText,
+                        isUser: false,
+                        isDark: isDark,
+                        streaming: true,
+                      );
+                    }
                     final msg = ai.messages[index];
-                    return _MessageBubble(message: msg, isDark: isDark);
+                    return _MessageBubble(
+                      content: msg.content,
+                      isUser: msg.role == ChatRole.user,
+                      isDark: isDark,
+                      streaming: false,
+                    );
                   },
                 ),
         ),
@@ -352,19 +323,22 @@ class _AiChatScreenState extends State<AiChatScreen> {
   }
 }
 
-/// 单条消息气泡
+/// 单条消息气泡（AI 回复使用 Markdown 渲染）
 class _MessageBubble extends StatelessWidget {
-  const _MessageBubble({required this.message, required this.isDark});
+  const _MessageBubble({
+    required this.content,
+    required this.isUser,
+    required this.isDark,
+    required this.streaming,
+  });
 
-  final ChatMessage message;
+  final String content;
+  final bool isUser;
   final bool isDark;
+  final bool streaming;
 
   @override
   Widget build(BuildContext context) {
-    final isUser = message.role == ChatRole.user;
-    if (message.role == ChatRole.system) {
-      return const SizedBox.shrink();
-    }
     return Padding(
       padding: EdgeInsets.only(
         bottom: 10,
@@ -414,38 +388,152 @@ class _MessageBubble extends StatelessWidget {
                     ],
                   ),
                 ),
-              Text(
-                message.content,
-                style: TextStyle(
-                  fontSize: 13,
-                  height: 1.5,
-                  color: isUser
-                      ? Colors.white
-                      : (isDark ? Colors.white : Colors.black87),
+              if (isUser)
+                Text(
+                  content,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    height: 1.5,
+                    color: Colors.white,
+                  ),
+                )
+              else
+                MarkdownBody(
+                  data: streaming ? '$content ▌' : content,
+                  selectable: true,
+                  styleSheet: _styleSheet(isDark),
+                  builders: {'pre': _CodeBlockBuilder(isDark)},
                 ),
-              ),
             ],
           ),
         ),
       ),
     );
   }
+
+  MarkdownStyleSheet _styleSheet(bool isDark) {
+    final textColor = isDark ? Colors.white : Colors.black87;
+    return MarkdownStyleSheet(
+      p: TextStyle(fontSize: 13, height: 1.5, color: textColor),
+      h1: TextStyle(
+        fontSize: 18,
+        fontWeight: FontWeight.bold,
+        color: textColor,
+      ),
+      h2: TextStyle(
+        fontSize: 16,
+        fontWeight: FontWeight.bold,
+        color: textColor,
+      ),
+      h3: TextStyle(
+        fontSize: 14,
+        fontWeight: FontWeight.w600,
+        color: textColor,
+      ),
+      code: TextStyle(
+        fontFamily: 'monospace',
+        fontSize: 12,
+        backgroundColor: isDark ? const Color(0xFF1E1E1E) : const Color(0xFFF0F2F5),
+        color: isDark ? const Color(0xFFCE9178) : const Color(0xFFB31D28),
+      ),
+      codeblockDecoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1E1E1E) : const Color(0xFFF6F8FA),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(
+          color: isDark ? const Color(0xFF3C3C3C) : const Color(0xFFE0E4E8),
+        ),
+      ),
+      blockquoteDecoration: BoxDecoration(
+        color: isDark ? const Color(0xFF232323) : const Color(0xFFF5F7FA),
+        border: Border(left: BorderSide(color: Colors.blueAccent, width: 3)),
+      ),
+      listBullet: TextStyle(fontSize: 13, color: textColor),
+      a: const TextStyle(color: Colors.blueAccent),
+    );
+  }
 }
 
-/// 快捷操作芯片
-class _QuickChip extends StatelessWidget {
-  const _QuickChip({required this.icon, required this.label, this.onTap});
+/// 代码块：横向滚动 + 复制按钮
+class _CodeBlockBuilder extends MarkdownElementBuilder {
+  _CodeBlockBuilder(this.isDark);
 
-  final IconData icon;
-  final String label;
-  final VoidCallback? onTap;
+  final bool isDark;
+
+  @override
+  Widget? visitElementAfter(md.Element element, TextStyle? preferredStyle) {
+    return _CodeBlock(code: element.textContent, isDark: isDark);
+  }
+}
+
+class _CodeBlock extends StatelessWidget {
+  const _CodeBlock({required this.code, required this.isDark});
+
+  final String code;
+  final bool isDark;
 
   @override
   Widget build(BuildContext context) {
-    return ActionChip(
-      avatar: Icon(icon, size: 14),
-      label: Text(label, style: const TextStyle(fontSize: 11)),
-      onPressed: onTap,
+    final text = code.endsWith('\n') ? code : '$code\n';
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.symmetric(vertical: 6),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1E1E1E) : const Color(0xFFF6F8FA),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(
+          color: isDark ? const Color(0xFF3C3C3C) : const Color(0xFFE0E4E8),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  '代码',
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: isDark ? Colors.white38 : Colors.black38,
+                  ),
+                ),
+              ),
+              TextButton.icon(
+                style: TextButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                ),
+                onPressed: () async {
+                  await Clipboard.setData(ClipboardData(text: text));
+                  if (!context.mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('已复制代码'),
+                      duration: Duration(seconds: 1),
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.copy, size: 13),
+                label: const Text('复制', style: TextStyle(fontSize: 11)),
+              ),
+            ],
+          ),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+            child: Text(
+              text,
+              style: TextStyle(
+                fontFamily: 'monospace',
+                fontSize: 12,
+                height: 1.45,
+                color: isDark ? const Color(0xFFD4D4D4) : const Color(0xFF1F2328),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

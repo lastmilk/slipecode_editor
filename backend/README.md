@@ -2,8 +2,11 @@
 
 零第三方依赖的 Node.js 后端，为 SLIPE 提供：
 
-- 独立账号体系（注册 / 登录 / 用户信息）
+- 独立账号体系（注册 / 登录 / 用户信息，注册需手机号短信验证）
+- 极验 GT4 行为验证（登录 / 注册前校验，可开关）
+- 阿里云短信验证码（DyPnsApi 2017-05-25，未配置凭据时自动降级为开发模式）
 - 用户偏好设置的多设备同步
+- 项目列表 / AI 对话记录 / 头像 / 壁纸的云端同步
 - Gitee OAuth token 代理（Gitee 不支持 PKCE，必须由后端持有 `client_secret`）
 - 积分体系：每日签到 +100 积分，积分用于抵扣内置 LLM 调用
 - LLM 内置代理：OpenAI 兼容 `/chat/completions`，按 token 计积分
@@ -36,6 +39,17 @@ npm start
 | `GITHUB_REDIRECT_URI` | 否 | GitHub OAuth App 里登记的 callback URL，默认 `https://ser1996.niav.cn/api/oauth/github/callback` |
 | `GITHUB_DEEP_LINK` | 否 | 换 token 后 302 回 App 的深链，默认 `slipecode://oauth/callback` |
 | `ADMIN_TOKEN` | 生产必填 | 管理端访问令牌，**必须改为足够长的随机串**；未设置时使用代码内的开发默认值（启动时会打印警告） |
+| `GEETEST_CAPTCHA_ID` | 生产必填 | 极验 GT4 Captcha ID（登录 / 注册二次校验） |
+| `GEETEST_CAPTCHA_KEY` | 生产必填 | 极验 GT4 Captcha Key（HMAC-SHA256 校验 sign_token） |
+| `GEETEST_ENFORCE` | 否 | 默认 `1`：强制校验极验；设为 `0` 可临时关闭 |
+| `ALIYUN_ACCESS_KEY_ID` | 短信必填 | 阿里云 AccessKey ID（未配置时进入短信开发模式，固定验证码 `123456`） |
+| `ALIYUN_ACCESS_KEY_SECRET` | 短信必填 | 阿里云 AccessKey Secret |
+| `ALIYUN_SMS_SIGN_NAME` | 否 | 短信签名，默认 `恒创联众` |
+| `ALIYUN_SMS_TEMPLATE_CODE` | 否 | 短信模板 Code，默认 `100001` |
+| `UPLOAD_DIR` | 否 | 头像 / 壁纸上传目录，默认 `backend/data/uploads` |
+| `UPLOAD_BODY_LIMIT` | 否 | 上传请求体上限，默认 `8388608`（8MB） |
+| `AVATAR_MAX` | 否 | 头像大小上限，默认 `2097152`（2MB） |
+| `WALLPAPER_MAX` | 否 | 壁纸大小上限，默认 `5242880`（5MB） |
 
 启动示例：
 
@@ -52,8 +66,20 @@ node src/server.js
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | `GET` | `/api/health` | 健康检查 |
-| `POST` | `/api/auth/register` | `{email, password, displayName}` → `{token, user}` |
-| `POST` | `/api/auth/login` | `{email, password}` → `{token, user}` |
+| `POST` | `/api/auth/register` | `{email, password, displayName, phone, smsCode, captcha?, captchaPlatform}` → `{token, user}` |
+| `POST` | `/api/auth/login` | `{email, password, captcha?, captchaPlatform}` → `{token, user}` |
+| `POST` | `/api/auth/sms/send` | `{phone}` → 发送注册短信验证码（开发模式返回 `{devMode: true, devCode: '123456'}`；同一号码 60 秒内限 1 次、每日限 5 次） |
+| `POST` | `/api/auth/captcha/validate` | 极验二次校验（App 一般不需要直接调用，注册 / 登录接口内部已校验） |
+| `GET` | `/api/projects` | 需登录，返回云端项目列表（路径 + 仓库映射 + 最近编辑时间，≤100 条） |
+| `PUT` | `/api/projects` | 需登录，`{projects}` 全量保存项目列表 |
+| `GET` | `/api/chat/history` | 需登录，返回 AI 对话记录（≤200 条） |
+| `PUT` | `/api/chat/history` | 需登录，`{messages}` 全量保存对话记录 |
+| `DELETE` | `/api/chat/history` | 需登录，清空对话记录 |
+| `POST` | `/api/me/avatar` | 需登录，`{dataBase64, mime}` 上传头像（png/jpg/webp，≤2MB） |
+| `GET` | `/api/avatars/:userId` | 获取用户头像（支持 `?v=` 缓存破坏） |
+| `POST` | `/api/me/wallpaper` | 需登录，`{dataBase64, mime}` 上传壁纸（png/jpg/webp，≤5MB） |
+| `GET` | `/api/me/wallpaper` | 需登录，下载壁纸 `{mime, version, dataBase64}` |
+| `DELETE` | `/api/me/wallpaper` | 需登录，删除云端壁纸 |
 | `GET` | `/api/me` | 需 `Authorization: Bearer <token>`，返回当前用户 |
 | `GET` | `/api/settings` | 需登录，返回 `{settings}` |
 | `PUT` | `/api/settings` | 需登录，`{settings}` 保存偏好设置 |

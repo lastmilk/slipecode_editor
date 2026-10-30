@@ -1,12 +1,8 @@
-import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 
-import '../providers/settings_provider.dart';
 import '../services/completion_service.dart';
-import '../services/llm_service.dart';
 import 'code_highlighter.dart';
 
 /// 代码编辑器组件
@@ -37,6 +33,12 @@ class CodeEditor extends StatefulWidget {
   /// 是否使用半透明背景（背景图模式下为 true）
   final bool translucent;
 
+  /// VibeCoding 触发回调：用户在行首输入 `..需求` 并回车后调用
+  ///
+  /// 参数：需求文本、触发词起始偏移、触发词结束偏移（不含换行）。
+  final void Function(String requirement, int lineStart, int lineEnd)?
+      onVibeRequest;
+
   const CodeEditor({
     super.key,
     this.initialContent = '',
@@ -46,6 +48,7 @@ class CodeEditor extends StatefulWidget {
     this.fontSize = 14,
     this.enableCompletion = true,
     this.translucent = false,
+    this.onVibeRequest,
   });
 
   @override
@@ -73,17 +76,14 @@ class CodeEditorState extends State<CodeEditor> {
   bool _isDark = false;
   SyntaxColors _colors = SyntaxColors.of(isDark: false);
 
-  // VibeCoding：输入 `..需求` / `。。需求` 后自动调用远端 LLM 并插入代码
-  Timer? _vibeTimer;
-  Timer? _vibeMessageTimer;
-  bool _vibeBusy = false;
-  String? _vibeMessage;
-  String? _lastVibeKey;
+  /// 上一次的文本（用于检测「用户刚输入了一个换行」）
+  String _lastText = '';
 
   @override
   void initState() {
     super.initState();
     _colors = SyntaxColors.of(isDark: false);
+    _lastText = widget.initialContent;
     _controller = HighlightingController(
       text: widget.initialContent,
       language: widget.language,
@@ -120,8 +120,6 @@ class CodeEditorState extends State<CodeEditor> {
 
   @override
   void dispose() {
-    _vibeTimer?.cancel();
-    _vibeMessageTimer?.cancel();
     _controller.removeListener(_onTextChanged);
     _controller.dispose();
     _focusNode.dispose();
@@ -130,164 +128,34 @@ class CodeEditorState extends State<CodeEditor> {
   }
 
   // ---------------------------------------------------------------------------
-  // VibeCoding
+  // VibeCoding：输入 `..需求` / `。。需求` 后按回车触发
   // ---------------------------------------------------------------------------
 
-  /// 解析光标前的 `..需求` / `。。需求` 触发词
-  _VibeRequest? _detectVibeRequest() {
+  /// 检测「刚输入了一个换行」且上一行是 `..需求` 触发词
+  ///
+  /// 只在确实新增了一个换行时触发，避免粘贴多行文本误触发。
+  void _detectVibeOnEnter() {
     final text = _controller.text;
+    final previous = _lastText;
+    _lastText = text;
+
+    if (widget.readOnly || widget.onVibeRequest == null) return;
     final cursor = _controller.selection.baseOffset;
-    if (cursor <= 0 || cursor > text.length) return null;
+    if (cursor <= 0 || cursor > text.length) return;
+    if (text[cursor - 1] != '\n') return;
+    // 只处理「在原文本的光标处插入了一个换行」
+    if (previous.length + 1 != text.length) return;
+    final lineEnd = cursor - 1;
+    if (!previous.startsWith(text.substring(0, lineEnd))) return;
 
-    final lineStart = text.lastIndexOf('\n', cursor - 1) + 1;
-    final line = text.substring(lineStart, cursor).trimRight();
-    final match = RegExp(r'^(.*?)(?:\.\.|。。)(.+)$').firstMatch(line);
-    if (match == null) return null;
+    final lineStart = lineEnd == 0 ? 0 : text.lastIndexOf('\n', lineEnd - 1) + 1;
+    final line = text.substring(lineStart, lineEnd);
+    final match = RegExp(r'^\s*(?:\.\.|。。)(.+)$').firstMatch(line);
+    if (match == null) return;
+    final requirement = match.group(1)!.trim();
+    if (requirement.isEmpty) return;
 
-    // 只识别「行首（缩进后）以 .. 开头」的写法，避免误判 Dart 级联操作符（如 list..add(1)）
-    final indent = match.group(1)!;
-    if (indent.trim().isNotEmpty) return null;
-
-    final requirement = match.group(3)!.trim();
-    if (requirement.isEmpty) return null;
-
-    return _VibeRequest(
-      start: lineStart + indent.length,
-      end: cursor,
-      requirement: requirement,
-      indent: indent,
-      trigger: text.substring(lineStart + indent.length, cursor),
-    );
-  }
-
-  void _scheduleVibeCoding() {
-    if (widget.readOnly) return;
-    _vibeTimer?.cancel();
-    if (_vibeBusy) return;
-
-    final request = _detectVibeRequest();
-    if (request == null) {
-      _lastVibeKey = null;
-      return;
-    }
-    final key = '${request.start}:${request.requirement}';
-    if (key == _lastVibeKey) return;
-    _vibeTimer = Timer(const Duration(milliseconds: 700), () {
-      _runVibeCoding(request, key);
-    });
-  }
-
-  void _showVibeMessage(String? message, {bool autoClear = true}) {
-    _vibeMessageTimer?.cancel();
-    setState(() => _vibeMessage = message);
-    if (message != null && autoClear) {
-      _vibeMessageTimer = Timer(const Duration(seconds: 3), () {
-        if (mounted) setState(() => _vibeMessage = null);
-      });
-    }
-  }
-
-  Future<void> _runVibeCoding(_VibeRequest request, String key) async {
-    if (!mounted || _vibeBusy) return;
-    final settings = context.read<SettingsProvider>().settings;
-    if (!settings.isLlmConfigured) {
-      _lastVibeKey = key;
-      _showVibeMessage('未配置 LLM：请在「偏好设置 → AI 助手」填写 API 地址 / Key / 模型');
-      return;
-    }
-
-    final sourceText = _controller.text;
-    if (!sourceText.contains(request.trigger)) return;
-
-    setState(() {
-      _vibeBusy = true;
-      _vibeMessage = 'VibeCoding 生成中…';
-    });
-
-    final before = sourceText.substring(0, request.start);
-    final after = sourceText.substring(request.end);
-    final prefix = before.length > 4000
-        ? before.substring(before.length - 4000)
-        : before;
-    final suffix = after.length > 1500 ? after.substring(0, 1500) : after;
-
-    try {
-      final reply = await LlmService.instance.chat(
-        apiBase: settings.llmApiBase,
-        apiKey: settings.llmApiKey,
-        model: settings.llmModel,
-        messages: [
-          ChatMessage(
-            role: ChatRole.system,
-            content: '你是 SLIPE 编辑器内置的 VibeCoding 代码生成器。'
-                '当前高亮语言：${widget.language}。'
-                '只输出需要插入的代码，不要解释，不要使用 Markdown 代码围栏。'
-                '代码要能直接粘贴到光标位置并保持可编译。',
-          ),
-          ChatMessage(
-            role: ChatRole.user,
-            content: '需求：${request.requirement}\n\n'
-                '当前文件（<CURSOR> 标记需要插入代码的位置）：\n'
-                '$prefix<CURSOR>$suffix',
-          ),
-        ],
-      );
-
-      if (!mounted) return;
-
-      // 生成期间文本若已变化，放弃本次结果，避免插入到错误位置
-      final current = _controller.text;
-      if (request.end > current.length ||
-          current.substring(request.start, request.end) != request.trigger) {
-        setState(() => _vibeBusy = false);
-        _showVibeMessage('文本已变化，本次 VibeCoding 结果已丢弃');
-        return;
-      }
-
-      var code = _unwrapCode(reply);
-      if (code.trim().isEmpty) {
-        setState(() => _vibeBusy = false);
-        _showVibeMessage('LLM 没有返回可插入的代码');
-        return;
-      }
-
-      // 保持原有缩进：第一行沿用当前缩进，后续行补齐
-      final lines = code.split('\n');
-      if (request.indent.isNotEmpty) {
-        for (var i = 1; i < lines.length; i++) {
-          if (lines[i].trim().isEmpty) {
-            lines[i] = '';
-          } else {
-            lines[i] = '${request.indent}${lines[i]}';
-          }
-        }
-      }
-      code = lines.join('\n');
-
-      final newText = current.replaceRange(request.start, request.end, code);
-      _controller.value = TextEditingValue(
-        text: newText,
-        selection: TextSelection.collapsed(
-          offset: request.start + code.length,
-        ),
-      );
-      widget.onChanged?.call(newText);
-      _lastVibeKey = key;
-      setState(() => _vibeBusy = false);
-      _showVibeMessage('✓ VibeCoding 已插入 ${lines.length} 行代码');
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _vibeBusy = false);
-      _showVibeMessage('VibeCoding 失败：$e');
-    }
-  }
-
-  /// 去掉 Markdown 代码围栏，只保留代码
-  String _unwrapCode(String reply) {
-    final fence = RegExp(r'```[\w-]*\n([\s\S]*?)```');
-    final match = fence.firstMatch(reply);
-    if (match != null) return match.group(1)!.trimRight();
-    return reply.trimRight();
+    widget.onVibeRequest!(requirement, lineStart, lineEnd);
   }
 
   // ---------------------------------------------------------------------------
@@ -295,7 +163,7 @@ class CodeEditorState extends State<CodeEditor> {
   // ---------------------------------------------------------------------------
 
   void _onTextChanged() {
-    _scheduleVibeCoding();
+    _detectVibeOnEnter();
     if (!widget.enableCompletion || widget.readOnly) {
       if (_suggestions.isNotEmpty) setState(() => _suggestions = const []);
       return;
@@ -435,7 +303,6 @@ class CodeEditorState extends State<CodeEditor> {
       color: background,
       child: Column(
         children: [
-          if (_vibeBusy || _vibeMessage != null) _buildVibeBar(isDark),
           if (widget.enableCompletion && hasSuggestions)
             _buildSuggestionBar(isDark),
           Expanded(
@@ -463,40 +330,6 @@ class CodeEditorState extends State<CodeEditor> {
               enableInteractiveSelection: true,
               onChanged: widget.onChanged,
               onTap: _onTextChanged,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// VibeCoding 状态条（生成中 / 结果提示）
-  Widget _buildVibeBar(bool isDark) {
-    final busy = _vibeBusy;
-    return Container(
-      width: double.infinity,
-      color: busy
-          ? Colors.blueAccent.withValues(alpha: 0.14)
-          : Colors.orange.withValues(alpha: 0.14),
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      child: Row(
-        children: [
-          if (busy)
-            const SizedBox(
-              width: 12,
-              height: 12,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            )
-          else
-            const Icon(Icons.auto_awesome, size: 14, color: Colors.orange),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              _vibeMessage ?? '',
-              style: TextStyle(
-                fontSize: 11,
-                color: isDark ? Colors.white70 : Colors.black87,
-              ),
             ),
           ),
         ],
@@ -621,31 +454,5 @@ class CodeEditorState extends State<CodeEditor> {
       ),
     );
   }
-}
-
-/// VibeCoding 触发请求
-class _VibeRequest {
-  /// 触发词起点（`..` / `。。` 的位置）
-  final int start;
-
-  /// 触发词终点（光标位置）
-  final int end;
-
-  /// 用户需求
-  final String requirement;
-
-  /// 触发词所在行的缩进（`..` 之前的文本）
-  final String indent;
-
-  /// 插入前的原始触发文本（用于校验位置未变化）
-  final String trigger;
-
-  const _VibeRequest({
-    required this.start,
-    required this.end,
-    required this.requirement,
-    required this.indent,
-    required this.trigger,
-  });
 }
 

@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 
 import '../models/project.dart';
 import '../providers/account_provider.dart';
+import '../providers/editor_provider.dart';
 import '../providers/gitee_provider.dart';
 import '../providers/github_provider.dart';
 import '../providers/project_provider.dart';
@@ -30,7 +31,8 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
+class _HomeScreenState extends State<HomeScreen>
+    with TickerProviderStateMixin, WidgetsBindingObserver {
   List<Project> _history = [];
   String _saying = '';
   bool _loadingHistory = true;
@@ -42,6 +44,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _entranceController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 800),
@@ -66,8 +69,20 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _entranceController.dispose();
     super.dispose();
+  }
+
+  /// 切后台时确保所有打开的改动已落盘
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.paused) return;
+    try {
+      context.read<EditorProvider>().saveAll();
+    } catch (_) {
+      // Provider 已销毁（例如热重启）时忽略
+    }
   }
 
   Future<void> _requestPermissions() async {
@@ -102,6 +117,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
   Future<void> _openProjectPath(String path, {String? name}) async {
+    if (!Directory(path).existsSync()) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('项目目录不存在（可能来自其他设备）：\n$path')),
+        );
+      }
+      return;
+    }
     final provider = context.read<ProjectProvider>();
     await provider.openProject(path);
     if (!mounted) return;
@@ -452,18 +475,134 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         ),
       );
     }
-    return ListView.separated(
-      itemCount: _history.length,
-      separatorBuilder: (_, _) => const SizedBox(height: 8),
+    return ListView.builder(
+      itemCount: _history.length + 1,
       itemBuilder: (context, index) {
-        final project = _history[index];
-        return _ProjectCard(
-          project: project,
-          isDark: isDark,
-          onTap: () => _openProjectPath(project.path, name: project.name),
-          onLongPress: () => _confirmRemove(project),
+        if (index == 0) {
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: _LastEditedCard(
+              project: _history.first,
+              isDark: isDark,
+              onTap: () => _openProjectPath(
+                _history.first.path,
+                name: _history.first.name,
+              ),
+            ),
+          );
+        }
+        final project = _history[index - 1];
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: _ProjectCard(
+            project: project,
+            isDark: isDark,
+            onTap: () => _openProjectPath(project.path, name: project.name),
+            onLongPress: () => _confirmRemove(project),
+          ),
         );
       },
+    );
+  }
+}
+
+/// 「上次编辑」卡片：展示最近编辑的项目与相对时间
+class _LastEditedCard extends StatelessWidget {
+  const _LastEditedCard({
+    required this.project,
+    required this.isDark,
+    required this.onTap,
+  });
+
+  final Project project;
+  final bool isDark;
+  final VoidCallback onTap;
+
+  /// 相对时间：刚刚 / x 分钟前 / 昨天 HH:mm / MM-dd
+  static String relativeTime(DateTime time) {
+    final now = DateTime.now();
+    final diff = now.difference(time);
+    if (diff.inMinutes < 1) return '刚刚';
+    if (diff.inMinutes < 60) return '${diff.inMinutes} 分钟前';
+    final today = DateTime(now.year, now.month, now.day);
+    final day = DateTime(time.year, time.month, time.day);
+    final hhmm =
+        '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
+    if (day == today) return '今天 $hhmm';
+    if (today.difference(day).inDays == 1) return '昨天 $hhmm';
+    return '${time.month.toString().padLeft(2, '0')}-'
+        '${time.day.toString().padLeft(2, '0')} $hhmm';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: isDark
+              ? [const Color(0xFF1F3A5F), const Color(0xFF2D2D30)]
+              : [const Color(0xFFE3F2FD), Colors.white],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: Colors.blueAccent.withValues(alpha: 0.25),
+        ),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(
+            children: [
+              const Icon(Icons.history, color: Colors.blueAccent),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '上次编辑',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: isDark ? Colors.white54 : Colors.black45,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      project.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      relativeTime(project.activityAt),
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: isDark ? Colors.white38 : Colors.black38,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Text(
+                '继续编辑',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: Theme.of(context).colorScheme.primary,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

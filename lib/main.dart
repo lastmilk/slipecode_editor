@@ -31,8 +31,12 @@ Future<void> main() async {
   final githubProvider = GitHubProvider();
   final giteeProvider = GiteeProvider();
 
-  // 账号体系：登录后可同步偏好设置
+  // 账号体系：登录后可同步偏好设置 / 项目列表 / 头像 / 壁纸
   final accountProvider = AccountProvider(settingsProvider);
+  accountProvider.attachSyncProviders(
+    github: githubProvider,
+    gitee: giteeProvider,
+  );
   settingsProvider.attachRemoteSync(
     accountProvider.pushSettingsIfLoggedIn,
   );
@@ -59,6 +63,7 @@ Future<void> main() async {
     editorProvider,
     buildProvider,
     projectProvider,
+    accountProvider,
   );
 
   runApp(

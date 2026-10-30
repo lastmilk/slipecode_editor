@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../providers/account_provider.dart';
+import '../services/captcha_service.dart';
 
 /// SlipCode 独立账号页面（注册 / 登录 / 退出）
 class AccountScreen extends StatefulWidget {
@@ -16,16 +19,24 @@ class _AccountScreenState extends State<AccountScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _nameController = TextEditingController();
+  final _phoneController = TextEditingController();
+  final _smsController = TextEditingController();
 
   bool _registerMode = false;
   bool _submitting = false;
+  bool _sendingSms = false;
+  int _smsCountdown = 0;
+  Timer? _smsTimer;
   String? _localError;
 
   @override
   void dispose() {
+    _smsTimer?.cancel();
     _emailController.dispose();
     _passwordController.dispose();
     _nameController.dispose();
+    _phoneController.dispose();
+    _smsController.dispose();
     super.dispose();
   }
 
@@ -36,15 +47,36 @@ class _AccountScreenState extends State<AccountScreen> {
       _localError = null;
     });
     final account = context.read<AccountProvider>();
+
+    // 极验人机验证（仅 Android 原生；其它平台由后端按平台放行）
+    Map<String, dynamic>? captcha;
+    try {
+      final result = await CaptchaService.verify();
+      captcha = result?.toJson();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _submitting = false;
+        _localError = '$e';
+      });
+      return;
+    }
+
     final ok = _registerMode
         ? await account.register(
             email: _emailController.text.trim(),
             password: _passwordController.text,
             displayName: _nameController.text.trim(),
+            phone: _phoneController.text.trim(),
+            smsCode: _smsController.text.trim(),
+            captcha: captcha,
+            captchaPlatform: CaptchaService.platformFlag,
           )
         : await account.login(
             email: _emailController.text.trim(),
             password: _passwordController.text,
+            captcha: captcha,
+            captchaPlatform: CaptchaService.platformFlag,
           );
     if (!mounted) return;
     setState(() {
@@ -60,6 +92,52 @@ class _AccountScreenState extends State<AccountScreen> {
       );
       _passwordController.clear();
     }
+  }
+
+  /// 发送注册短信验证码
+  Future<void> _sendSms() async {
+    final phone = _phoneController.text.trim();
+    if (!RegExp(r'^1[3-9]\d{9}$').hasMatch(phone)) {
+      setState(() => _localError = '请输入正确的手机号');
+      return;
+    }
+    setState(() {
+      _sendingSms = true;
+      _localError = null;
+    });
+    final account = context.read<AccountProvider>();
+    final (ok, dev, devCode) = await account.sendSmsCode(phone);
+    if (!mounted) return;
+    setState(() => _sendingSms = false);
+    if (!ok) {
+      setState(() => _localError = account.error ?? '验证码发送失败');
+      return;
+    }
+    if (dev && devCode != null) {
+      _smsController.text = devCode;
+    }
+    _startCountdown();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(dev ? '开发模式：验证码已自动填入 $devCode' : '验证码已发送'),
+        backgroundColor: Colors.green,
+      ),
+    );
+  }
+
+  void _startCountdown() {
+    _smsTimer?.cancel();
+    setState(() => _smsCountdown = 60);
+    _smsTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      setState(() {
+        _smsCountdown -= 1;
+        if (_smsCountdown <= 0) timer.cancel();
+      });
+    });
   }
 
   @override
@@ -278,7 +356,7 @@ class _AccountScreenState extends State<AccountScreen> {
           const SizedBox(height: 4),
           Center(
             child: Text(
-              '独立账号体系，与 GitHub / Gitee 无关，用于同步偏好设置',
+              '独立账号体系，与 GitHub / Gitee 无关；注册需手机号短信验证',
               textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: 11,
@@ -323,7 +401,63 @@ class _AccountScreenState extends State<AccountScreen> {
               return null;
             },
           ),
-          const SizedBox(height: 14),
+          if (_registerMode) ...[
+            TextFormField(
+              controller: _phoneController,
+              enabled: !_submitting,
+              keyboardType: TextInputType.phone,
+              decoration: const InputDecoration(
+                labelText: '手机号',
+                prefixIcon: Icon(Icons.phone_iphone),
+                border: OutlineInputBorder(),
+              ),
+              validator: (v) {
+                if (!_registerMode) return null;
+                final value = v?.trim() ?? '';
+                if (value.isEmpty) return '请输入手机号';
+                if (!RegExp(r'^1[3-9]\d{9}$').hasMatch(value)) {
+                  return '手机号格式不正确';
+                }
+                return null;
+              },
+            ),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                Expanded(
+                  child: TextFormField(
+                    controller: _smsController,
+                    enabled: !_submitting,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                      labelText: '短信验证码',
+                      prefixIcon: Icon(Icons.sms_outlined),
+                      border: OutlineInputBorder(),
+                    ),
+                    validator: (v) {
+                      if (!_registerMode) return null;
+                      if (v == null || v.trim().isEmpty) return '请输入验证码';
+                      return null;
+                    },
+                  ),
+                ),
+                const SizedBox(width: 10),
+                SizedBox(
+                  height: 52,
+                  child: OutlinedButton(
+                    onPressed: (_submitting || _sendingSms || _smsCountdown > 0)
+                        ? null
+                        : _sendSms,
+                    child: Text(
+                      _smsCountdown > 0 ? '${_smsCountdown}s' : '获取验证码',
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+          ],
           TextFormField(
             controller: _passwordController,
             enabled: !_submitting,

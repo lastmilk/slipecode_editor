@@ -11,6 +11,7 @@ import '../services/gitee_api_service.dart';
 import '../services/gitee_auth_service.dart';
 import '../services/gitee_go_templates.dart';
 import '../services/git_host.dart';
+import '../services/project_history_service.dart';
 import '../services/github_api_service.dart' show RepoFile;
 import '../services/project_snapshot.dart';
 
@@ -116,6 +117,11 @@ class GiteeProvider extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('$_repoMapPrefix$projectPath', repoFullName);
+    await ProjectHistoryService.instance.setRepo(
+      projectPath,
+      repoFullName: repoFullName,
+      host: 'gitee',
+    );
   }
 
   Future<void> unlinkRepo(String projectPath) async {

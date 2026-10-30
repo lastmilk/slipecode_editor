@@ -6,18 +6,46 @@ import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 
 import '../models/app_settings.dart';
+import '../models/llm_profile.dart';
 import '../providers/account_provider.dart';
 import '../providers/settings_provider.dart';
 import '../services/git_host.dart';
+import '../services/llm_presets.dart';
 import '../widgets/ai_floating_ball.dart';
+import '../widgets/image_crop_dialog.dart';
 import 'account_screen.dart';
 
 /// 偏好设置页面
 ///
-/// 配置 IDE 行为（主题、编辑器字号、自动保存、首页语句、Git 默认平台），
-/// 登录 SLIPE 账号后设置会自动同步到其他设备。
-class SettingsScreen extends StatelessWidget {
+/// 按「外观 / 编辑器 / 项目与Git / AI模型 / AI助手 / 账号与同步」分 Tab，
+/// 顶部搜索框可跨 Tab 过滤设置项；登录 SLIPE 账号后设置可同步到其他设备。
+class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
+
+  @override
+  State<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends State<SettingsScreen>
+    with SingleTickerProviderStateMixin {
+  late final TabController _tabController;
+  final TextEditingController _searchController = TextEditingController();
+  String _query = '';
+
+  static const _tabNames = ['外观', '编辑器', '项目与Git', 'AI模型', 'AI助手', '账号'];
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: _tabNames.length, vsync: this);
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    _searchController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -25,112 +53,242 @@ class SettingsScreen extends StatelessWidget {
     final account = context.watch<AccountProvider>();
     final settings = settingsProvider.settings;
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final searching = _query.trim().isNotEmpty;
+
+    // 各 Tab 的分区数据（搜索时跨 Tab 统一过滤）
+    final tabSections = <List<_SectionData>>[
+      _appearanceSections(settingsProvider, settings, isDark),
+      _editorSections(settingsProvider, settings),
+      _gitSections(settingsProvider, settings),
+      _llmSections(settingsProvider, account, settings),
+      _aiSections(settingsProvider, settings),
+      _accountSections(account, settingsProvider, settings, isDark),
+    ];
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('偏好设置'),
         elevation: 0,
-      ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-        children: [
-          _SyncCard(account: account),
-          const SizedBox(height: 16),
-
-          _Section(
-            title: '外观',
-            isDark: isDark,
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(96),
+          child: Column(
             children: [
               Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                child: Row(
-                  children: [
-                    const Expanded(child: Text('主题模式')),
-                    SegmentedButton<ThemeMode>(
-                      segments: const [
-                        ButtonSegment(
-                          value: ThemeMode.system,
-                          label: Text('跟随系统'),
-                        ),
-                        ButtonSegment(
-                          value: ThemeMode.light,
-                          label: Text('浅色'),
-                        ),
-                        ButtonSegment(
-                          value: ThemeMode.dark,
-                          label: Text('深色'),
-                        ),
-                      ],
-                      selected: {settings.themeMode},
-                      onSelectionChanged: (value) =>
-                          settingsProvider.setThemeMode(value.first),
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                child: TextField(
+                  controller: _searchController,
+                  onChanged: (value) => setState(() => _query = value),
+                  decoration: InputDecoration(
+                    hintText: '搜索设置项…',
+                    prefixIcon: const Icon(Icons.search, size: 20),
+                    suffixIcon: searching
+                        ? IconButton(
+                            icon: const Icon(Icons.close, size: 18),
+                            onPressed: () {
+                              _searchController.clear();
+                              setState(() => _query = '');
+                            },
+                          )
+                        : null,
+                    isDense: true,
+                    filled: true,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(24),
+                      borderSide: BorderSide.none,
                     ),
-                  ],
-                ),
-              ),
-              const Divider(height: 16),
-
-              // 背景图片：选择 / 预览缩略图 / 清除
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                child: Row(
-                  children: [
-                    const Expanded(child: Text('背景图片')),
-                    if (settings.backgroundImagePath.isNotEmpty &&
-                        File(settings.backgroundImagePath).existsSync())
-                      Padding(
-                        padding: const EdgeInsets.only(right: 8),
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(6),
-                          child: Image.file(
-                            File(settings.backgroundImagePath),
-                            width: 40,
-                            height: 40,
-                            fit: BoxFit.cover,
-                          ),
-                        ),
-                      ),
-                    TextButton.icon(
-                      onPressed: () => _pickBackgroundImage(context),
-                      icon: const Icon(Icons.image_outlined, size: 16),
-                      label: Text(
-                        settings.backgroundImagePath.isEmpty ? '选择图片' : '更换',
-                      ),
-                    ),
-                    if (settings.backgroundImagePath.isNotEmpty)
-                      TextButton(
-                        onPressed: settingsProvider.clearBackgroundImage,
-                        child: const Text('清除'),
-                      ),
-                  ],
-                ),
-              ),
-
-              // 已设置背景图时才显示范围与不透明度选项
-              if (settings.backgroundImagePath.isNotEmpty) ...[
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  child: Row(
-                    children: [
-                      const Expanded(child: Text('显示范围')),
-                      SegmentedButton<String>(
-                        segments: const [
-                          ButtonSegment(
-                            value: AppSettings.backgroundScopeGlobal,
-                            label: Text('全局'),
-                          ),
-                          ButtonSegment(
-                            value: AppSettings.backgroundScopeIdeOnly,
-                            label: Text('仅编辑器'),
-                          ),
-                        ],
-                        selected: {settings.backgroundImageScope},
-                        onSelectionChanged: (value) =>
-                            settingsProvider.setBackgroundScope(value.first),
-                      ),
-                    ],
                   ),
                 ),
+              ),
+              if (!searching)
+                TabBar(
+                  controller: _tabController,
+                  isScrollable: true,
+                  tabAlignment: TabAlignment.start,
+                  tabs: [for (final name in _tabNames) Tab(text: name)],
+                ),
+            ],
+          ),
+        ),
+      ),
+      body: searching
+          ? _buildSearchResults(tabSections, isDark)
+          : TabBarView(
+              controller: _tabController,
+              children: [
+                for (final sections in tabSections)
+                  _SettingsTab(sections: sections, isDark: isDark),
+              ],
+            ),
+    );
+  }
+
+  /// 搜索结果：跨 Tab 扁平展示匹配项，并标注所属位置
+  Widget _buildSearchResults(List<List<_SectionData>> tabSections, bool isDark) {
+    final query = _query.trim().toLowerCase();
+    final results = <Widget>[];
+    for (var t = 0; t < tabSections.length; t++) {
+      for (final section in tabSections[t]) {
+        final matched = section.entries
+            .where((e) => e.keywords.toLowerCase().contains(query))
+            .toList();
+        if (matched.isEmpty) continue;
+        results.add(
+          Padding(
+            padding: const EdgeInsets.only(left: 4, bottom: 8, top: 16),
+            child: Text(
+              '${_tabNames[t]} · ${section.title}',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: isDark ? Colors.white60 : Colors.black54,
+              ),
+            ),
+          ),
+        );
+        results.add(_SectionCard(isDark: isDark, children: [
+          for (final e in matched) e.child,
+        ]));
+      }
+    }
+    if (results.isEmpty) {
+      return Center(
+        child: Text(
+          '没有找到与「$_query」相关的设置',
+          style: TextStyle(color: isDark ? Colors.white38 : Colors.black38),
+        ),
+      );
+    }
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+      children: results,
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // 各 Tab 内容
+  // ---------------------------------------------------------------------------
+
+  List<_SectionData> _appearanceSections(
+    SettingsProvider sp,
+    AppSettings settings,
+    bool isDark,
+  ) {
+    final hasWallpaper = settings.backgroundImagePath.isNotEmpty;
+    final isVideo = hasWallpaper &&
+        settings.backgroundImagePath.toLowerCase().endsWith('.mp4');
+    return [
+      _SectionData('主题', [
+        _Entry(
+          '主题模式 深色 浅色 跟随系统 appearance theme',
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Row(
+              children: [
+                const Expanded(child: Text('主题模式')),
+                SegmentedButton<ThemeMode>(
+                  segments: const [
+                    ButtonSegment(value: ThemeMode.system, label: Text('跟随系统')),
+                    ButtonSegment(value: ThemeMode.light, label: Text('浅色')),
+                    ButtonSegment(value: ThemeMode.dark, label: Text('深色')),
+                  ],
+                  selected: {settings.themeMode},
+                  onSelectionChanged: (value) => sp.setThemeMode(value.first),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ]),
+      _SectionData('壁纸', [
+        _Entry(
+          '壁纸 背景图片 动态壁纸 gif mp4 wallpaper background',
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Row(
+              children: [
+                const Expanded(child: Text('壁纸（支持 GIF / MP4）')),
+                if (hasWallpaper && File(settings.backgroundImagePath).existsSync())
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(6),
+                      child: isVideo
+                          ? const SizedBox(
+                              width: 40,
+                              height: 40,
+                              child: ColoredBox(
+                                color: Colors.black26,
+                                child: Icon(Icons.play_circle_outline),
+                              ),
+                            )
+                          : Image.file(
+                              File(settings.backgroundImagePath),
+                              width: 40,
+                              height: 40,
+                              fit: BoxFit.cover,
+                            ),
+                    ),
+                  ),
+                TextButton.icon(
+                  onPressed: _pickWallpaper,
+                  icon: const Icon(Icons.image_outlined, size: 16),
+                  label: Text(hasWallpaper ? '更换' : '选择壁纸'),
+                ),
+                if (hasWallpaper)
+                  TextButton(
+                    onPressed: sp.clearBackgroundImage,
+                    child: const Text('清除'),
+                  ),
+              ],
+            ),
+          ),
+        ),
+        _Entry(
+          '壁纸云端同步 wallpaper cloud sync 大小限制',
+          Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: Text(
+              '静态壁纸（≤5MB）登录后自动上传云端并在 Wi-Fi 下同步到其他设备；'
+              'GIF / MP4 动态壁纸仅保存在本机，不参与云同步。',
+              style: TextStyle(
+                fontSize: 11,
+                height: 1.4,
+                color: isDark ? Colors.white38 : Colors.black45,
+              ),
+            ),
+          ),
+        ),
+        if (hasWallpaper) ...[
+          _Entry(
+            '壁纸显示范围 全局 仅编辑器 scope',
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Row(
+                children: [
+                  const Expanded(child: Text('显示范围')),
+                  SegmentedButton<String>(
+                    segments: const [
+                      ButtonSegment(
+                        value: AppSettings.backgroundScopeGlobal,
+                        label: Text('全局'),
+                      ),
+                      ButtonSegment(
+                        value: AppSettings.backgroundScopeIdeOnly,
+                        label: Text('仅编辑器'),
+                      ),
+                    ],
+                    selected: {settings.backgroundImageScope},
+                    onSelectionChanged: (value) =>
+                        sp.setBackgroundScope(value.first),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          _Entry(
+            '壁纸不透明度 opacity',
+            Column(
+              children: [
                 Padding(
                   padding: const EdgeInsets.only(top: 4),
                   child: Row(
@@ -151,24 +309,61 @@ class SettingsScreen extends StatelessWidget {
                   divisions: 20,
                   value: settings.backgroundImageOpacity,
                   label: settings.backgroundImageOpacity.toStringAsFixed(2),
-                  onChanged: settingsProvider.setBackgroundOpacity,
+                  onChanged: sp.setBackgroundOpacity,
                 ),
               ],
-            ],
+            ),
           ),
-          const SizedBox(height: 16),
+        ],
+      ]),
+      _SectionData('首页', [
+        _Entry(
+          '首页标题 home title',
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('首页标题'),
+            subtitle: Text(settings.homeTitle),
+            trailing: const Icon(Icons.edit, size: 18),
+            onTap: () => _editText(
+              context,
+              title: '首页标题',
+              hint: '留空则使用默认 SLIPE',
+              value: settings.homeTitle,
+              onSave: sp.setHomeTitle,
+            ),
+          ),
+        ),
+        _Entry(
+          '显示随机语句 打字机 saying typewriter',
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('显示随机语句'),
+            subtitle: const Text('每次打开首页用打字机效果显示一句随机语句'),
+            value: settings.showSaying,
+            onChanged: sp.setShowSaying,
+          ),
+        ),
+      ]),
+    ];
+  }
 
-          _Section(
-            title: '编辑器',
-            isDark: isDark,
+  List<_SectionData> _editorSections(SettingsProvider sp, AppSettings settings) {
+    return [
+      _SectionData('编辑行为', [
+        _Entry(
+          '自动保存 auto save 退出保存',
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('自动保存'),
+            subtitle: const Text('编辑文件后自动写入并同步到远程仓库；退出界面时也会统一保存'),
+            value: settings.autoSave,
+            onChanged: sp.setAutoSave,
+          ),
+        ),
+        _Entry(
+          '代码字号 font size',
+          Column(
             children: [
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('自动保存'),
-                subtitle: const Text('编辑文件后自动写入并同步到远程仓库'),
-                value: settings.autoSave,
-                onChanged: settingsProvider.setAutoSave,
-              ),
               Padding(
                 padding: const EdgeInsets.only(top: 4),
                 child: Row(
@@ -189,322 +384,597 @@ class SettingsScreen extends StatelessWidget {
                 divisions: 11,
                 value: settings.editorFontSize,
                 label: settings.editorFontSize.toStringAsFixed(0),
-                onChanged: settingsProvider.setEditorFontSize,
+                onChanged: sp.setEditorFontSize,
               ),
             ],
           ),
-          const SizedBox(height: 16),
+        ),
+      ]),
+      _SectionData('代码补全', [
+        _Entry(
+          '语法补全建议 completion suggestion',
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('语法补全建议'),
+            subtitle: const Text('输入时在编辑器顶部显示关键字 / 组件 / 代码片段建议'),
+            value: settings.completionEnabled,
+            onChanged: sp.setCompletionEnabled,
+          ),
+        ),
+        _Entry(
+          '音量键控制 补全 volume key',
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('音量键控制（下键切换 / 上键确认）'),
+            subtitle: Text(
+              Platform.isAndroid
+                  ? '编辑器内音量键不再调节音量。有补全候选时，音量下键切换候选、音量上键确认；'
+                      '无候选时音量下键唤出文件栏。关闭后恢复系统音量调节。'
+                  : 'iOS 不支持音量键映射，请使用建议条上的上一条 / 下一条 / 补全按钮。',
+            ),
+            value: settings.volumeKeyCompletionEnabled,
+            onChanged:
+                Platform.isAndroid ? sp.setVolumeKeyCompletionEnabled : null,
+          ),
+        ),
+      ]),
+    ];
+  }
 
-          _Section(
-            title: '首页',
-            isDark: isDark,
-            children: [
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('显示随机语句'),
-                subtitle: const Text('每次打开首页用打字机效果显示一句随机语句'),
-                value: settings.showSaying,
-                onChanged: settingsProvider.setShowSaying,
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-
-          _Section(
-            title: 'Git 与项目',
-            isDark: isDark,
-            children: [
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('默认 Git 平台'),
-                subtitle: const Text('创建项目时默认使用的托管平台'),
-                trailing: DropdownButton<GitHost>(
-                  value: settings.defaultGitHost,
-                  underline: const SizedBox.shrink(),
-                  items: GitHost.values
-                      .map(
-                        (host) => DropdownMenuItem(
-                          value: host,
-                          child: Text(host.label),
-                        ),
-                      )
-                      .toList(),
-                  onChanged: (host) {
-                    if (host != null) {
-                      settingsProvider.setDefaultGitHost(host);
-                    }
-                  },
-                ),
-              ),
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('创建项目时自动建仓并推送'),
-                subtitle: const Text('默认勾选是否创建远程仓库并推送模板文件'),
-                value: settings.createRepoOnCreate,
-                onChanged: settingsProvider.setCreateRepoOnCreate,
-              ),
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('iOS 构建'),
-                subtitle: const Text(
-                  'iOS 只能在 GitHub Actions 的 macOS Runner 上构建；'
-                  'Gitee Go 不支持 macOS，因此选择 Gitee 时 iOS 构建会被禁用',
-                ),
-                leading: const Icon(Icons.apple),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-
-          _Section(
-            title: 'AI 助手（LLM）',
-            isDark: isDark,
-            children: [
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.auto_awesome),
-                title: const Text('API 地址'),
-                subtitle: Text(
-                  settings.isLlmConfigured ? '已配置' : '未配置',
-                  style: TextStyle(
-                    color: settings.isLlmConfigured
-                        ? Colors.green
-                        : Colors.orange,
-                    fontSize: 11,
-                  ),
-                ),
-                onTap: () => _editText(
-                  context,
-                  title: 'LLM API 地址',
-                  hint: 'https://api.openai.com/v1',
-                  value: settings.llmApiBase,
-                  onSave: settingsProvider.setLlmApiBase,
-                ),
-              ),
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.key),
-                title: const Text('API Key'),
-                subtitle: Text(
-                  settings.llmApiKey.isEmpty ? '未设置' : '已设置（仅存本地）',
-                  style: TextStyle(
-                    color: settings.llmApiKey.isEmpty
-                        ? Colors.orange
-                        : Colors.green,
-                    fontSize: 11,
-                  ),
-                ),
-                onTap: () => _editText(
-                  context,
-                  title: 'LLM API Key',
-                  hint: 'sk-...',
-                  value: settings.llmApiKey,
-                  obscure: true,
-                  onSave: settingsProvider.setLlmApiKey,
-                ),
-              ),
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.psychology),
-                title: const Text('模型名称'),
-                subtitle: Text(settings.llmModel),
-                onTap: () => _editText(
-                  context,
-                  title: '模型名称',
-                  hint: 'gpt-4o-mini',
-                  value: settings.llmModel,
-                  onSave: settingsProvider.setLlmModel,
-                ),
-              ),
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 4),
-                child: Text(
-                  '对接任意 OpenAI 兼容接口（OpenAI / 通义千问 / DeepSeek / 本地模型等）。'
-                  '凭据仅保存在本地，不会上传。',
-                  style: TextStyle(fontSize: 11, color: Colors.grey),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-
-          _Section(
-            title: '首页个性化',
-            isDark: isDark,
-            children: [
-              // 头像
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                child: Row(
-                  children: [
-                    const Expanded(child: Text('头像')),
-                    if (settings.avatarPath.isNotEmpty &&
-                        File(settings.avatarPath).existsSync())
-                      Padding(
-                        padding: const EdgeInsets.only(right: 8),
-                        child: ClipOval(
-                          child: Image.file(
-                            File(settings.avatarPath),
-                            width: 40,
-                            height: 40,
-                            fit: BoxFit.cover,
-                          ),
-                        ),
-                      ),
-                    TextButton.icon(
-                      onPressed: () => _pickAvatar(context),
-                      icon: const Icon(Icons.image_outlined, size: 16),
-                      label: Text(settings.avatarPath.isEmpty ? '选择头像' : '更换'),
-                    ),
-                    if (settings.avatarPath.isNotEmpty)
-                      TextButton(
-                        onPressed: settingsProvider.clearAvatar,
-                        child: const Text('恢复默认'),
-                      ),
-                  ],
-                ),
-              ),
-              // 标题文案
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('首页标题'),
-                subtitle: Text(settings.homeTitle),
-                trailing: const Icon(Icons.edit, size: 18),
-                onTap: () => _editText(
-                  context,
-                  title: '首页标题',
-                  hint: '留空则使用默认 SLIPE',
-                  value: settings.homeTitle,
-                  onSave: settingsProvider.setHomeTitle,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-
-          _Section(
-            title: 'AI 悬浮球',
-            isDark: isDark,
-            children: [
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('应用内悬浮球'),
-                subtitle: const Text('在 IDE 右下角显示 AI 悬浮球，点击呼出 Agent 面板'),
-                value: settings.aiFloatingBallEnabled,
-                onChanged: settingsProvider.setAiFloatingBallEnabled,
-              ),
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('系统悬浮球'),
-                subtitle: Text(
-                  Platform.isAndroid
-                      ? 'App 退到后台后仍显示悬浮球（需授予悬浮窗权限）'
-                      : 'iOS 不支持系统悬浮窗，仅可使用应用内悬浮球',
-                ),
-                value: settings.systemOverlayEnabled,
-                onChanged: Platform.isAndroid
-                    ? (value) async {
-                        final ok = await toggleSystemOverlay(value);
-                        if (!context.mounted) return;
-                        if (value && !ok) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('未授予悬浮窗权限，无法开启系统悬浮球'),
-                            ),
-                          );
-                          return;
-                        }
-                        settingsProvider.setSystemOverlayEnabled(ok);
-                      }
-                    : null,
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-
-          _Section(
-            title: '代码补全',
-            isDark: isDark,
-            children: [
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('语法补全建议'),
-                subtitle: const Text('输入时在编辑器顶部显示关键字 / 组件 / 代码片段建议'),
-                value: settings.completionEnabled,
-                onChanged: settingsProvider.setCompletionEnabled,
-              ),
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('音量键控制（下键切换 / 上键确认）'),
-                subtitle: Text(
-                  Platform.isAndroid
-                      ? '编辑器内音量键不再调节音量。有补全候选时，音量下键切换候选、音量上键确认；'
-                          '无候选时音量下键唤出文件栏。'
-                          '关闭后音量键恢复系统音量调节。'
-                      : 'iOS 不支持音量键映射，请使用建议条上的上一条 / 下一条 / 补全按钮。',
-                ),
-                value: settings.volumeKeyCompletionEnabled,
-                onChanged: Platform.isAndroid
-                    ? settingsProvider.setVolumeKeyCompletionEnabled
-                    : null,
-              ),
-            ],
-          ),
-          const SizedBox(height: 24),
-          Center(
-            child: Text(
-              'SLIPE · 偏好设置保存在本地，登录账号后同步到云端',
-              style: TextStyle(
-                fontSize: 11,
-                color: isDark ? Colors.white38 : Colors.black38,
-              ),
+  List<_SectionData> _gitSections(SettingsProvider sp, AppSettings settings) {
+    return [
+      _SectionData('Git 平台', [
+        _Entry(
+          '默认 Git 平台 github gitee',
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('默认 Git 平台'),
+            subtitle: const Text('创建项目时默认使用的托管平台'),
+            trailing: DropdownButton<GitHost>(
+              value: settings.defaultGitHost,
+              underline: const SizedBox.shrink(),
+              items: GitHost.values
+                  .map((host) => DropdownMenuItem(
+                        value: host,
+                        child: Text(host.label),
+                      ))
+                  .toList(),
+              onChanged: (host) {
+                if (host != null) sp.setDefaultGitHost(host);
+              },
             ),
           ),
+        ),
+        _Entry(
+          '创建项目时自动建仓并推送 auto repo push',
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('创建项目时自动建仓并推送'),
+            subtitle: const Text('默认勾选是否创建远程仓库并推送模板文件'),
+            value: settings.createRepoOnCreate,
+            onChanged: sp.setCreateRepoOnCreate,
+          ),
+        ),
+        _Entry(
+          'iOS 构建 macos runner',
+          const ListTile(
+            contentPadding: EdgeInsets.zero,
+            title: Text('iOS 构建'),
+            subtitle: Text(
+              'iOS 只能在 GitHub Actions 的 macOS Runner 上构建；'
+              'Gitee Go 不支持 macOS，因此选择 Gitee 时 iOS 构建会被禁用',
+            ),
+            leading: Icon(Icons.apple),
+          ),
+        ),
+      ]),
+    ];
+  }
+
+  List<_SectionData> _llmSections(
+    SettingsProvider sp,
+    AccountProvider account,
+    AppSettings settings,
+  ) {
+    final profiles = settings.llmProfiles;
+    return [
+      _SectionData('模型列表', [
+        for (final profile in profiles)
+          _Entry(
+            '模型 ${profile.name} ${profile.model} ${profile.apiBase} llm provider',
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(
+                profile.id == settings.activeLlmId
+                    ? Icons.radio_button_checked
+                    : Icons.radio_button_off,
+                color: profile.id == settings.activeLlmId
+                    ? Theme.of(context).colorScheme.primary
+                    : Colors.grey,
+              ),
+              title: Text(profile.name),
+              subtitle: Text(
+                '${profile.model}\n${profile.apiBase.isEmpty ? '（云端模型）' : profile.apiBase}',
+                style: const TextStyle(fontSize: 11, height: 1.3),
+              ),
+              isThreeLine: true,
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.edit_outlined, size: 18),
+                    tooltip: '编辑',
+                    onPressed: () => _editProfile(context, sp, account, profile),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.delete_outline, size: 18),
+                    tooltip: '删除',
+                    onPressed: () => _removeProfile(context, sp, profile),
+                  ),
+                ],
+              ),
+              onTap: () => sp.setActiveLlm(profile.id),
+            ),
+          ),
+        _Entry(
+          '添加模型配置 add llm provider preset',
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: OutlinedButton.icon(
+              onPressed: () => _editProfile(context, sp, account, null),
+              icon: const Icon(Icons.add, size: 18),
+              label: const Text('添加模型配置'),
+            ),
+          ),
+        ),
+        _Entry(
+          '模型配置说明 openai 兼容 api key',
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 4),
+            child: Text(
+              '支持任意 OpenAI 兼容接口（OpenAI / DeepSeek / 通义 / 本地 Ollama 等）。'
+              'API Key 默认仅保存在本机。',
+              style: TextStyle(fontSize: 11, color: Colors.grey),
+            ),
+          ),
+        ),
+      ]),
+      _SectionData('同步', [
+        _Entry(
+          '模型配置云同步 llm cloud sync api key 上传',
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('模型配置云同步'),
+            subtitle: const Text(
+              '开启后模型列表（含 API Key）会随账号上传到云端，'
+              '请仅在信任自建后端时开启',
+            ),
+            value: settings.llmCloudSync,
+            onChanged: sp.setLlmCloudSync,
+          ),
+        ),
+      ]),
+    ];
+  }
+
+  List<_SectionData> _aiSections(SettingsProvider sp, AppSettings settings) {
+    return [
+      _SectionData('AI 助手', [
+        _Entry(
+          '对话记录云同步 chat history cloud',
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('对话记录云同步'),
+            subtitle: const Text('开启后 AI 助手对话记录上传到云端，可在多设备间查看'),
+            value: settings.chatCloudSync,
+            onChanged: sp.setChatCloudSync,
+          ),
+        ),
+        _Entry(
+          '应用内悬浮球 floating ball agent',
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('应用内悬浮球'),
+            subtitle: const Text('在 IDE 右下角显示 AI 悬浮球，点击呼出 Agent 面板'),
+            value: settings.aiFloatingBallEnabled,
+            onChanged: sp.setAiFloatingBallEnabled,
+          ),
+        ),
+        _Entry(
+          '系统悬浮球 overlay 悬浮窗权限',
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('系统悬浮球'),
+            subtitle: Text(
+              Platform.isAndroid
+                  ? 'App 退到后台后仍显示悬浮球（需授予悬浮窗权限）'
+                  : 'iOS 不支持系统悬浮窗，仅可使用应用内悬浮球',
+            ),
+            value: settings.systemOverlayEnabled,
+            onChanged: Platform.isAndroid
+                ? (value) async {
+                    final messenger = ScaffoldMessenger.of(context);
+                    final ok = await toggleSystemOverlay(value);
+                    if (value && !ok) {
+                      messenger.showSnackBar(
+                        const SnackBar(
+                          content: Text('未授予悬浮窗权限，无法开启系统悬浮球'),
+                        ),
+                      );
+                      return;
+                    }
+                    sp.setSystemOverlayEnabled(ok);
+                  }
+                : null,
+          ),
+        ),
+        _Entry(
+          'vibecoding 说明 回车触发',
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 4),
+            child: Text(
+              'VibeCoding：在编辑器行首输入「..需求」或「。。需求」后回车，'
+              'AI 会在该位置自动生成代码；生成期间可在文件管理器的 Agent 页查看思考过程。',
+              style: TextStyle(fontSize: 11, color: Colors.grey, height: 1.4),
+            ),
+          ),
+        ),
+      ]),
+    ];
+  }
+
+  List<_SectionData> _accountSections(
+    AccountProvider account,
+    SettingsProvider sp,
+    AppSettings settings,
+    bool isDark,
+  ) {
+    return [
+      _SectionData('账号', [
+        _Entry('账号同步状态 sync account login', _SyncCard(account: account)),
+        _Entry(
+          '头像 账号头像 avatar 上传 裁剪',
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Row(
+              children: [
+                const Expanded(child: Text('头像（与账号绑定）')),
+                if (settings.avatarPath.isNotEmpty &&
+                    File(settings.avatarPath).existsSync())
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: ClipOval(
+                      child: Image.file(
+                        File(settings.avatarPath),
+                        width: 40,
+                        height: 40,
+                        fit: BoxFit.cover,
+                      ),
+                    ),
+                  ),
+                TextButton.icon(
+                  onPressed: _pickAvatar,
+                  icon: const Icon(Icons.image_outlined, size: 16),
+                  label: Text(settings.avatarPath.isEmpty ? '选择头像' : '更换'),
+                ),
+                if (settings.avatarPath.isNotEmpty)
+                  TextButton(
+                    onPressed: sp.clearAvatar,
+                    child: const Text('恢复默认'),
+                  ),
+              ],
+            ),
+          ),
+        ),
+        _Entry(
+          '头像说明 云端 avatar cloud',
+          const Padding(
+            padding: EdgeInsets.only(bottom: 4),
+            child: Text(
+              '登录后头像自动上传到云端（≤2MB），并同步到所有设备。',
+              style: TextStyle(fontSize: 11, color: Colors.grey),
+            ),
+          ),
+        ),
+      ]),
+      _SectionData('云同步', [
+        _Entry(
+          '同步网络策略 wifi 流量 network policy',
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('同步网络策略'),
+            subtitle: const Text('控制项目 / 壁纸 / 对话记录等自动同步使用的网络'),
+            trailing: DropdownButton<String>(
+              value: settings.syncNetwork,
+              underline: const SizedBox.shrink(),
+              items: const [
+                DropdownMenuItem(value: 'wifi', child: Text('仅 Wi-Fi')),
+                DropdownMenuItem(value: 'any', child: Text('任意网络')),
+                DropdownMenuItem(value: 'never', child: Text('关闭自动同步')),
+              ],
+              onChanged: (value) {
+                if (value != null) sp.setSyncNetwork(value);
+              },
+            ),
+          ),
+        ),
+        _Entry(
+          '项目云同步 重装不丢 project sync',
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('项目与仓库云同步'),
+            subtitle: const Text(
+              '登录后云端保存本地打开过的项目路径与远程仓库映射，'
+              '重装 App 后登录即可找回',
+            ),
+            trailing: account.isSignedIn
+                ? TextButton.icon(
+                    onPressed: () async {
+                      final messenger = ScaffoldMessenger.of(context);
+                      final ok = await account.syncProjectsNow();
+                      messenger.showSnackBar(
+                        SnackBar(
+                          content: Text(ok ? '项目列表已同步' : '同步失败'),
+                          backgroundColor: ok ? Colors.green : Colors.redAccent,
+                        ),
+                      );
+                    },
+                    icon: const Icon(Icons.sync, size: 16),
+                    label: const Text('立即同步'),
+                  )
+                : null,
+          ),
+        ),
+      ]),
+    ];
+  }
+
+  // ---------------------------------------------------------------------------
+  // LLM 配置编辑
+  // ---------------------------------------------------------------------------
+
+  /// 新增 / 编辑模型配置
+  Future<void> _editProfile(
+    BuildContext context,
+    SettingsProvider sp,
+    AccountProvider account,
+    LlmProfile? existing,
+  ) async {
+    final result = await showDialog<LlmProfile>(
+      context: context,
+      builder: (_) => _ProfileEditDialog(existing: existing),
+    );
+    if (result == null) return;
+    await sp.upsertLlmProfile(result);
+    if (existing == null) {
+      await sp.setActiveLlm(result.id);
+    }
+  }
+
+  Future<void> _removeProfile(
+    BuildContext context,
+    SettingsProvider sp,
+    LlmProfile profile,
+  ) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('删除「${profile.name}」？'),
+        content: const Text('删除后无法恢复，该配置仅移除本机与云端的这一条记录。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('删除'),
+          ),
         ],
+      ),
+    );
+    if (confirmed == true) {
+      await sp.removeLlmProfile(profile.id);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // 头像 / 壁纸选择（含自由剪裁与云端上传）
+  // ---------------------------------------------------------------------------
+
+  /// 选择头像 → 1:1 裁剪为 512×512 → 本地保存 → 登录时上传云端
+  Future<void> _pickAvatar() async {
+    final settingsProvider = context.read<SettingsProvider>();
+    final account = context.read<AccountProvider>();
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.image,
+        dialogTitle: '选择头像',
+      );
+      final srcPath = result?.files.single.path;
+      if (srcPath == null || srcPath.isEmpty) return;
+
+      final docsDir = await getApplicationDocumentsDirectory();
+      if (!mounted) return;
+      final destPath =
+          '${docsDir.path}/avatars/avatar_${DateTime.now().millisecondsSinceEpoch}.png';
+      final cropped = await showImageCropDialog(
+        context,
+        sourcePath: srcPath,
+        aspectRatio: 1.0,
+        outputPath: destPath,
+      );
+      if (cropped == null) return;
+
+      await settingsProvider.setAvatarPath(cropped);
+      if (account.isSignedIn) {
+        final ok = await account.uploadAvatar(cropped);
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text(ok ? '头像已同步到云端' : '头像已保存本机，云端上传失败'),
+            backgroundColor: ok ? Colors.green : Colors.orange,
+          ),
+        );
+      }
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('选择头像失败: $e')));
+    }
+  }
+
+  /// 选择壁纸 → 静态图按屏幕比例裁剪，GIF/MP4 直接保存 → 符合条件时上传云端
+  Future<void> _pickWallpaper() async {
+    final settingsProvider = context.read<SettingsProvider>();
+    final account = context.read<AccountProvider>();
+    final messenger = ScaffoldMessenger.of(context);
+    // 屏幕比例在异步间隙前取好，避免跨 await 使用 context
+    final screenSize = MediaQuery.of(context).size;
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'mp4'],
+        dialogTitle: '选择壁纸（图片 / GIF / MP4）',
+      );
+      final srcPath = result?.files.single.path;
+      if (srcPath == null || srcPath.isEmpty) return;
+
+      final ext = srcPath.contains('.')
+          ? srcPath.split('.').last.toLowerCase()
+          : 'png';
+      final docsDir = await getApplicationDocumentsDirectory();
+      final bgDir = Directory('${docsDir.path}/backgrounds');
+      if (!bgDir.existsSync()) bgDir.createSync(recursive: true);
+      final destPath =
+          '${bgDir.path}/background_${DateTime.now().millisecondsSinceEpoch}.$ext';
+
+      String savedPath;
+      if (ext == 'gif' || ext == 'mp4') {
+        // 动图 / 视频无法逐帧裁剪，直接复制
+        await File(srcPath).copy(destPath);
+        savedPath = destPath;
+      } else {
+        // 静态图：按屏幕比例自由裁剪，铺满效果更好
+        if (!mounted) return;
+        final cropped = await showImageCropDialog(
+          context,
+          sourcePath: srcPath,
+          aspectRatio: screenSize.width / screenSize.height,
+          outputPath: destPath,
+        );
+        if (cropped == null) return;
+        savedPath = cropped;
+      }
+
+      await settingsProvider.setBackgroundImage(savedPath);
+      if (account.isSignedIn && ext != 'gif' && ext != 'mp4') {
+        final ok = await account.uploadWallpaper(savedPath);
+        if (!ok) {
+          messenger.showSnackBar(
+            const SnackBar(
+              content: Text('壁纸已保存本机（超过 5MB 或网络受限，未上传云端）'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('选择壁纸失败: $e')));
+    }
+  }
+}
+
+// =============================================================================
+// 数据模型与复用组件
+// =============================================================================
+
+/// 一个可搜索的设置项：child 为展示组件，keywords 用于搜索匹配
+class _Entry {
+  const _Entry(this.keywords, this.child);
+  final String keywords;
+  final Widget child;
+}
+
+/// 一个分区（标题 + 若干设置项）
+class _SectionData {
+  const _SectionData(this.title, this.entries);
+  final String title;
+  final List<_Entry> entries;
+}
+
+/// Tab 页：纵向列出所有分区
+class _SettingsTab extends StatelessWidget {
+  const _SettingsTab({required this.sections, required this.isDark});
+
+  final List<_SectionData> sections;
+  final bool isDark;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+      children: [
+        for (final section in sections) ...[
+          _SectionHeader(title: section.title, isDark: isDark),
+          _SectionCard(
+            isDark: isDark,
+            children: [for (final e in section.entries) e.child],
+          ),
+          const SizedBox(height: 16),
+        ],
+        Center(
+          child: Text(
+            'SLIPE · 偏好设置保存在本地，登录账号后同步到云端',
+            style: TextStyle(
+              fontSize: 11,
+              color: isDark ? Colors.white38 : Colors.black38,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _SectionHeader extends StatelessWidget {
+  const _SectionHeader({required this.title, required this.isDark});
+
+  final String title;
+  final bool isDark;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(left: 4, bottom: 8),
+      child: Text(
+        title,
+        style: TextStyle(
+          fontSize: 13,
+          fontWeight: FontWeight.w600,
+          color: isDark ? Colors.white60 : Colors.black54,
+        ),
       ),
     );
   }
 }
 
-class _Section extends StatelessWidget {
-  const _Section({
-    required this.title,
-    required this.children,
-    required this.isDark,
-  });
+class _SectionCard extends StatelessWidget {
+  const _SectionCard({required this.children, required this.isDark});
 
-  final String title;
   final List<Widget> children;
   final bool isDark;
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.only(left: 4, bottom: 8),
-          child: Text(
-            title,
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: isDark ? Colors.white60 : Colors.black54,
-            ),
-          ),
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF2D2D30) : Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isDark ? const Color(0xFF3C3C3C) : const Color(0xFFE0E4E8),
         ),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-          decoration: BoxDecoration(
-            color: isDark ? const Color(0xFF2D2D30) : Colors.white,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: isDark ? const Color(0xFF3C3C3C) : const Color(0xFFE0E4E8),
-            ),
-          ),
-          child: Column(children: children),
-        ),
-      ],
+      ),
+      child: Column(children: children),
     );
   }
 }
@@ -616,116 +1086,233 @@ class _SyncCard extends StatelessWidget {
   }
 }
 
-/// 选择头像图片并复制到应用文档目录
-Future<void> _pickAvatar(BuildContext context) async {
-  final settingsProvider = context.read<SettingsProvider>();
-  try {
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType.image,
-      dialogTitle: '选择头像',
+// =============================================================================
+// LLM 配置编辑对话框
+// =============================================================================
+
+class _ProfileEditDialog extends StatefulWidget {
+  const _ProfileEditDialog({this.existing});
+
+  final LlmProfile? existing;
+
+  @override
+  State<_ProfileEditDialog> createState() => _ProfileEditDialogState();
+}
+
+class _ProfileEditDialogState extends State<_ProfileEditDialog> {
+  late final TextEditingController _name;
+  late final TextEditingController _apiBase;
+  late final TextEditingController _apiKey;
+  late final TextEditingController _model;
+  late String _presetId;
+  bool _obscure = true;
+
+  LlmPreset? get _preset => LlmPresets.byId(_presetId);
+
+  @override
+  void initState() {
+    super.initState();
+    final existing = widget.existing;
+    _name = TextEditingController(text: existing?.name ?? '');
+    _apiBase = TextEditingController(text: existing?.apiBase ?? '');
+    _apiKey = TextEditingController(text: existing?.apiKey ?? '');
+    _model = TextEditingController(text: existing?.model ?? '');
+    _presetId = existing?.presetId ?? 'deepseek';
+    if (existing == null) _applyPreset(_presetId);
+  }
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _apiBase.dispose();
+    _apiKey.dispose();
+    _model.dispose();
+    super.dispose();
+  }
+
+  /// 选择预置后自动填充名称 / 地址 / 默认模型
+  void _applyPreset(String presetId) {
+    final preset = LlmPresets.byId(presetId);
+    if (preset == null) return;
+    _presetId = presetId;
+    _name.text = preset.name;
+    _apiBase.text = LlmPresets.apiBaseFor(preset);
+    if (preset.defaultModel.isNotEmpty) {
+      _model.text = preset.defaultModel;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final preset = _preset;
+    final isCloud = preset?.requiresLogin ?? false;
+    final modelOptions = preset?.models ?? const <String>[];
+
+    return AlertDialog(
+      title: Text(widget.existing == null ? '添加模型配置' : '编辑模型配置'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            DropdownButtonFormField<String>(
+              initialValue: _presetId,
+              decoration: const InputDecoration(
+                labelText: '服务商',
+                isDense: true,
+                border: OutlineInputBorder(),
+              ),
+              items: [
+                for (final p in LlmPresets.list)
+                  DropdownMenuItem(value: p.id, child: Text(p.name)),
+              ],
+              onChanged: (value) {
+                if (value != null) setState(() => _applyPreset(value));
+              },
+            ),
+            if (preset?.note != null && preset!.note.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    preset.note,
+                    style: const TextStyle(fontSize: 11, color: Colors.grey),
+                  ),
+                ),
+              ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _name,
+              decoration: const InputDecoration(
+                labelText: '名称',
+                isDense: true,
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _apiBase,
+              enabled: !isCloud,
+              decoration: InputDecoration(
+                labelText: 'API 地址',
+                hintText: 'https://api.openai.com/v1',
+                isDense: true,
+                border: const OutlineInputBorder(),
+                helperText: isCloud ? '云端模型地址由账号后端自动决定' : null,
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _apiKey,
+              obscureText: _obscure,
+              decoration: InputDecoration(
+                labelText: isCloud ? 'API Key（云端无需填写）' : 'API Key',
+                hintText: 'sk-...',
+                isDense: true,
+                border: const OutlineInputBorder(),
+                suffixIcon: IconButton(
+                  icon: Icon(
+                    _obscure ? Icons.visibility_off : Icons.visibility,
+                    size: 18,
+                  ),
+                  onPressed: () => setState(() => _obscure = !_obscure),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            if (modelOptions.isNotEmpty)
+              DropdownButtonFormField<String>(
+                // 切换服务商时重建，让默认模型随预置刷新
+                key: ValueKey('model_$_presetId'),
+                initialValue:
+                    modelOptions.contains(_model.text) ? _model.text : null,
+                decoration: const InputDecoration(
+                  labelText: '模型',
+                  isDense: true,
+                  border: OutlineInputBorder(),
+                ),
+                items: [
+                  for (final m in modelOptions)
+                    DropdownMenuItem(value: m, child: Text(m)),
+                ],
+                onChanged: (value) {
+                  if (value != null) _model.text = value;
+                },
+              )
+            else
+              TextField(
+                controller: _model,
+                decoration: const InputDecoration(
+                  labelText: '模型名称',
+                  hintText: 'gpt-4o-mini',
+                  isDense: true,
+                  border: OutlineInputBorder(),
+                ),
+              ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          onPressed: () {
+            final name = _name.text.trim();
+            final model = _model.text.trim();
+            if (name.isEmpty || model.isEmpty) return;
+            Navigator.of(context).pop(
+              LlmProfile(
+                id: widget.existing?.id ?? LlmProfile.newId(),
+                name: name,
+                apiBase: isCloud ? LlmPresets.apiBaseFor(preset!) : _apiBase.text.trim(),
+                apiKey: _apiKey.text.trim(),
+                model: model,
+                presetId: _presetId == 'custom' ? null : _presetId,
+                requiresLogin: isCloud,
+              ),
+            );
+          },
+          child: const Text('保存'),
+        ),
+      ],
     );
-    final srcPath = result?.files.single.path;
-    if (srcPath == null || srcPath.isEmpty) return;
-
-    final docsDir = await getApplicationDocumentsDirectory();
-    final avatarDir = Directory('${docsDir.path}/avatars');
-    if (!avatarDir.existsSync()) {
-      avatarDir.createSync(recursive: true);
-    }
-    final ext = srcPath.contains('.') ? srcPath.split('.').last : 'png';
-    final destPath =
-        '${avatarDir.path}/avatar_${DateTime.now().millisecondsSinceEpoch}.$ext';
-    await File(srcPath).copy(destPath);
-
-    await settingsProvider.setAvatarPath(destPath);
-  } catch (e) {
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('选择头像失败: $e')),
-      );
-    }
   }
 }
 
-/// 选择本地图片并复制到应用文档目录，再保存持久化路径到偏好设置
-Future<void> _pickBackgroundImage(BuildContext context) async {
-  final settingsProvider = context.read<SettingsProvider>();
-  try {
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType.image,
-      dialogTitle: '选择背景图片',
-    );
-    final srcPath = result?.files.single.path;
-    if (srcPath == null || srcPath.isEmpty) return; // 用户取消
-
-    // 复制到应用文档目录持久化，避免源图片被移动/删除后背景丢失
-    final docsDir = await getApplicationDocumentsDirectory();
-    final bgDir = Directory('${docsDir.path}/backgrounds');
-    if (!bgDir.existsSync()) {
-      bgDir.createSync(recursive: true);
-    }
-    final ext = srcPath.contains('.') ? srcPath.split('.').last : 'png';
-    final destPath =
-        '${bgDir.path}/background_${DateTime.now().millisecondsSinceEpoch}.$ext';
-    await File(srcPath).copy(destPath);
-
-    await settingsProvider.setBackgroundImage(destPath);
-  } catch (e) {
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('选择背景图片失败: $e')),
-      );
-    }
-  }
-}
-
-/// 弹出文本编辑对话框，用于编辑 LLM 配置项
+/// 弹出文本编辑对话框
 Future<void> _editText(
   BuildContext context, {
   required String title,
   required String hint,
   required String value,
   required Future<void> Function(String) onSave,
-  bool obscure = false,
 }) async {
   final controller = TextEditingController(text: value);
-  var obscureText = obscure;
   final confirmed = await showDialog<bool>(
     context: context,
-    builder: (context) => StatefulBuilder(
-      builder: (context, setDialogState) => AlertDialog(
-        title: Text(title),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          obscureText: obscureText,
-          decoration: InputDecoration(
-            hintText: hint,
-            border: const OutlineInputBorder(),
-            isDense: true,
-            suffixIcon: obscure
-                ? IconButton(
-                    icon: Icon(
-                      obscureText ? Icons.visibility_off : Icons.visibility,
-                      size: 18,
-                    ),
-                    onPressed: () =>
-                        setDialogState(() => obscureText = !obscureText),
-                  )
-                : null,
-          ),
+    builder: (context) => AlertDialog(
+      title: Text(title),
+      content: TextField(
+        controller: controller,
+        autofocus: true,
+        decoration: InputDecoration(
+          hintText: hint,
+          border: const OutlineInputBorder(),
+          isDense: true,
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('保存'),
-          ),
-        ],
       ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, true),
+          child: const Text('保存'),
+        ),
+      ],
     ),
   );
   if (confirmed == true) {

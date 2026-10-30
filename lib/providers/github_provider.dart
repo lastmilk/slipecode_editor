@@ -10,6 +10,7 @@ import '../services/build_service.dart';
 import '../services/git_host.dart';
 import '../services/github_api_service.dart';
 import '../services/github_auth_service.dart';
+import '../services/project_history_service.dart';
 import '../services/project_snapshot.dart';
 
 /// GitHub 授权状态
@@ -119,6 +120,12 @@ class GitHubProvider extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('$_repoMapPrefix$projectPath', repoFullName);
+    // 同步到项目历史，供云端持久化
+    await ProjectHistoryService.instance.setRepo(
+      projectPath,
+      repoFullName: repoFullName,
+      host: 'github',
+    );
   }
 
   Future<void> unlinkRepo(String projectPath) async {
@@ -164,8 +171,16 @@ class GitHubProvider extends ChangeNotifier {
     if (client == null || login == null) throw StateError('尚未登录 GitHub');
     for (var i = 0; i <= 20; i++) {
       final candidate = i == 0 ? baseName : '${baseName}_$i';
-      final exists = await client.getRepo('$login/$candidate');
-      if (exists == null) return candidate;
+      try {
+        final exists = await client.getRepo('$login/$candidate');
+        if (exists == null) return candidate;
+      } on HttpExceptionWithBody catch (e) {
+        // 409/422 等无法确认是否存在的状态：不再继续探测，交由创建时重试
+        final ambiguous = e.message.contains('HTTP 409') ||
+            e.message.contains('HTTP 422');
+        if (ambiguous) return candidate;
+        rethrow;
+      }
     }
     throw StateError('同名仓库过多，请换一个仓库名');
   }
@@ -193,11 +208,27 @@ class GitHubProvider extends ChangeNotifier {
     }
 
     onLog?.call('==> 创建 GitHub 仓库：$resolvedName');
-    final repo = await createRepoForProject(
-      projectPath,
-      resolvedName,
-      private: private,
-    );
+    GitHubRepo? repo;
+    var attemptName = resolvedName;
+    for (var attempt = 0; attempt < 4; attempt++) {
+      try {
+        repo = await createRepoForProject(
+          projectPath,
+          attemptName,
+          private: private,
+        );
+        break;
+      } on HttpExceptionWithBody catch (e) {
+        // 422/409：仓库名已被占用或创建中，换一个带时间后缀的名字重试
+        final retryable = e.message.contains('HTTP 422') ||
+            e.message.contains('HTTP 409');
+        if (!retryable || attempt == 3) rethrow;
+        attemptName =
+            '${safeName}_${DateTime.now().millisecondsSinceEpoch % 10000}';
+        onLog?.call('    仓库创建冲突，改用 $attemptName 重试');
+      }
+    }
+    if (repo == null) throw StateError('仓库创建失败，请稍后重试');
     onLog?.call('    ${repo.htmlUrl}');
 
     onLog?.call('==> 扫描项目文件');

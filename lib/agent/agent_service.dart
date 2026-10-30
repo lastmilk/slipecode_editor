@@ -14,6 +14,14 @@ class AgentResult {
   const AgentResult(this.content, this.steps);
 }
 
+/// 用户取消了 Agent 运行
+class AgentCancelled implements Exception {
+  const AgentCancelled();
+
+  @override
+  String toString() => '已取消';
+}
+
 /// Agent 服务
 ///
 /// 以 Skill.md 为系统提示，配合 MCP 工具集执行「思考 → 调工具 → 观察 → 继续」的循环。
@@ -60,6 +68,8 @@ class AgentService {
     required String model,
     required List<ChatMessage> history,
     void Function(AgentToolStep step)? onStep,
+    void Function(String delta)? onDelta,
+    bool Function()? isCancelled,
     int maxSteps = 6,
   }) async {
     final system = await buildSystemPrompt();
@@ -70,24 +80,26 @@ class AgentService {
     final steps = <AgentToolStep>[];
 
     for (var iteration = 0; iteration < maxSteps; iteration++) {
+      if (isCancelled?.call() == true) throw const AgentCancelled();
       Map<String, dynamic> reply;
       try {
-        reply = await LlmService.instance.chatMessage(
+        reply = await _streamOnce(
           apiBase: apiBase,
           apiKey: apiKey,
           model: model,
           messages: messages,
-          tools: toolbox.definitions,
+          onDelta: onDelta,
         );
       } catch (e) {
-        // 部分模型不支持 tools：首轮失败时退回普通对话
-        if (iteration == 0 && steps.isEmpty) {
+        // 部分模型不支持 tools / 流式：首轮失败时退回普通对话
+        if (iteration == 0 && steps.isEmpty && e is! AgentCancelled) {
           final text = await LlmService.instance.chat(
             apiBase: apiBase,
             apiKey: apiKey,
             model: model,
             messages: messages,
           );
+          onDelta?.call(text);
           return AgentResult(text, steps);
         }
         rethrow;
@@ -104,6 +116,17 @@ class AgentService {
 
       // 没有工具调用：这就是最终回复
       if (calls.isEmpty) {
+        if (content.trim().isEmpty && steps.isEmpty) {
+          // 流式返回为空：退回非流式再试一次
+          final text = await LlmService.instance.chat(
+            apiBase: apiBase,
+            apiKey: apiKey,
+            model: model,
+            messages: messages,
+          );
+          onDelta?.call(text);
+          return AgentResult(text, steps);
+        }
         return AgentResult(
           content.trim().isEmpty ? '（模型没有返回内容）' : content,
           steps,
@@ -119,6 +142,7 @@ class AgentService {
       );
 
       for (final call in calls) {
+        if (isCancelled?.call() == true) throw const AgentCancelled();
         final id = call['id']?.toString() ?? '';
         final function = call['function'];
         final name = (function is Map ? function['name'] : null)?.toString() ?? '';
@@ -144,6 +168,31 @@ class AgentService {
       '已达到最大工具调用步数（$maxSteps），请查看已完成的修改或继续描述需求。',
       steps,
     );
+  }
+
+  /// 单轮流式调用，返回完整的 assistant message（含 tool_calls）
+  Future<Map<String, dynamic>> _streamOnce({
+    required String apiBase,
+    required String apiKey,
+    required String model,
+    required List<ChatMessage> messages,
+    void Function(String delta)? onDelta,
+  }) async {
+    Map<String, dynamic>? finalMessage;
+    await for (final chunk in LlmService.instance.streamChatMessage(
+      apiBase: apiBase,
+      apiKey: apiKey,
+      model: model,
+      messages: messages,
+      tools: toolbox.definitions,
+    )) {
+      if (chunk.deltaText != null) onDelta?.call(chunk.deltaText!);
+      if (chunk.finalMessage != null) finalMessage = chunk.finalMessage;
+    }
+    if (finalMessage == null) {
+      throw const LlmException('LLM 未返回内容');
+    }
+    return finalMessage;
   }
 
   Map<String, dynamic> _decodeArgs(dynamic raw) {

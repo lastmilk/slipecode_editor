@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../services/git_host.dart';
+import 'llm_profile.dart';
 
 /// 应用偏好设置
 class AppSettings {
@@ -32,7 +33,27 @@ class AppSettings {
   final String llmApiKey;
 
   /// 模型名称，例如 gpt-4o-mini / claude-sonnet / qwen-plus
+  ///
+  /// 仅用于兼容旧版本；新代码请使用 [llmProfiles] / [activeLlm]。
   final String llmModel;
+
+  /// 多模型配置（Provider Profile）
+  final List<LlmProfile> llmProfiles;
+
+  /// 当前激活的模型 id
+  final String activeLlmId;
+
+  /// 是否把模型配置（含 API Key）同步到云端
+  final bool llmCloudSync;
+
+  /// 是否把 AI 对话记录同步到云端
+  final bool chatCloudSync;
+
+  /// 云同步网络策略：wifi / any / never
+  final String syncNetwork;
+
+  /// 云端壁纸版本号（用于判断是否需要重新下载）
+  final String wallpaperCloudVersion;
 
   // ---------------------------------------------------------------------------
   // 主题背景图片
@@ -96,6 +117,12 @@ class AppSettings {
     this.llmApiBase = '',
     this.llmApiKey = '',
     this.llmModel = 'gpt-4o-mini',
+    this.llmProfiles = const [],
+    this.activeLlmId = '',
+    this.llmCloudSync = false,
+    this.chatCloudSync = false,
+    this.syncNetwork = 'wifi',
+    this.wallpaperCloudVersion = '',
     this.backgroundImagePath = '',
     this.backgroundImageScope = backgroundScopeGlobal,
     this.backgroundImageOpacity = 0.15,
@@ -110,8 +137,16 @@ class AppSettings {
   static const defaults = AppSettings();
 
   /// 是否已配置 LLM（可用于 AI 助手）
-  bool get isLlmConfigured =>
-      llmApiBase.isNotEmpty && llmApiKey.isNotEmpty && llmModel.isNotEmpty;
+  bool get isLlmConfigured => activeLlm?.isConfigured ?? false;
+
+  /// 当前激活的模型配置
+  LlmProfile? get activeLlm {
+    if (llmProfiles.isEmpty) return null;
+    for (final profile in llmProfiles) {
+      if (profile.id == activeLlmId) return profile;
+    }
+    return llmProfiles.first;
+  }
 
   AppSettings copyWith({
     ThemeMode? themeMode,
@@ -123,6 +158,12 @@ class AppSettings {
     String? llmApiBase,
     String? llmApiKey,
     String? llmModel,
+    List<LlmProfile>? llmProfiles,
+    String? activeLlmId,
+    bool? llmCloudSync,
+    bool? chatCloudSync,
+    String? syncNetwork,
+    String? wallpaperCloudVersion,
     String? backgroundImagePath,
     String? backgroundImageScope,
     double? backgroundImageOpacity,
@@ -143,6 +184,13 @@ class AppSettings {
       llmApiBase: llmApiBase ?? this.llmApiBase,
       llmApiKey: llmApiKey ?? this.llmApiKey,
       llmModel: llmModel ?? this.llmModel,
+      llmProfiles: llmProfiles ?? this.llmProfiles,
+      activeLlmId: activeLlmId ?? this.activeLlmId,
+      llmCloudSync: llmCloudSync ?? this.llmCloudSync,
+      chatCloudSync: chatCloudSync ?? this.chatCloudSync,
+      syncNetwork: syncNetwork ?? this.syncNetwork,
+      wallpaperCloudVersion:
+          wallpaperCloudVersion ?? this.wallpaperCloudVersion,
       backgroundImagePath: backgroundImagePath ?? this.backgroundImagePath,
       backgroundImageScope: backgroundImageScope ?? this.backgroundImageScope,
       backgroundImageOpacity:
@@ -158,34 +206,75 @@ class AppSettings {
     );
   }
 
-  Map<String, dynamic> toJson() => {
-        'themeMode': switch (themeMode) {
-          ThemeMode.system => 'system',
-          ThemeMode.light => 'light',
-          ThemeMode.dark => 'dark',
-        },
-        'editorFontSize': editorFontSize,
-        'autoSave': autoSave,
-        'showSaying': showSaying,
-        'defaultGitHost': defaultGitHost.id,
-        'createRepoOnCreate': createRepoOnCreate,
-        'llmApiBase': llmApiBase,
-        'llmApiKey': llmApiKey,
-        'llmModel': llmModel,
-        'backgroundImagePath': backgroundImagePath,
-        'backgroundImageScope': backgroundImageScope,
-        'backgroundImageOpacity': backgroundImageOpacity,
-        'aiFloatingBallEnabled': aiFloatingBallEnabled,
-        'systemOverlayEnabled': systemOverlayEnabled,
-        'completionEnabled': completionEnabled,
-        'volumeKeyCompletionEnabled': volumeKeyCompletionEnabled,
-        'homeTitle': homeTitle,
-        'avatarPath': avatarPath,
-      };
+  Map<String, dynamic> toJson({bool includeSecrets = true}) {
+    final llm = activeLlm;
+    return {
+      'themeMode': switch (themeMode) {
+        ThemeMode.system => 'system',
+        ThemeMode.light => 'light',
+        ThemeMode.dark => 'dark',
+      },
+      'editorFontSize': editorFontSize,
+      'autoSave': autoSave,
+      'showSaying': showSaying,
+      'defaultGitHost': defaultGitHost.id,
+      'createRepoOnCreate': createRepoOnCreate,
+      // 旧字段继续输出，便于旧版本读取；Key 是否输出由 includeSecrets 决定
+      'llmApiBase': llm?.apiBase ?? llmApiBase,
+      'llmApiKey': includeSecrets ? (llm?.apiKey ?? llmApiKey) : '',
+      'llmModel': llm?.model ?? llmModel,
+      'llmProfiles': llmProfiles
+          .map((profile) => profile.toJson(includeKey: includeSecrets))
+          .toList(),
+      'activeLlmId': activeLlmId,
+      'llmCloudSync': llmCloudSync,
+      'chatCloudSync': chatCloudSync,
+      'syncNetwork': syncNetwork,
+      'wallpaperCloudVersion': wallpaperCloudVersion,
+      'backgroundImagePath': backgroundImagePath,
+      'backgroundImageScope': backgroundImageScope,
+      'backgroundImageOpacity': backgroundImageOpacity,
+      'aiFloatingBallEnabled': aiFloatingBallEnabled,
+      'systemOverlayEnabled': systemOverlayEnabled,
+      'completionEnabled': completionEnabled,
+      'volumeKeyCompletionEnabled': volumeKeyCompletionEnabled,
+      'homeTitle': homeTitle,
+      'avatarPath': avatarPath,
+    };
+  }
 
   factory AppSettings.fromJson(Map<String, dynamic>? json) {
     if (json == null) return defaults;
     final mode = json['themeMode'] as String?;
+
+    // 多模型配置；为空且旧字段有值时做一次性迁移
+    final profiles = <LlmProfile>[];
+    final rawProfiles = json['llmProfiles'];
+    if (rawProfiles is List) {
+      for (final item in rawProfiles) {
+        if (item is Map) {
+          profiles.add(LlmProfile.fromJson(Map<String, dynamic>.from(item)));
+        }
+      }
+    }
+    var activeLlmId = json['activeLlmId'] as String? ?? '';
+    if (profiles.isEmpty) {
+      final legacyBase = json['llmApiBase'] as String? ?? '';
+      if (legacyBase.isNotEmpty) {
+        final legacyModel = json['llmModel'] as String? ?? '';
+        profiles.add(
+          LlmProfile(
+            id: 'legacy',
+            name: '默认模型',
+            apiBase: legacyBase,
+            apiKey: json['llmApiKey'] as String? ?? '',
+            model: legacyModel.isEmpty ? defaults.llmModel : legacyModel,
+          ),
+        );
+        activeLlmId = 'legacy';
+      }
+    }
+
     return AppSettings(
       themeMode: switch (mode) {
         'light' => ThemeMode.light,
@@ -203,6 +292,14 @@ class AppSettings {
       llmApiBase: json['llmApiBase'] as String? ?? defaults.llmApiBase,
       llmApiKey: json['llmApiKey'] as String? ?? defaults.llmApiKey,
       llmModel: json['llmModel'] as String? ?? defaults.llmModel,
+      llmProfiles: profiles,
+      activeLlmId: activeLlmId,
+      llmCloudSync: json['llmCloudSync'] as bool? ?? defaults.llmCloudSync,
+      chatCloudSync: json['chatCloudSync'] as bool? ?? defaults.chatCloudSync,
+      syncNetwork: json['syncNetwork'] as String? ?? defaults.syncNetwork,
+      wallpaperCloudVersion:
+          json['wallpaperCloudVersion'] as String? ??
+              defaults.wallpaperCloudVersion,
       backgroundImagePath:
           json['backgroundImagePath'] as String? ?? defaults.backgroundImagePath,
       backgroundImageScope: switch (json['backgroundImageScope'] as String?) {

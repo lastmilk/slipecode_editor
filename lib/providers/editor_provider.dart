@@ -145,17 +145,30 @@ class EditorProvider extends ChangeNotifier {
     return saveFile(_activeFile!.path);
   }
 
-  /// 保存指定文件
+  /// 保存指定文件（原位替换，保持标签顺序）
   Future<bool> saveFile(String path) async {
-    final file = _openFiles.where((f) => f.path == path).firstOrNull;
-    if (file == null) return false;
+    final index = _openFiles.indexWhere((f) => f.path == path);
+    if (index == -1) return false;
+    final file = _openFiles[index];
+    return _writeAndRefresh(index, file.content);
+  }
 
+  /// 把指定内容写入文件并刷新保存基线
+  ///
+  /// 用于自动保存：定时器捕获的是「改动时的文件路径 + 内容」快照，
+  /// 避免用户切换标签后把内容写到别的文件里。
+  Future<bool> saveContent(String path, String content) async {
+    final index = _openFiles.indexWhere((f) => f.path == path);
+    if (index == -1) return false;
+    return _writeAndRefresh(index, content);
+  }
+
+  Future<bool> _writeAndRefresh(int index, String content) async {
+    final path = _openFiles[index].path;
     try {
-      await _fileService.writeFile(path, file.content);
-      // 重新从文件创建以更新 originalContent
-      _openFiles.removeWhere((f) => f.path == path);
-      final freshFile = OpenFile(path: path, content: file.content);
-      _openFiles.add(freshFile);
+      await _fileService.writeFile(path, content);
+      final freshFile = OpenFile(path: path, content: content);
+      _openFiles[index] = freshFile;
       if (_activeFile?.path == path) {
         _activeFile = freshFile;
       }
@@ -165,6 +178,33 @@ class EditorProvider extends ChangeNotifier {
       debugPrint('Error saving file $path: $e');
       return false;
     }
+  }
+
+  /// 替换文件中一段文本并立即保存（VibeCoding 删除触发词用）
+  Future<bool> replaceRangeAndSave(
+    String path,
+    int start,
+    int end,
+    String replacement,
+  ) async {
+    final index = _openFiles.indexWhere((f) => f.path == path);
+    if (index == -1) return false;
+    final file = _openFiles[index];
+    if (start < 0 ||
+        end > file.content.length ||
+        start > end) {
+      return false;
+    }
+    file.updateContent(file.content.replaceRange(start, end, replacement));
+    return _writeAndRefresh(index, file.content);
+  }
+
+  /// 指定文件是否有未保存修改
+  bool isModified(String path) {
+    for (final file in _openFiles) {
+      if (file.path == path) return file.isModified;
+    }
+    return false;
   }
 
   /// 保存所有已修改的文件

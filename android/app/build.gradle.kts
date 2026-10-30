@@ -54,6 +54,8 @@ kotlin {
 
 dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
+    // 极验验证码 SDK（GT4，来自 gt4-android-sec.zip）
+    implementation(files("libs/geetest_captcha_android.aar"))
 }
 
 flutter {

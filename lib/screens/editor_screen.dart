@@ -7,6 +7,8 @@ import 'package:path/path.dart' as p;
 import 'package:provider/provider.dart';
 
 import '../models/file_node.dart';
+import '../models/open_file.dart';
+import '../providers/ai_provider.dart';
 import '../providers/editor_provider.dart';
 import '../providers/git_sync_provider.dart';
 import '../providers/project_provider.dart';
@@ -35,9 +37,12 @@ class EditorScreen extends StatefulWidget {
 }
 
 class _EditorScreenState extends State<EditorScreen>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   bool _showSidebar = false;
   Timer? _autoSaveTimer;
+
+  /// 已确认退出（避免 PopScope 重复拦截）
+  bool _allowPop = false;
 
   /// 侧边栏标签控制器（0=文件，1=Agent）
   late final TabController _sidebarTabController;
@@ -54,6 +59,7 @@ class _EditorScreenState extends State<EditorScreen>
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _sidebarTabController = TabController(length: 2, vsync: this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final projectProvider = context.read<ProjectProvider>();
@@ -70,6 +76,9 @@ class _EditorScreenState extends State<EditorScreen>
   @override
   void dispose() {
     _autoSaveTimer?.cancel();
+    // 离开编辑器前把未落盘的改动写回（fire-and-forget，不阻塞销毁）
+    unawaited(_saveAllNow());
+    WidgetsBinding.instance.removeObserver(this);
     _sidebarTabController.dispose();
     _settingsProvider?.removeListener(_syncVolumeKeyListener);
     // 离开编辑器时取消音量键拦截，恢复正常音量调节
@@ -118,17 +127,117 @@ class _EditorScreenState extends State<EditorScreen>
   // 行为
   // ---------------------------------------------------------------------------
 
+  /// 自动保存：捕获「改动时的文件路径 + 内容」快照，避免切换标签后存错文件
   void _scheduleAutoSave() {
-    if (!context.read<SettingsProvider>().settings.autoSave) return;
+    final editorProvider = context.read<EditorProvider>();
+    final active = editorProvider.activeFile;
+    if (active == null) return;
+    final path = active.path;
+    final content = active.content;
     _autoSaveTimer?.cancel();
+    if (!context.read<SettingsProvider>().settings.autoSave) return;
     _autoSaveTimer = Timer(const Duration(seconds: 1), () async {
-      final editorProvider = context.read<EditorProvider>();
-      if (!mounted || !editorProvider.hasActiveFile) return;
-      final path = editorProvider.activeFile!.path;
-      final ok = await editorProvider.saveActiveFile();
+      final ok = await editorProvider.saveContent(path, content);
       if (!mounted || !ok) return;
       context.read<GitSyncProvider>().markChanged(path);
     });
+  }
+
+  /// 立即把所有未保存文件写盘（退出 / 切后台 / 销毁时调用）
+  Future<void> _saveAllNow() async {
+    try {
+      final editorProvider = context.read<EditorProvider>();
+      final gitSync = context.read<GitSyncProvider>();
+      final modified = List<OpenFile>.from(
+        editorProvider.openFiles.where((file) => file.isModified),
+      );
+      for (final file in modified) {
+        if (await editorProvider.saveFile(file.path)) {
+          gitSync.markChanged(file.path);
+        }
+      }
+    } catch (e) {
+      debugPrint('保存未落盘改动失败：$e');
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused) {
+      unawaited(_saveAllNow());
+    }
+  }
+
+  /// 退出编辑器前的未保存确认
+  Future<bool> _confirmExit() async {
+    final editorProvider = context.read<EditorProvider>();
+    if (!editorProvider.hasUnsavedChanges) return true;
+    final count =
+        editorProvider.openFiles.where((file) => file.isModified).length;
+    final action = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('有未保存的文件'),
+        content: Text('$count 个文件尚未保存，是否保存后退出？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop('cancel'),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop('discard'),
+            child: const Text('不保存'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop('save'),
+            child: const Text('保存并退出'),
+          ),
+        ],
+      ),
+    );
+    if (action == 'save') {
+      await _saveAllNow();
+      return true;
+    }
+    return action == 'discard';
+  }
+
+  /// 关闭标签：有未保存修改时先确认
+  Future<void> _handleCloseTab(OpenFile file) async {
+    final editorProvider = context.read<EditorProvider>();
+    if (!file.isModified) {
+      editorProvider.closeFile(file.path);
+      return;
+    }
+    final action = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('保存「${file.name}」？'),
+        content: const Text('该文件有未保存的修改。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop('cancel'),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop('discard'),
+            child: const Text('不保存'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop('save'),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || action == null || action == 'cancel') return;
+    if (action == 'save') {
+      final ok = await editorProvider.saveFile(file.path);
+      if (!mounted || !ok) return;
+      context.read<GitSyncProvider>().markChanged(file.path);
+    }
+    editorProvider.closeFile(file.path);
   }
 
   Future<void> _handleFileTap(String path) async {
@@ -455,8 +564,18 @@ class _EditorScreenState extends State<EditorScreen>
     final screenWidth = MediaQuery.of(context).size.width;
     final sidebarWidth = math.min(300.0, screenWidth * 0.82);
 
-    return Scaffold(
-      appBar: AppBar(
+    return PopScope(
+      canPop: _allowPop,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop) return;
+        final navigator = Navigator.of(context);
+        final ok = await _confirmExit();
+        if (!ok || !mounted) return;
+        setState(() => _allowPop = true);
+        navigator.pop();
+      },
+      child: Scaffold(
+        appBar: AppBar(
         title: Text(
           projectProvider.projectPath?.split(RegExp(r'[/\\]')).last ?? '编辑器',
         ),
@@ -502,7 +621,7 @@ class _EditorScreenState extends State<EditorScreen>
             // 编辑区占满整个宽度（修复侧边栏挤压编辑器的问题）
             Column(
               children: [
-                const EditorTabs(),
+                EditorTabs(onRequestClose: _handleCloseTab),
                 Expanded(
                   child: editorProvider.hasActiveFile
                       ? _buildEditor(
@@ -553,6 +672,7 @@ class _EditorScreenState extends State<EditorScreen>
             if (settings.aiFloatingBallEnabled)
               AiFloatingBall(onTap: _openAgentPanel),
           ],
+        ),
         ),
       ),
     );
@@ -704,6 +824,8 @@ class _EditorScreenState extends State<EditorScreen>
     final activeFile = editorProvider.activeFile!;
     final language = _detectLanguage(activeFile.path);
     final enableCompletion = completionEnabled && language == 'dart';
+    final ai = context.watch<AiProvider>();
+    final vibeBusy = ai.vibeBusy;
 
     return Column(
       children: [
@@ -723,20 +845,95 @@ class _EditorScreenState extends State<EditorScreen>
           ),
         ),
         Expanded(
-          child: CodeEditor(
-            key: _codeEditorKey,
-            initialContent: activeFile.content,
-            language: language,
-            fontSize: fontSize,
-            enableCompletion: enableCompletion,
-            translucent: translucent,
-            onChanged: (content) {
-              editorProvider.updateActiveContent(content);
-              _scheduleAutoSave();
-            },
+          child: Stack(
+            children: [
+              // VibeCoding 执行期间锁定编辑区，把空间留给 AI
+              AbsorbPointer(
+                absorbing: vibeBusy,
+                child: CodeEditor(
+                  key: _codeEditorKey,
+                  initialContent: activeFile.content,
+                  language: language,
+                  fontSize: fontSize,
+                  enableCompletion: enableCompletion,
+                  translucent: translucent,
+                  readOnly: vibeBusy,
+                  onVibeRequest: (requirement, lineStart, lineEnd) {
+                    ai.runVibeCoding(
+                      filePath: activeFile.path,
+                      requirement: requirement,
+                      lineStart: lineStart,
+                      lineEnd: lineEnd,
+                    );
+                  },
+                  onChanged: (content) {
+                    editorProvider.updateActiveContent(content);
+                    _scheduleAutoSave();
+                  },
+                ),
+              ),
+              if (vibeBusy) _buildVibeOverlay(ai, isDark),
+            ],
           ),
         ),
       ],
+    );
+  }
+
+  /// VibeCoding 进行中的遮罩：提示 + 思考片段 + 取消
+  Widget _buildVibeOverlay(AiProvider ai, bool isDark) {
+    final thinking = ai.vibeThinking.trim();
+    return Positioned(
+      left: 8,
+      right: 8,
+      top: 8,
+      child: Material(
+        color: isDark ? const Color(0xF0202020) : const Color(0xF0FFFFFF),
+        elevation: 4,
+        borderRadius: BorderRadius.circular(10),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                  const SizedBox(width: 8),
+                  const Expanded(
+                    child: Text(
+                      'AI 正在编辑 · 可在侧边栏 Agent 面板查看思考过程',
+                      style: TextStyle(fontSize: 12),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: ai.cancelVibe,
+                    child: const Text('取消', style: TextStyle(fontSize: 12)),
+                  ),
+                ],
+              ),
+              if (thinking.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4, right: 8),
+                  child: Text(
+                    thinking,
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 11,
+                      height: 1.4,
+                      color: isDark ? Colors.white54 : Colors.black54,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 

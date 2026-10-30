@@ -4,6 +4,11 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 
 import '../services/account_service.dart';
+import '../services/avatar_service.dart';
+import '../services/project_sync_service.dart';
+import '../services/wallpaper_sync_service.dart';
+import 'gitee_provider.dart';
+import 'github_provider.dart';
 import 'settings_provider.dart';
 
 enum AccountStatus { signedOut, signingIn, signedIn }
@@ -17,6 +22,18 @@ class AccountProvider extends ChangeNotifier {
 
   final SettingsProvider _settings;
 
+  /// Git 平台 Provider（用于项目/仓库映射同步），由 main 注入
+  GitHubProvider? _github;
+  GiteeProvider? _gitee;
+
+  void attachSyncProviders({
+    GitHubProvider? github,
+    GiteeProvider? gitee,
+  }) {
+    _github = github;
+    _gitee = gitee;
+  }
+
   AccountStatus _status = AccountStatus.signedOut;
   AccountUser? _user;
   String? _token;
@@ -27,6 +44,9 @@ class AccountProvider extends ChangeNotifier {
 
   AccountStatus get status => _status;
   AccountUser? get user => _user;
+
+  /// 当前账号 token（用于 SLIPE 云端模型 / 同步接口）
+  String? get token => _token;
   String? get error => _error;
   DateTime? get lastSyncAt => _lastSyncAt;
   bool get isSignedIn => _status == AccountStatus.signedIn && _token != null;
@@ -55,7 +75,7 @@ class AccountProvider extends ChangeNotifier {
       _token = token;
       _status = AccountStatus.signedIn;
       _safeNotify();
-      await _pullSettings();
+      await _syncAfterLogin();
     } catch (e) {
       debugPrint('恢复账号登录失败：$e');
       // 网络不可达/后端未部署时降级为未登录，但保留 token 以便下次重试；
@@ -74,22 +94,48 @@ class AccountProvider extends ChangeNotifier {
     required String email,
     required String password,
     required String displayName,
+    required String phone,
+    required String smsCode,
+    Map<String, dynamic>? captcha,
+    String captchaPlatform = 'android',
   }) async {
     return _authenticate(
       () => AccountService.instance.register(
         email: email,
         password: password,
         displayName: displayName,
+        phone: phone,
+        smsCode: smsCode,
+        captcha: captcha,
+        captchaPlatform: captchaPlatform,
       ),
     );
+  }
+
+  /// 发送注册短信验证码，返回 (ok, dev, devCode)
+  Future<(bool, bool, String?)> sendSmsCode(String phone) async {
+    try {
+      return await AccountService.instance.sendSmsCode(phone);
+    } catch (e) {
+      _error = '$e';
+      _safeNotify();
+      return (false, false, null);
+    }
   }
 
   Future<bool> login({
     required String email,
     required String password,
+    Map<String, dynamic>? captcha,
+    String captchaPlatform = 'android',
   }) async {
     return _authenticate(
-      () => AccountService.instance.login(email: email, password: password),
+      () => AccountService.instance.login(
+        email: email,
+        password: password,
+        captcha: captcha,
+        captchaPlatform: captchaPlatform,
+      ),
     );
   }
 
@@ -111,8 +157,8 @@ class AccountProvider extends ChangeNotifier {
       _user = user;
       _status = AccountStatus.signedIn;
       _safeNotify();
-      // 登录后优先使用云端设置
-      await _pullSettings();
+      // 登录后：设置 → 项目/仓库 → 头像 → 壁纸
+      await _syncAfterLogin();
       return true;
     } catch (e) {
       _error = '$e';
@@ -172,10 +218,12 @@ class AccountProvider extends ChangeNotifier {
   Future<void> _pullSettings() async {
     final remote = await AccountService.instance.fetchSettings(_token!);
     if (remote == null || remote.isEmpty) {
-      // 云端还没有设置：把本地设置作为初始版本
+      // 云端还没有设置：把本地设置作为初始版本（API Key 是否上传取决于用户开关）
       await AccountService.instance.pushSettings(
         _token!,
-        _settings.settings.toJson(),
+        _settings.settings.toJson(
+          includeSecrets: _settings.settings.llmCloudSync,
+        ),
       );
       _lastSyncAt = DateTime.now();
     } else {
@@ -183,6 +231,102 @@ class AccountProvider extends ChangeNotifier {
       _lastSyncAt = DateTime.now();
     }
     _safeNotify();
+  }
+
+  /// 登录后的完整同步：设置 → 项目/仓库映射 → 头像 → 壁纸
+  Future<void> _syncAfterLogin() async {
+    try {
+      await _pullSettings();
+    } catch (e) {
+      _error = '设置同步失败：$e';
+      _safeNotify();
+    }
+    await syncProjectsNow();
+    await _syncAvatar();
+    await _syncWallpaper();
+  }
+
+  /// 立即同步项目列表与仓库映射（设置页「立即同步」也会调用）
+  Future<bool> syncProjectsNow() async {
+    if (!isSignedIn) return false;
+    try {
+      await ProjectSyncService.instance.sync(
+        token: _token!,
+        settings: _settings.settings,
+        github: _github,
+        gitee: _gitee,
+      );
+      _lastSyncAt = DateTime.now();
+      _error = null;
+      _safeNotify();
+      return true;
+    } catch (e) {
+      _error = '项目同步失败：$e';
+      _safeNotify();
+      return false;
+    }
+  }
+
+  /// 下载账号头像为本地头像
+  Future<void> _syncAvatar() async {
+    final user = _user;
+    if (user == null || user.avatarUrl.isEmpty) return;
+    try {
+      final path = await AvatarService.downloadToLocal(user.avatarUrl);
+      if (path != null) {
+        await _settings.applyServerAvatarPath(path);
+      }
+    } catch (e) {
+      debugPrint('头像同步失败：$e');
+    }
+  }
+
+  /// 云端壁纸有更新时自动下载
+  Future<void> _syncWallpaper() async {
+    if (_token == null) return;
+    try {
+      final result = await WallpaperSyncService.downloadIfNewer(
+        token: _token!,
+        settings: _settings.settings,
+      );
+      if (result != null) {
+        await _settings.applyServerWallpaperPath(result.path, result.version);
+      }
+    } catch (e) {
+      debugPrint('壁纸同步失败：$e');
+    }
+  }
+
+  /// 上传本地头像到账号（本地头像已先保存）
+  Future<bool> uploadAvatar(String localPath) async {
+    if (!isSignedIn) return false;
+    try {
+      await AvatarService.uploadFile(token: _token!, path: localPath);
+      return true;
+    } catch (e) {
+      _error = '头像上传失败：$e';
+      _safeNotify();
+      return false;
+    }
+  }
+
+  /// 上传本地壁纸到云端（类型/大小/网络不满足时静默跳过）
+  Future<bool> uploadWallpaper(String localPath) async {
+    if (!isSignedIn) return false;
+    try {
+      final version = await WallpaperSyncService.uploadIfEligible(
+        token: _token!,
+        settings: _settings.settings,
+        path: localPath,
+      );
+      if (version == null) return false;
+      await _settings.applyServerWallpaperPath(localPath, version);
+      return true;
+    } catch (e) {
+      _error = '壁纸上传失败：$e';
+      _safeNotify();
+      return false;
+    }
   }
 
   @override

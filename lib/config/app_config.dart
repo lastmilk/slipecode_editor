@@ -104,4 +104,17 @@ class AppConfig {
   static String get githubTokenEndpoint => accountBackendBase.isEmpty
       ? ''
       : '$accountBackendBase/api/oauth/github/token';
+
+  // ---------------------------------------------------------------------------
+  // 极验验证码（GT4）
+  // ---------------------------------------------------------------------------
+
+  /// 极验 Captcha ID（公开信息；校验用的 Key 只存在后端）
+  static String get geetestCaptchaId => _env(
+        'GEETEST_CAPTCHA_ID',
+        'bad52dace656f61eab4b052c157d00b2',
+      );
+
+  /// 是否已配置极验
+  static bool get isGeetestConfigured => geetestCaptchaId.isNotEmpty;
 }

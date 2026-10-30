@@ -229,6 +229,9 @@ class GitHubApiService {
   }
 
   /// 创建私有/公开仓库（在授权用户名下）
+  ///
+  /// 使用 `auto_init: true`：仓库创建后立即带有初始提交与默认分支，
+  /// 可避免空仓库下 git 数据接口返回 409（`Git Repository is empty`）。
   Future<GitHubRepo> createRepo(
     String name, {
     bool private = true,
@@ -238,14 +241,16 @@ class GitHubApiService {
       'name': name,
       'private': private,
       'description': description,
-      'auto_init': false,
+      'auto_init': true,
     });
     return GitHubRepo.fromJson(json);
   }
 
   /// 获取仓库信息；不存在时返回 null
   Future<GitHubRepo?> getRepo(String fullName) async {
-    final res = await _client.get(_u('/repos/$fullName'), headers: _headers);
+    final res = await _client
+        .get(_u('/repos/$fullName'), headers: _headers)
+        .timeout(_timeout);
     if (res.statusCode == 404) return null;
     _check(res, 'GET /repos/$fullName');
     return GitHubRepo.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
@@ -253,10 +258,12 @@ class GitHubApiService {
 
   /// 判断仓库中是否存在某个文件
   Future<bool> fileExists(String fullName, String path, String branch) async {
-    final res = await _client.get(
-      _u('/repos/$fullName/contents/$path', {'ref': branch}),
-      headers: _headers,
-    );
+    final res = await _client
+        .get(
+          _u('/repos/$fullName/contents/$path', {'ref': branch}),
+          headers: _headers,
+        )
+        .timeout(_timeout);
     if (res.statusCode == 404) return false;
     _check(res, 'GET contents/$path');
     return true;
@@ -268,7 +275,8 @@ class GitHubApiService {
 
   /// 推送一批文件到指定分支（单次 commit）。
   ///
-  /// - 空仓库（无 commits）时创建初始提交；
+  /// - 空仓库 / 分支并发创建等场景，GitHub 会返回 409 或 422；
+  ///   这里最多重试 3 次（重新读取 HEAD 后再推送），避免建仓后首次推送失败；
   /// - 文本文件直接内联 content，二进制文件先创建 blob。
   Future<PushResult> pushFiles(
     String fullName,
@@ -279,14 +287,44 @@ class GitHubApiService {
     if (files.isEmpty) {
       throw ArgumentError('没有需要推送的文件');
     }
+    Object? lastError;
+    for (var attempt = 0; attempt < 3; attempt++) {
+      try {
+        return await _pushFilesOnce(
+          fullName,
+          files,
+          message: message,
+          branch: branch,
+        );
+      } catch (e) {
+        lastError = e;
+        final retryable = e is HttpExceptionWithBody &&
+            (e.message.contains('HTTP 409') ||
+                e.message.contains('HTTP 422'));
+        if (!retryable || attempt == 2) rethrow;
+        await Future.delayed(Duration(milliseconds: 800 * (attempt + 1)));
+      }
+    }
+    throw lastError!;
+  }
+
+  /// 单次推送实现（分支并发变化时由 [pushFiles] 重试）
+  Future<PushResult> _pushFilesOnce(
+    String fullName,
+    List<RepoFile> files, {
+    required String message,
+    String branch = 'main',
+  }) async {
 
     // 1. 取当前分支 HEAD（空仓库会 404/409）
     String? headCommitSha;
     String? baseTreeSha;
-    final refRes = await _client.get(
-      _u('/repos/$fullName/git/ref/heads/$branch'),
-      headers: _headers,
-    );
+    final refRes = await _client
+        .get(
+          _u('/repos/$fullName/git/ref/heads/$branch'),
+          headers: _headers,
+        )
+        .timeout(_timeout);
     if (refRes.statusCode == 200) {
       final ref = jsonDecode(refRes.body) as Map<String, dynamic>;
       headCommitSha = (ref['object'] as Map<String, dynamic>)['sha'] as String;

@@ -5,7 +5,10 @@ import '../providers/editor_provider.dart';
 
 /// 编辑器标签栏组件
 class EditorTabs extends StatelessWidget {
-  const EditorTabs({super.key});
+  const EditorTabs({super.key, this.onRequestClose});
+
+  /// 关闭标签前的回调（用于未保存确认）；为空时直接关闭
+  final void Function(OpenFile file)? onRequestClose;
 
   @override
   Widget build(BuildContext context) {
@@ -32,7 +35,13 @@ class EditorTabs extends StatelessWidget {
             isActive: isActive,
             isDark: isDark,
             onTap: () => editor.setActiveFile(file.path),
-            onClose: () => editor.closeFile(file.path),
+            onClose: () {
+              if (onRequestClose != null) {
+                onRequestClose!(file);
+              } else {
+                editor.closeFile(file.path);
+              }
+            },
           );
         },
       ),
