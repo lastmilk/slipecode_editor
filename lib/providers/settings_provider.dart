@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../l10n/app_localizations.dart';
 import '../models/app_settings.dart';
 import '../models/llm_profile.dart';
 import '../services/git_host.dart';
@@ -35,6 +36,7 @@ class SettingsProvider extends ChangeNotifier {
         _settings = AppSettings.defaults;
       }
     }
+    L10n.apply(_settings.language);
     _loaded = true;
     notifyListeners();
   }
@@ -64,7 +66,10 @@ class SettingsProvider extends ChangeNotifier {
       llmProfiles: mergedProfiles,
       backgroundImagePath: _settings.backgroundImagePath,
       avatarPath: _settings.avatarPath,
+      // 应用锁属于设备本地安全设置，不跟随云端
+      appLockEnabled: _settings.appLockEnabled,
     );
+    L10n.apply(_settings.language);
     await _persist();
     notifyListeners();
   }
@@ -81,8 +86,25 @@ class SettingsProvider extends ChangeNotifier {
     await _save();
   }
 
-  Future<void> setAutoSave(bool value) async {
-    _settings = _settings.copyWith(autoSave: value);
+  /// 切换界面语言（立即生效，无需重启）
+  Future<void> setLanguage(String language) async {
+    _settings = _settings.copyWith(language: language);
+    L10n.apply(language);
+    await _save();
+  }
+
+  Future<void> setFontFamily(String fontFamily) async {
+    _settings = _settings.copyWith(fontFamily: fontFamily);
+    await _save();
+  }
+
+  Future<void> setAiApprovalEnabled(bool value) async {
+    _settings = _settings.copyWith(aiApprovalEnabled: value);
+    await _save();
+  }
+
+  Future<void> setAppLockEnabled(bool value) async {
+    _settings = _settings.copyWith(appLockEnabled: value);
     await _save();
   }
 

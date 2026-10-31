@@ -3,6 +3,23 @@ import 'package:flutter/material.dart';
 import '../services/git_host.dart';
 import 'llm_profile.dart';
 
+/// 可选的常见字体
+class AppFontOption {
+  final String id;
+  final String label;
+  const AppFontOption(this.id, this.label);
+}
+
+const List<AppFontOption> appFontOptions = [
+  AppFontOption('', '系统默认'),
+  AppFontOption('sans-serif', '无衬线'),
+  AppFontOption('serif', '衬线'),
+  AppFontOption('monospace', '等宽'),
+  AppFontOption('Roboto', 'Roboto'),
+  AppFontOption('Noto Sans SC', 'Noto Sans SC（思源黑体）'),
+  AppFontOption('Source Han Serif', '思源宋体'),
+];
+
 /// 应用偏好设置
 class AppSettings {
   final ThemeMode themeMode;
@@ -10,8 +27,17 @@ class AppSettings {
   /// 编辑器字号
   final double editorFontSize;
 
-  /// 编辑后自动保存
-  final bool autoSave;
+  /// 界面语言：zh（简体）/ zhHant（繁体）/ en（英文）
+  final String language;
+
+  /// 应用字体族（空字符串表示系统默认）
+  final String fontFamily;
+
+  /// AI 改动写盘前是否需要用户审批
+  final bool aiApprovalEnabled;
+
+  /// 是否开启应用锁（生物认证 + 密码兜底）
+  final bool appLockEnabled;
 
   /// 首页显示随机语句
   final bool showSaying;
@@ -110,7 +136,10 @@ class AppSettings {
   const AppSettings({
     this.themeMode = ThemeMode.system,
     this.editorFontSize = 14,
-    this.autoSave = true,
+    this.language = 'zh',
+    this.fontFamily = '',
+    this.aiApprovalEnabled = true,
+    this.appLockEnabled = false,
     this.showSaying = true,
     this.defaultGitHost = GitHost.github,
     this.createRepoOnCreate = true,
@@ -151,7 +180,10 @@ class AppSettings {
   AppSettings copyWith({
     ThemeMode? themeMode,
     double? editorFontSize,
-    bool? autoSave,
+    String? language,
+    String? fontFamily,
+    bool? aiApprovalEnabled,
+    bool? appLockEnabled,
     bool? showSaying,
     GitHost? defaultGitHost,
     bool? createRepoOnCreate,
@@ -177,7 +209,10 @@ class AppSettings {
     return AppSettings(
       themeMode: themeMode ?? this.themeMode,
       editorFontSize: editorFontSize ?? this.editorFontSize,
-      autoSave: autoSave ?? this.autoSave,
+      language: language ?? this.language,
+      fontFamily: fontFamily ?? this.fontFamily,
+      aiApprovalEnabled: aiApprovalEnabled ?? this.aiApprovalEnabled,
+      appLockEnabled: appLockEnabled ?? this.appLockEnabled,
       showSaying: showSaying ?? this.showSaying,
       defaultGitHost: defaultGitHost ?? this.defaultGitHost,
       createRepoOnCreate: createRepoOnCreate ?? this.createRepoOnCreate,
@@ -215,7 +250,10 @@ class AppSettings {
         ThemeMode.dark => 'dark',
       },
       'editorFontSize': editorFontSize,
-      'autoSave': autoSave,
+      'language': language,
+      'fontFamily': fontFamily,
+      'aiApprovalEnabled': aiApprovalEnabled,
+      'appLockEnabled': appLockEnabled,
       'showSaying': showSaying,
       'defaultGitHost': defaultGitHost.id,
       'createRepoOnCreate': createRepoOnCreate,
@@ -283,7 +321,16 @@ class AppSettings {
       },
       editorFontSize: (json['editorFontSize'] as num?)?.toDouble() ??
           defaults.editorFontSize,
-      autoSave: json['autoSave'] as bool? ?? defaults.autoSave,
+      language: switch (json['language'] as String?) {
+        'zhHant' => 'zhHant',
+        'en' => 'en',
+        _ => 'zh',
+      },
+      fontFamily: json['fontFamily'] as String? ?? defaults.fontFamily,
+      aiApprovalEnabled:
+          json['aiApprovalEnabled'] as bool? ?? defaults.aiApprovalEnabled,
+      appLockEnabled:
+          json['appLockEnabled'] as bool? ?? defaults.appLockEnabled,
       showSaying: json['showSaying'] as bool? ?? defaults.showSaying,
       defaultGitHost:
           GitHost.fromId(json['defaultGitHost'] as String?, fallback: GitHost.github),

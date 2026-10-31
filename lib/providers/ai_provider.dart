@@ -33,11 +33,14 @@ class AiProvider extends ChangeNotifier {
     BuildProvider build,
     this._project,
     this._account,
-  ) : _toolbox = McpToolbox(
-          project: _project,
-          editor: _editor,
-          build: build,
-        ) {
+  ) {
+    _toolbox = McpToolbox(
+      project: _project,
+      editor: _editor,
+      build: build,
+      // AI 改动落盘前必须获得用户审批（可在偏好设置中关闭）
+      approvalEnabled: () => _settings.settings.aiApprovalEnabled,
+    );
     _agent = AgentService(_project, _toolbox);
   }
 
@@ -46,7 +49,7 @@ class AiProvider extends ChangeNotifier {
   final ProjectProvider _project;
   final AccountProvider _account;
 
-  final McpToolbox _toolbox;
+  late final McpToolbox _toolbox;
   late final AgentService _agent;
 
   final List<ChatMessage> _messages = [];

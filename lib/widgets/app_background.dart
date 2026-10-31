@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -20,6 +21,11 @@ class AppBackground extends StatelessWidget {
     required this.child,
     this.isIdeScreen = false,
   });
+
+  /// 页面背景媒体需要感知路由切换：被其它页面遮挡时暂停，返回时恢复，
+  /// 避免多个 VideoPlayer 同时解码导致偶发暂停。
+  static final RouteObserver<PageRoute<dynamic>> routeObserver =
+      RouteObserver<PageRoute<dynamic>>();
 
   /// 叠加在背景之上的页面内容
   final Widget child;
@@ -61,9 +67,7 @@ class AppBackground extends StatelessWidget {
         Positioned.fill(
           child: Opacity(
             opacity: opacity,
-            child: isVideoPath(path)
-                ? _VideoWallpaper(key: ValueKey(path), path: path)
-                : Image.file(File(path), fit: BoxFit.cover),
+            child: _WallpaperMedia(key: ValueKey(path), path: path),
           ),
         ),
         child,
@@ -72,51 +76,147 @@ class AppBackground extends StatelessWidget {
   }
 }
 
-/// MP4 动态壁纸：静音、循环、铺满，无任何控制 UI
-class _VideoWallpaper extends StatefulWidget {
-  const _VideoWallpaper({super.key, required this.path});
+/// 动态壁纸（MP4 / GIF）：处理路由遮挡与 App 前后台切换导致的暂停
+class _WallpaperMedia extends StatefulWidget {
+  const _WallpaperMedia({super.key, required this.path});
 
   final String path;
 
   @override
-  State<_VideoWallpaper> createState() => _VideoWallpaperState();
+  State<_WallpaperMedia> createState() => _WallpaperMediaState();
 }
 
-class _VideoWallpaperState extends State<_VideoWallpaper> {
-  late final VideoPlayerController _controller;
+class _WallpaperMediaState extends State<_WallpaperMedia>
+    with WidgetsBindingObserver, RouteAware {
+  VideoPlayerController? _controller;
+  Timer? _watchdog;
+  PageRoute<dynamic>? _route;
   bool _ready = false;
+  bool _visible = true;
+
+  bool get _isVideo => AppBackground.isVideoPath(widget.path);
 
   @override
   void initState() {
     super.initState();
-    _controller = VideoPlayerController.file(File(widget.path))
-      ..setLooping(true)
-      ..setVolume(0)
-      ..initialize().then((_) {
-        if (!mounted) return;
-        setState(() => _ready = true);
-        _controller.play();
-      }).catchError((_) {
-        // 视频解码失败：保持黑底，不影响前景
+    WidgetsBinding.instance.addObserver(this);
+    if (_isVideo) {
+      _initVideo();
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final route = ModalRoute.of(context);
+    if (route is PageRoute<dynamic> && route != _route) {
+      if (_route != null) {
+        AppBackground.routeObserver.unsubscribe(this);
+      }
+      _route = route;
+      AppBackground.routeObserver.subscribe(this, route);
+    }
+  }
+
+  Future<void> _initVideo() async {
+    final controller = VideoPlayerController.file(File(widget.path));
+    _controller = controller;
+    try {
+      await controller.initialize();
+      if (!mounted) return;
+      await controller.setLooping(true);
+      await controller.setVolume(0);
+      setState(() => _ready = true);
+      _playIfVisible();
+      // 看门狗：系统回收资源或解码器空闲时自动恢复播放
+      _watchdog = Timer.periodic(const Duration(seconds: 2), (_) {
+        if (!mounted || !_visible) return;
+        final value = _controller?.value;
+        if (value == null || !value.isInitialized) return;
+        if (!value.isPlaying && !value.isCompleted) {
+          _controller?.play();
+        }
       });
+    } catch (_) {
+      // 视频解码失败：保持黑底，不影响前景
+      if (mounted) setState(() => _ready = false);
+    }
+  }
+
+  void _playIfVisible() {
+    if (!mounted || !_visible) return;
+    final controller = _controller;
+    if (controller == null || !_ready) return;
+    if (!controller.value.isPlaying) controller.play();
+  }
+
+  @override
+  void didPushNext() {
+    _visible = false;
+    _controller?.pause();
+  }
+
+  @override
+  void didPopNext() {
+    _visible = true;
+    _playIfVisible();
+    // 触发一次重建，让 GIF 动画重新调度
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    switch (state) {
+      case AppLifecycleState.resumed:
+        _visible = true;
+        _playIfVisible();
+        if (mounted) setState(() {});
+      case AppLifecycleState.inactive:
+      case AppLifecycleState.paused:
+      case AppLifecycleState.hidden:
+        _visible = false;
+        _controller?.pause();
+      case AppLifecycleState.detached:
+        break;
+    }
   }
 
   @override
   void dispose() {
-    _controller.dispose();
+    _watchdog?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    if (_route != null) {
+      AppBackground.routeObserver.unsubscribe(this);
+    }
+    _controller?.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    if (!_ready) return const ColoredBox(color: Colors.black);
+    if (!_isVideo) {
+      return TickerMode(
+        enabled: _visible,
+        child: Image.file(
+          File(widget.path),
+          key: ValueKey(widget.path),
+          fit: BoxFit.cover,
+          gaplessPlayback: true,
+        ),
+      );
+    }
+
+    final controller = _controller;
+    if (!_ready || controller == null) {
+      return const ColoredBox(color: Colors.black);
+    }
     return FittedBox(
       fit: BoxFit.cover,
       clipBehavior: Clip.hardEdge,
       child: SizedBox(
-        width: _controller.value.size.width,
-        height: _controller.value.size.height,
-        child: VideoPlayer(_controller),
+        width: controller.value.size.width,
+        height: controller.value.size.height,
+        child: VideoPlayer(controller),
       ),
     );
   }

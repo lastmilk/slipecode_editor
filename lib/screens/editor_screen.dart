@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 
@@ -6,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 import 'package:provider/provider.dart';
 
+import '../l10n/app_localizations.dart';
 import '../models/file_node.dart';
 import '../models/open_file.dart';
 import '../providers/ai_provider.dart';
@@ -21,6 +21,7 @@ import '../widgets/app_background.dart';
 import '../widgets/code_editor.dart';
 import '../widgets/editor_tabs.dart';
 import '../widgets/file_tree.dart';
+import '../widgets/symbol_keypad.dart';
 import 'ai_chat_screen.dart';
 import 'build_screen.dart';
 import 'terminal_screen.dart';
@@ -37,9 +38,8 @@ class EditorScreen extends StatefulWidget {
 }
 
 class _EditorScreenState extends State<EditorScreen>
-    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
+    with SingleTickerProviderStateMixin {
   bool _showSidebar = false;
-  Timer? _autoSaveTimer;
 
   /// 已确认退出（避免 PopScope 重复拦截）
   bool _allowPop = false;
@@ -59,7 +59,6 @@ class _EditorScreenState extends State<EditorScreen>
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this);
     _sidebarTabController = TabController(length: 2, vsync: this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final projectProvider = context.read<ProjectProvider>();
@@ -75,10 +74,7 @@ class _EditorScreenState extends State<EditorScreen>
 
   @override
   void dispose() {
-    _autoSaveTimer?.cancel();
-    // 离开编辑器前把未落盘的改动写回（fire-and-forget，不阻塞销毁）
-    unawaited(_saveAllNow());
-    WidgetsBinding.instance.removeObserver(this);
+    // 不再自动保存：仅关闭标签 / 主动保存 / 退出确认时落盘
     _sidebarTabController.dispose();
     _settingsProvider?.removeListener(_syncVolumeKeyListener);
     // 离开编辑器时取消音量键拦截，恢复正常音量调节
@@ -127,23 +123,7 @@ class _EditorScreenState extends State<EditorScreen>
   // 行为
   // ---------------------------------------------------------------------------
 
-  /// 自动保存：捕获「改动时的文件路径 + 内容」快照，避免切换标签后存错文件
-  void _scheduleAutoSave() {
-    final editorProvider = context.read<EditorProvider>();
-    final active = editorProvider.activeFile;
-    if (active == null) return;
-    final path = active.path;
-    final content = active.content;
-    _autoSaveTimer?.cancel();
-    if (!context.read<SettingsProvider>().settings.autoSave) return;
-    _autoSaveTimer = Timer(const Duration(seconds: 1), () async {
-      final ok = await editorProvider.saveContent(path, content);
-      if (!mounted || !ok) return;
-      context.read<GitSyncProvider>().markChanged(path);
-    });
-  }
-
-  /// 立即把所有未保存文件写盘（退出 / 切后台 / 销毁时调用）
+  /// 立即把所有未保存文件写盘（仅在用户明确选择「保存并退出 / 保存」时调用）
   Future<void> _saveAllNow() async {
     try {
       final editorProvider = context.read<EditorProvider>();
@@ -161,14 +141,6 @@ class _EditorScreenState extends State<EditorScreen>
     }
   }
 
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.inactive ||
-        state == AppLifecycleState.paused) {
-      unawaited(_saveAllNow());
-    }
-  }
-
   /// 退出编辑器前的未保存确认
   Future<bool> _confirmExit() async {
     final editorProvider = context.read<EditorProvider>();
@@ -178,20 +150,20 @@ class _EditorScreenState extends State<EditorScreen>
     final action = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('有未保存的文件'),
-        content: Text('$count 个文件尚未保存，是否保存后退出？'),
+        title: Text(t('editor.unsavedTitle')),
+        content: Text(t('editor.unsavedBody', {'count': '$count'})),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop('cancel'),
-            child: const Text('取消'),
+            child: Text(t('common.cancel')),
           ),
           TextButton(
             onPressed: () => Navigator.of(ctx).pop('discard'),
-            child: const Text('不保存'),
+            child: Text(t('editor.discard')),
           ),
           FilledButton(
             onPressed: () => Navigator.of(ctx).pop('save'),
-            child: const Text('保存并退出'),
+            child: Text(t('editor.saveAndExit')),
           ),
         ],
       ),
@@ -213,20 +185,20 @@ class _EditorScreenState extends State<EditorScreen>
     final action = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text('保存「${file.name}」？'),
-        content: const Text('该文件有未保存的修改。'),
+        title: Text(t('editor.closeFileTitle', {'name': file.name})),
+        content: Text(t('editor.closeFileBody')),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop('cancel'),
-            child: const Text('取消'),
+            child: Text(t('common.cancel')),
           ),
           TextButton(
             onPressed: () => Navigator.of(ctx).pop('discard'),
-            child: const Text('不保存'),
+            child: Text(t('editor.discard')),
           ),
           FilledButton(
             onPressed: () => Navigator.of(ctx).pop('save'),
-            child: const Text('保存'),
+            child: Text(t('common.save')),
           ),
         ],
       ),
@@ -270,7 +242,7 @@ class _EditorScreenState extends State<EditorScreen>
     }
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(ok ? '✓ 已保存' : '保存失败'),
+        content: Text(ok ? t('editor.savedOk') : t('editor.saveFailed')),
         backgroundColor: ok ? Colors.green : Colors.red,
         duration: const Duration(seconds: 1),
       ),
@@ -317,11 +289,11 @@ class _EditorScreenState extends State<EditorScreen>
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('取消'),
+            child: Text(t('common.cancel')),
           ),
           FilledButton(
             onPressed: () => Navigator.of(ctx).pop(controller.text.trim()),
-            child: const Text('确定'),
+            child: Text(t('common.confirm')),
           ),
         ],
       ),
@@ -337,9 +309,9 @@ class _EditorScreenState extends State<EditorScreen>
 
   Future<void> _createFileDialog(String dirPath) async {
     final name = await _promptName(
-      title: '新建文件',
+      title: t('editor.newFile'),
       hint: 'example.dart',
-      helper: '支持任意扩展名',
+      helper: t('editor.anyExtension'),
     );
     if (name == null || name.isEmpty || !mounted) return;
     try {
@@ -347,18 +319,21 @@ class _EditorScreenState extends State<EditorScreen>
       await _refreshTree();
       await _handleFileTap(file.path);
     } catch (e) {
-      _snack('创建失败：$e', error: true);
+      _snack(t('editor.createFailed', {'error': '$e'}), error: true);
     }
   }
 
   Future<void> _createDirDialog(String parentPath) async {
-    final name = await _promptName(title: '新建文件夹', hint: 'lib');
+    final name = await _promptName(
+      title: t('editor.newFolder'),
+      hint: 'lib',
+    );
     if (name == null || name.isEmpty || !mounted) return;
     try {
       await _fileService.createDirectory(parentPath, name);
       await _refreshTree();
     } catch (e) {
-      _snack('创建失败：$e', error: true);
+      _snack(t('editor.createFailed', {'error': '$e'}), error: true);
     }
   }
 
@@ -366,7 +341,7 @@ class _EditorScreenState extends State<EditorScreen>
     return showDialog<DartClassKind>(
       context: context,
       builder: (ctx) => SimpleDialog(
-        title: const Text('选择 Dart 模板'),
+        title: Text(t('editor.pickDartTemplate')),
         children: DartClassKind.values
             .map(
               (kind) => SimpleDialogOption(
@@ -384,9 +359,9 @@ class _EditorScreenState extends State<EditorScreen>
 
   Future<void> _createDartClassDialog(String dirPath) async {
     final name = await _promptName(
-      title: '新建 Dart 类',
+      title: t('editor.newDartClass'),
       hint: 'MyWidget',
-      helper: '自动生成类名与 {{snake_case}}.dart 文件名',
+      helper: t('editor.dtoHelper'),
     );
     if (name == null || name.isEmpty || !mounted) return;
     final kind = await _pickDartClassKind();
@@ -402,14 +377,14 @@ class _EditorScreenState extends State<EditorScreen>
       await _refreshTree();
       await _handleFileTap(file.path);
     } catch (e) {
-      _snack('创建失败：$e', error: true);
+      _snack(t('editor.createFailed', {'error': '$e'}), error: true);
     }
   }
 
   Future<void> _renameNode(FileNode node) async {
     final editor = context.read<EditorProvider>();
     final newName = await _promptName(
-      title: '重命名',
+      title: t('editor.rename'),
       hint: node.name,
       initial: node.name,
     );
@@ -423,9 +398,9 @@ class _EditorScreenState extends State<EditorScreen>
         editor.renameOpenFile(node.path, newPath);
       }
       await _refreshTree();
-      _snack('✓ 已重命名为 $newName');
+      _snack(t('editor.renamed', {'name': newName}));
     } catch (e) {
-      _snack('重命名失败：$e', error: true);
+      _snack(t('editor.renameFailed', {'error': '$e'}), error: true);
     }
   }
 
@@ -434,21 +409,21 @@ class _EditorScreenState extends State<EditorScreen>
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('删除确认'),
+        title: Text(t('editor.deleteTitle')),
         content: Text(
           node.isDirectory
-              ? '确定删除文件夹「${node.name}」及其全部内容？此操作不可撤销。'
-              : '确定删除文件「${node.name}」？此操作不可撤销。',
+              ? t('editor.deleteDirBody', {'name': node.name})
+              : t('editor.deleteFileBody', {'name': node.name}),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('取消'),
+            child: Text(t('common.cancel')),
           ),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('删除'),
+            child: Text(t('editor.delete')),
           ),
         ],
       ),
@@ -458,9 +433,9 @@ class _EditorScreenState extends State<EditorScreen>
       await _fileService.deleteEntity(node.path);
       editor.closeFilesUnder(node.path);
       await _refreshTree();
-      _snack('✓ 已删除 ${node.name}');
+      _snack(t('editor.deleted', {'name': node.name}));
     } catch (e) {
-      _snack('删除失败：$e', error: true);
+      _snack(t('editor.deleteFailed', {'error': '$e'}), error: true);
     }
   }
 
@@ -495,32 +470,32 @@ class _EditorScreenState extends State<EditorScreen>
               if (node.isDirectory) ...[
                 ListTile(
                   leading: const Icon(Icons.note_add),
-                  title: const Text('新建文件'),
+                  title: Text(t('editor.newFile')),
                   onTap: () => Navigator.of(ctx).pop('newFile'),
                 ),
                 ListTile(
                   leading: const Icon(Icons.create_new_folder),
-                  title: const Text('新建文件夹'),
+                  title: Text(t('editor.newFolder')),
                   onTap: () => Navigator.of(ctx).pop('newFolder'),
                 ),
                 if (payload.isFlutter)
                   ListTile(
                     leading: const Icon(Icons.widgets),
-                    title: const Text('新建 Dart 类'),
-                    subtitle: const Text('自动生成模板代码'),
+                    title: Text(t('editor.newDartClass')),
+                    subtitle: Text(t('editor.dtoHelper')),
                     onTap: () => Navigator.of(ctx).pop('newDartClass'),
                   ),
               ],
               ListTile(
                 leading: const Icon(Icons.drive_file_rename_outline),
-                title: const Text('重命名'),
+                title: Text(t('editor.rename')),
                 onTap: () => Navigator.of(ctx).pop('rename'),
               ),
               ListTile(
                 leading: const Icon(Icons.delete_outline, color: Colors.red),
-                title: const Text(
-                  '删除',
-                  style: TextStyle(color: Colors.red),
+                title: Text(
+                  t('editor.delete'),
+                  style: const TextStyle(color: Colors.red),
                 ),
                 onTap: () => Navigator.of(ctx).pop('delete'),
               ),
@@ -577,39 +552,39 @@ class _EditorScreenState extends State<EditorScreen>
       child: Scaffold(
         appBar: AppBar(
         title: Text(
-          projectProvider.projectPath?.split(RegExp(r'[/\\]')).last ?? '编辑器',
+          projectProvider.projectPath?.split(RegExp(r'[/\\]')).last ??
+              t('editor.title'),
         ),
         actions: [
           IconButton(
             icon: const Icon(Icons.terminal),
-            tooltip: '终端 (proot)',
-            onPressed: () => Navigator.of(context)
-                .push(MaterialPageRoute(builder: (_) => const TerminalScreen())),
+            tooltip: t('editor.terminal'),
+            onPressed: () => showTerminalSheet(context),
           ),
           IconButton(
             icon: const Icon(Icons.build),
-            tooltip: '构建',
+            tooltip: t('editor.build'),
             onPressed: () => Navigator.of(context)
                 .push(MaterialPageRoute(builder: (_) => const BuildScreen())),
           ),
           IconButton(
             icon: const Icon(Icons.auto_awesome),
-            tooltip: 'AI 助手（侧边栏 Agent）',
+            tooltip: t('editor.ai'),
             onPressed: _openAgentPanel,
           ),
           IconButton(
             icon: const Icon(Icons.refresh),
-            tooltip: '刷新文件树',
+            tooltip: t('editor.refresh'),
             onPressed: projectProvider.refreshFileTree,
           ),
           IconButton(
             icon: const Icon(Icons.save),
-            tooltip: '保存 (Ctrl+S)',
+            tooltip: t('editor.save'),
             onPressed: _handleSave,
           ),
           IconButton(
             icon: Icon(_showSidebar ? Icons.menu_open : Icons.menu),
-            tooltip: '切换侧边栏',
+            tooltip: t('editor.sidebar'),
             onPressed: _toggleSidebar,
           ),
         ],
@@ -628,11 +603,18 @@ class _EditorScreenState extends State<EditorScreen>
                           editorProvider,
                           isDark,
                           settings.editorFontSize,
+                          settings.fontFamily,
                           settings.completionEnabled,
                           showBackground,
                         )
                       : _buildWelcome(isDark),
                 ),
+                if (editorProvider.hasActiveFile)
+                  SymbolKeypad(
+                    isDark: isDark,
+                    onInsert: (symbol) =>
+                        _codeEditorKey.currentState?.insertAtCursor(symbol),
+                  ),
                 _buildStatusBar(editorProvider, isDark),
               ],
             ),
@@ -725,9 +707,9 @@ class _EditorScreenState extends State<EditorScreen>
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
               ),
-              tabs: const [
-                Tab(text: '文件'),
-                Tab(text: 'Agent'),
+              tabs: [
+                Tab(text: t('editor.files')),
+                const Tab(text: 'Agent'),
               ],
             ),
             const Divider(height: 1),
@@ -768,20 +750,20 @@ class _EditorScreenState extends State<EditorScreen>
               IconButton(
                 visualDensity: VisualDensity.compact,
                 icon: const Icon(Icons.note_add, size: 18),
-                tooltip: '新建文件',
+                tooltip: t('editor.newFile'),
                 onPressed: rootPath == null ? null : () => _createFileDialog(rootPath),
               ),
               IconButton(
                 visualDensity: VisualDensity.compact,
                 icon: const Icon(Icons.create_new_folder, size: 18),
-                tooltip: '新建文件夹',
+                tooltip: t('editor.newFolder'),
                 onPressed: rootPath == null ? null : () => _createDirDialog(rootPath),
               ),
               if (payload.isFlutter)
                 IconButton(
                   visualDensity: VisualDensity.compact,
                   icon: const Icon(Icons.widgets, size: 18),
-                  tooltip: '新建 Dart 类',
+                  tooltip: t('editor.newDartClass'),
                   onPressed:
                       rootPath == null ? null : () => _createDartClassDialog(rootPath),
                 ),
@@ -796,7 +778,7 @@ class _EditorScreenState extends State<EditorScreen>
               IconButton(
                 visualDensity: VisualDensity.compact,
                 icon: const Icon(Icons.refresh, size: 18),
-                tooltip: '刷新',
+                tooltip: t('editor.refresh'),
                 onPressed: projectProvider.refreshFileTree,
               ),
             ],
@@ -818,6 +800,7 @@ class _EditorScreenState extends State<EditorScreen>
     EditorProvider editorProvider,
     bool isDark,
     double fontSize,
+    String fontFamily,
     bool completionEnabled,
     bool translucent,
   ) {
@@ -855,6 +838,7 @@ class _EditorScreenState extends State<EditorScreen>
                   initialContent: activeFile.content,
                   language: language,
                   fontSize: fontSize,
+                  fontFamily: fontFamily,
                   enableCompletion: enableCompletion,
                   translucent: translucent,
                   readOnly: vibeBusy,
@@ -868,7 +852,6 @@ class _EditorScreenState extends State<EditorScreen>
                   },
                   onChanged: (content) {
                     editorProvider.updateActiveContent(content);
-                    _scheduleAutoSave();
                   },
                 ),
               ),
@@ -904,15 +887,18 @@ class _EditorScreenState extends State<EditorScreen>
                     child: CircularProgressIndicator(strokeWidth: 2),
                   ),
                   const SizedBox(width: 8),
-                  const Expanded(
+                  Expanded(
                     child: Text(
-                      'AI 正在编辑 · 可在侧边栏 Agent 面板查看思考过程',
-                      style: TextStyle(fontSize: 12),
+                      t('editor.aiEditing'),
+                      style: const TextStyle(fontSize: 12),
                     ),
                   ),
                   TextButton(
                     onPressed: ai.cancelVibe,
-                    child: const Text('取消', style: TextStyle(fontSize: 12)),
+                    child: Text(
+                      t('common.cancel'),
+                      style: const TextStyle(fontSize: 12),
+                    ),
                   ),
                 ],
               ),
@@ -949,7 +935,7 @@ class _EditorScreenState extends State<EditorScreen>
           ),
           const SizedBox(height: 16),
           Text(
-            '从左侧文件树选择文件开始编辑\n（左滑或右滑边缘可唤出文件栏）',
+            t('editor.welcome'),
             textAlign: TextAlign.center,
             style: TextStyle(
               color: isDark ? Colors.white38 : Colors.black38,
@@ -973,7 +959,7 @@ class _EditorScreenState extends State<EditorScreen>
         children: [
           if (activeFile != null) ...[
             Text(
-              activeFile.isModified ? '● 已修改' : '● 已保存',
+              activeFile.isModified ? t('editor.modified') : t('editor.saved'),
               style: const TextStyle(fontSize: 11, color: Colors.white),
             ),
             const SizedBox(width: 20),
@@ -983,13 +969,13 @@ class _EditorScreenState extends State<EditorScreen>
             ),
             const SizedBox(width: 20),
             Text(
-              '${activeFile.content.split('\n').length} 行',
+              t('editor.lines', {'count': '${activeFile.content.split('\n').length}'}),
               style: const TextStyle(fontSize: 11, color: Colors.white),
             ),
           ] else
-            const Text(
-              '就绪',
-              style: TextStyle(fontSize: 11, color: Colors.white),
+            Text(
+              t('editor.ready'),
+              style: const TextStyle(fontSize: 11, color: Colors.white),
             ),
         ],
       ),

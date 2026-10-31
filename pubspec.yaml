@@ -30,6 +30,11 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+
+  # 生物认证（Android BiometricPrompt / iOS Face ID·Touch ID）
+  local_auth: ^2.3.0
 
   cupertino_icons: ^1.0.8
   code_text_field: ^1.1.0
