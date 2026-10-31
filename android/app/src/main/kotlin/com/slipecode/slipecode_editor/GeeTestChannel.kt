@@ -75,7 +75,8 @@ class GeeTestChannel(private val activity: Activity) {
                     .addOnFailureListener { error ->
                         if (finished) return@addOnFailureListener
                         finished = true
-                        result.error("CAPTCHA_ERROR", error.message ?: "验证失败", null)
+                        // OnFailureListener.onFailure(String)：参数即错误描述
+                        result.error("CAPTCHA_ERROR", error.ifBlank { "验证失败" }, null)
                     }
             } catch (e: Exception) {
                 if (!finished) {

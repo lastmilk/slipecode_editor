@@ -6,7 +6,9 @@ plugins {
 
 android {
     namespace = "com.slipecode.slipecode_editor"
-    compileSdk = flutter.compileSdkVersion
+    // 极验 GT4 AAR 的 aar-metadata 要求 minCompileSdk=37，因此固定为 37
+    // （AGP 9.1 官方推荐上限为 36，已在 gradle.properties 中显式放开检查）
+    compileSdk = 37
     ndkVersion = flutter.ndkVersion
 
     compileOptions {

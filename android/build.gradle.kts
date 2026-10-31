@@ -22,9 +22,10 @@ subprojects {
 }
 
 // Some Flutter plugins declare a compileSdk older than what their own
-// dependencies require: file_picker / permission_handler_android use 34 and
-// jni / jni_flutter use 35, while flutter_plugin_android_lifecycle requires 36.
-// Force every Android module to compile against API 36 so that the AAR
+// dependencies require: file_picker / permission_handler_android use 34,
+// jni / jni_flutter use 35, flutter_plugin_android_lifecycle requires 36,
+// while the Geetest GT4 AAR requires API 37.
+// Force every Android module to compile against API 37 so that the AAR
 // metadata check passes. Reflection keeps this working across AGP DSL
 // revisions. This must stay above the `evaluationDependsOn(":app")` block,
 // otherwise the projects are already evaluated by the time we register.
@@ -45,9 +46,9 @@ fun Project.forceCompileSdk(api: Int) {
 subprojects {
     val target = this
     if (target.state.executed) {
-        target.forceCompileSdk(36)
+        target.forceCompileSdk(37)
     } else {
-        target.afterEvaluate { target.forceCompileSdk(36) }
+        target.afterEvaluate { target.forceCompileSdk(37) }
     }
 }
 
