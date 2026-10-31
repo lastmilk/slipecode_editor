@@ -1,23 +1,25 @@
-name: SLIPE Build
+name: SlipCode Build
 
 on:
   push:
     branches: [main]
   workflow_dispatch:
     inputs:
-      target:
-        description: '构建目标'
+      build_type:
+        description: '构建类型'
         required: true
         type: choice
-        default: all
+        default: 'apk-release'
         options:
-          - all
-          - android
-          - ios
+          - apk-release
+          - apk-debug
+          - appbundle-release
+          - ios-release
 
 jobs:
-  android:
-    if: ${{ github.event_name == 'push' || inputs.target != 'ios' }}
+  build-android:
+    # push 触发只跑 Android；iOS 需要 macOS Runner，不随 push 自动执行
+    if: ${{ github.event_name == 'push' || inputs.build_type != 'ios-release' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -29,51 +31,51 @@ jobs:
           channel: stable
           cache: true
 
-      # .env 在 .gitignore 中，但 pubspec 将其声明为 asset，缺失会导致构建失败
-      # 以下均为公开的非机密配置（OAuth 公开 client id 与后端地址），client_secret 仅在服务端
-      - name: Create .env
+      # 本地创建的项目不含平台工程，构建前用 flutter create 补齐。
+      # org / 项目名从模板自带的 .slipecode.json 读取；缺失时退回默认值。
+      - name: Generate platform files
         run: |
-          cat > .env <<'EOF'
-          GITHUB_CLIENT_ID=Ov23li26aNK8JhfG6weT
-          GITHUB_OAUTH_REDIRECT_URI=https://api.slipe.cn/api/oauth/github/callback
-          GITHUB_DEEP_LINK=slipecode://oauth/callback
-          GITHUB_OAUTH_SCOPES=repo workflow read:user
-          GITHUB_API_BASE=https://api.github.com
-          GITHUB_OAUTH_BASE=https://github.com/login/oauth
-          GITEE_CLIENT_ID=6d44003e515e38e6b6723a9cea8ebe07447e5bd342a5c724555b6af6f69eea4d
-          GITEE_OAUTH_REDIRECT_URI=slipecode://oauth/gitee/callback
-          GITEE_OAUTH_SCOPES=projects user_info
-          GITEE_API_BASE=https://gitee.com/api/v5
-          GITEE_OAUTH_BASE=https://gitee.com/oauth
-          ACCOUNT_BACKEND_BASE_URL=https://api.slipe.cn
-          EOF
+          set -e
+          if [ -f .slipecode.json ]; then
+            ORG=$(jq -r '.org // "com.example"' .slipecode.json)
+            NAME=$(jq -r '.project_name // empty' .slipecode.json)
+            flutter create --org "$ORG" --platforms=android ${NAME:+--project-name "$NAME"} .
+          else
+            flutter create --platforms=android .
+          fi
 
       - name: Pub get
         run: flutter pub get
 
-      # 极验 GT4 AAR 的 aar-metadata 要求 minCompileSdk=37；
-      # SDK 37 采用新的小版本包名（platforms;android-37.0），需显式安装
-      - name: Install Android SDK 37
+      - name: Build
+        env:
+          BUILD_TYPE: ${{ inputs.build_type || 'apk-release' }}
         run: |
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
-            "platforms;android-37.0" "build-tools;37.0.0" > /dev/null
+          set -e
+          case "$BUILD_TYPE" in
+            apk-debug)
+              flutter build apk --debug
+              ;;
+            appbundle-release)
+              flutter build appbundle --release
+              ;;
+            *)
+              flutter build apk --release
+              ;;
+          esac
 
-      - name: Analyze
-        run: flutter analyze
-
-      - name: Build APK
-        run: flutter build apk --release
-
-      - name: Upload APK
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: slipecode-editor-apk
-          path: build/app/outputs/flutter-apk/*.apk
+          name: slipecode-${{ inputs.build_type || 'apk-release' }}
+          path: |
+            build/app/outputs/flutter-apk/*.apk
+            build/app/outputs/bundle/**/*.aab
           if-no-files-found: error
 
-  # iOS 由 macOS Runner 构建；暂未配置 Developer 证书，先产出未签名产物
-  ios:
-    if: ${{ github.event_name == 'workflow_dispatch' && (inputs.target == 'ios' || inputs.target == 'all') }}
+  build-ios:
+    # iOS 仅手动触发，使用 macOS Runner；先不签名
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.build_type == 'ios-release' }}
     runs-on: macos-latest
     steps:
       - name: Checkout
@@ -85,26 +87,21 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Create .env
+      - name: Generate iOS platform files
         run: |
-          cat > .env <<'EOF'
-          GITHUB_CLIENT_ID=Ov23li26aNK8JhfG6weT
-          GITHUB_OAUTH_REDIRECT_URI=https://api.slipe.cn/api/oauth/github/callback
-          GITHUB_DEEP_LINK=slipecode://oauth/callback
-          GITHUB_OAUTH_SCOPES=repo workflow read:user
-          GITHUB_API_BASE=https://api.github.com
-          GITHUB_OAUTH_BASE=https://github.com/login/oauth
-          GITEE_CLIENT_ID=6d44003e515e38e6b6723a9cea8ebe07447e5bd342a5c724555b6af6f69eea4d
-          GITEE_OAUTH_REDIRECT_URI=slipecode://oauth/gitee/callback
-          GITEE_OAUTH_SCOPES=projects user_info
-          GITEE_API_BASE=https://gitee.com/api/v5
-          GITEE_OAUTH_BASE=https://gitee.com/oauth
-          ACCOUNT_BACKEND_BASE_URL=https://api.slipe.cn
-          EOF
+          set -e
+          if [ -f .slipecode.json ]; then
+            ORG=$(jq -r '.org // "com.example"' .slipecode.json)
+            NAME=$(jq -r '.project_name // empty' .slipecode.json)
+            flutter create --org "$ORG" --platforms=ios ${NAME:+--project-name "$NAME"} .
+          else
+            flutter create --platforms=ios .
+          fi
 
       - name: Pub get
         run: flutter pub get
 
+      # Developer 证书暂未配置，先构建无签名产物
       - name: Build iOS (no codesign)
         run: flutter build ios --release --no-codesign
 
@@ -114,11 +111,11 @@ jobs:
           mkdir -p build/ios-artifact
           ditto -c -k --sequesterRsrc --keepParent \
             build/ios/iphoneos/Runner.app \
-            build/ios-artifact/slipecode-editor-ios-unsigned.zip
+            build/ios-artifact/slipecode-ios-unsigned.zip
 
-      - name: Upload iOS artifact
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: slipecode-editor-ios-unsigned
-          path: build/ios-artifact/slipecode-editor-ios-unsigned.zip
+          name: slipecode-ios-release
+          path: build/ios-artifact/slipecode-ios-unsigned.zip
           if-no-files-found: error
