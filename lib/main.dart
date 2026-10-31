@@ -69,6 +69,7 @@ Future<void> main() async {
     buildProvider,
     projectProvider,
     accountProvider,
+    terminal: terminalProvider,
   );
 
   runApp(

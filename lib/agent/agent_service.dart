@@ -62,6 +62,9 @@ class AgentService {
   /// 运行 Agent 循环
   ///
   /// [history] 不含 system 消息。
+  ///
+  /// 不限制工具调用步数：循环会一直执行到模型不再发起工具调用、
+  /// 或用户取消、或检测到完全重复的调用（防止模型原地打转）。
   Future<AgentResult> run({
     required String apiBase,
     required String apiKey,
@@ -70,7 +73,6 @@ class AgentService {
     void Function(AgentToolStep step)? onStep,
     void Function(String delta)? onDelta,
     bool Function()? isCancelled,
-    int maxSteps = 6,
   }) async {
     final system = await buildSystemPrompt();
     final messages = <ChatMessage>[
@@ -78,8 +80,10 @@ class AgentService {
       ...history,
     ];
     final steps = <AgentToolStep>[];
+    String? lastSignature;
+    var repeatCount = 0;
 
-    for (var iteration = 0; iteration < maxSteps; iteration++) {
+    while (true) {
       if (isCancelled?.call() == true) throw const AgentCancelled();
       Map<String, dynamic> reply;
       try {
@@ -92,7 +96,7 @@ class AgentService {
         );
       } catch (e) {
         // 部分模型不支持 tools / 流式：首轮失败时退回普通对话
-        if (iteration == 0 && steps.isEmpty && e is! AgentCancelled) {
+        if (steps.isEmpty && e is! AgentCancelled) {
           final text = await LlmService.instance.chat(
             apiBase: apiBase,
             apiKey: apiKey,
@@ -149,11 +153,17 @@ class AgentService {
         final rawArgs = function is Map ? function['arguments'] : null;
         final args = _decodeArgs(rawArgs);
 
-        final step = AgentToolStep(name, _summarize(name, args));
+        final step = AgentToolStep(name, _summarize(name, args), args: args);
         steps.add(step);
         onStep?.call(step);
 
         final result = await toolbox.execute(name, args);
+        // 工具结果回填到 step，供对话流显式展示
+        step
+          ..result = result
+          ..running = false;
+        onStep?.call(step);
+
         messages.add(
           ChatMessage.toolResult(
             toolCallId: id,
@@ -161,13 +171,24 @@ class AgentService {
             content: result,
           ),
         );
+
+        // 完全重复的调用（同工具、同参数、同结果）连续出现时判定为原地打转
+        final signature = '$name|${jsonEncode(args)}|$result';
+        if (signature == lastSignature) {
+          repeatCount++;
+          if (repeatCount >= 3) {
+            return AgentResult(
+              '检测到工具调用重复执行且结果未变化，已自动停止。'
+              '请查看已完成的修改，或换一种说法继续描述需求。',
+              steps,
+            );
+          }
+        } else {
+          lastSignature = signature;
+          repeatCount = 0;
+        }
       }
     }
-
-    return AgentResult(
-      '已达到最大工具调用步数（$maxSteps），请查看已完成的修改或继续描述需求。',
-      steps,
-    );
   }
 
   /// 单轮流式调用，返回完整的 assistant message（含 tool_calls）

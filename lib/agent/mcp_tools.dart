@@ -7,16 +7,35 @@ import '../l10n/app_localizations.dart';
 import '../providers/build_provider.dart';
 import '../providers/editor_provider.dart';
 import '../providers/project_provider.dart';
-import '../services/ai_approval_service.dart';
+import '../providers/terminal_provider.dart';
+import '../services/ai_change_journal.dart';
 import '../services/dart_class_template.dart';
 import '../services/file_service.dart';
 
 /// 一次工具调用的展示记录
+///
+/// [result] 保存工具返回给模型的原始文本，用于在对话流中显式展示执行结果。
 class AgentToolStep {
   final String tool;
   final String summary;
+  final Map<String, dynamic> args;
 
-  const AgentToolStep(this.tool, this.summary);
+  /// 工具返回文本（执行完成后填充）
+  String result;
+
+  /// 是否仍在执行
+  bool running;
+
+  AgentToolStep(
+    this.tool,
+    this.summary, {
+    this.args = const {},
+    this.result = '',
+    this.running = true,
+  });
+
+  /// 工具返回是否代表失败
+  bool get failed => result.startsWith('错误');
 }
 
 /// MCP 风格工具
@@ -53,32 +72,30 @@ class McpToolbox {
     required this.project,
     required this.editor,
     required this.build,
-    Future<bool> Function(AiChangeProposal proposal)? approve,
-    bool Function()? approvalEnabled,
-  })  : _approve = approve ?? AiApprovalService.instance.request,
-        _approvalEnabled = approvalEnabled ?? (() => true);
+    this.terminal,
+  });
 
   final ProjectProvider project;
   final EditorProvider editor;
   final BuildProvider build;
 
-  /// 审批回调：返回 true 才允许落盘
-  final Future<bool> Function(AiChangeProposal proposal) _approve;
-
-  /// 是否启用审批（偏好设置可关闭）
-  final bool Function() _approvalEnabled;
+  /// 终端能力（仅检测到 Termux 时由 Agent 使用）
+  final TerminalProvider? terminal;
 
   final FileService _fs = FileService();
 
-  /// 请求用户审批；未启用审批时直接放行
-  Future<bool> _requestApproval(AiChangeProposal proposal) async {
-    if (!_approvalEnabled()) return true;
-    return _approve(proposal);
-  }
+  /// AI 改动默认直接落盘，但会登记到台账，用户可事后撤回
+  final AiChangeJournal _journal = AiChangeJournal.instance;
 
   /// 供 LLM 使用的工具定义
-  List<Map<String, dynamic>> get definitions =>
-      tools.map((tool) => tool.toDefinition()).toList();
+  ///
+  /// 终端工具仅在检测到 Termux（或桌面 shell）时暴露给模型。
+  List<Map<String, dynamic>> get definitions => tools
+      .where((tool) => tool.name != 'run_terminal_command' || _terminalReady)
+      .map((tool) => tool.toDefinition())
+      .toList();
+
+  bool get _terminalReady => terminal?.available ?? false;
 
   String? get _root => project.projectPath;
 
@@ -169,18 +186,17 @@ class McpToolbox {
         final existed = await File(path).exists();
         final old = existed ? await _fs.readFile(path) : '';
         if (old == content) return '文件内容未变化，无需写入 ${_rel(path)}';
-        final approved = await _requestApproval(
-          AiChangeProposal(
-            action: existed ? t('approval.write') : t('approval.create'),
-            path: _rel(path),
-            before: old,
-            after: content,
-          ),
-        );
-        if (!approved) return '用户拒绝写入 ${_rel(path)}，文件未修改';
         await _fs.writeFile(path, content);
+        _journal.record(
+          kind: existed ? AiChangeKind.write : AiChangeKind.create,
+          action: existed ? t('approval.write') : t('approval.create'),
+          path: path,
+          before: existed ? old : null,
+          after: content,
+        );
         await _afterFileChanged(path);
-        return '已写入 ${_rel(path)}（${content.length} 字符）';
+        return '已写入 ${_rel(path)}（${content.length} 字符），'
+            '改动已登记，可随时撤回';
       },
     ),
     McpTool(
@@ -205,18 +221,16 @@ class McpToolbox {
           return '错误：文件中未找到指定文本，请先 read_file 确认原文';
         }
         final updated = content.replaceFirst(oldText, newText);
-        final approved = await _requestApproval(
-          AiChangeProposal(
-            action: t('approval.replace'),
-            path: _rel(path),
-            before: content,
-            after: updated,
-          ),
-        );
-        if (!approved) return '用户拒绝修改 ${_rel(path)}，文件未修改';
         await _fs.writeFile(path, updated);
+        _journal.record(
+          kind: AiChangeKind.write,
+          action: t('approval.replace'),
+          path: path,
+          before: content,
+          after: updated,
+        );
         await _afterFileChanged(path);
-        return '已修改 ${_rel(path)}';
+        return '已修改 ${_rel(path)}，改动已登记，可随时撤回';
       },
     ),
     McpTool(
@@ -234,18 +248,15 @@ class McpToolbox {
         if (path == null) return '错误：缺少 path';
         if (await File(path).exists()) return '错误：文件已存在 $path';
         final content = args['content'] as String? ?? '';
-        final approved = await _requestApproval(
-          AiChangeProposal(
-            action: t('approval.create'),
-            path: _rel(path),
-            before: '',
-            after: content,
-          ),
-        );
-        if (!approved) return '用户拒绝创建 ${_rel(path)}，文件未创建';
         await _fs.writeFile(path, content);
+        _journal.record(
+          kind: AiChangeKind.create,
+          action: t('approval.create'),
+          path: path,
+          after: content,
+        );
         await _afterFileChanged(path);
-        return '已创建 ${_rel(path)}';
+        return '已创建 ${_rel(path)}，改动已登记，可随时撤回';
       },
     ),
     McpTool(
@@ -273,18 +284,15 @@ class McpToolbox {
         final path = p.join(dir, fileName);
         if (await File(path).exists()) return '错误：文件已存在 ${_rel(path)}';
         final content = DartClassTemplate.generate(kind, className);
-        final approved = await _requestApproval(
-          AiChangeProposal(
-            action: t('approval.create'),
-            path: _rel(path),
-            before: '',
-            after: content,
-          ),
-        );
-        if (!approved) return '用户拒绝创建 ${_rel(path)}，文件未创建';
         await _fs.writeFile(path, content);
+        _journal.record(
+          kind: AiChangeKind.create,
+          action: t('approval.create'),
+          path: path,
+          after: content,
+        );
         await _afterFileChanged(path);
-        return '已创建 ${_rel(path)}（${kind.label}）';
+        return '已创建 ${_rel(path)}（${kind.label}），改动已登记，可随时撤回';
       },
     ),
     McpTool(
@@ -302,16 +310,13 @@ class McpToolbox {
         final newName = args['new_name'] as String? ?? '';
         if (path == null || newName.isEmpty) return '错误：缺少参数';
         final newPath = p.join(p.dirname(path), newName);
-        final approved = await _requestApproval(
-          AiChangeProposal(
-            action: t('approval.rename'),
-            path: _rel(path),
-            before: _rel(path),
-            after: _rel(newPath),
-          ),
-        );
-        if (!approved) return '用户拒绝重命名 ${_rel(path)}，未做修改';
         await _fs.renameEntity(path, newName);
+        _journal.record(
+          kind: AiChangeKind.rename,
+          action: t('approval.rename'),
+          path: path,
+          newPath: newPath,
+        );
         final isDir = await Directory(newPath).exists();
         if (isDir) {
           editor.renameDirectory(path, newPath);
@@ -332,16 +337,15 @@ class McpToolbox {
       execute: (args) async {
         final path = _resolve(args['path'] as String?);
         if (path == null) return '错误：缺少 path';
-        final approved = await _requestApproval(
-          AiChangeProposal(
-            action: t('approval.delete'),
-            path: _rel(path),
-            before: _rel(path),
-            after: '',
-          ),
-        );
-        if (!approved) return '用户拒绝删除 ${_rel(path)}，未做修改';
+        final isDir = await Directory(path).exists();
+        final old = isDir ? null : await _fs.readFile(path);
         await _fs.deleteEntity(path);
+        _journal.record(
+          kind: AiChangeKind.delete,
+          action: t('approval.delete'),
+          path: path,
+          before: old,
+        );
         editor.closeFilesUnder(path);
         await project.refreshFileTree();
         return '已删除 ${_rel(path)}';
@@ -392,6 +396,27 @@ class McpToolbox {
 
         await walk(Directory(_root!));
         return count == 0 ? '未找到「$query」' : results.toString();
+      },
+    ),
+    McpTool(
+      name: 'run_terminal_command',
+      description: '在当前项目目录执行 shell 命令（Android 通过 Termux 执行），'
+          '返回标准输出、错误输出与退出码。适合运行测试、格式化、git 等命令。',
+      parameters: _object(
+        {'command': _string('要执行的完整 shell 命令')},
+        required: ['command'],
+      ),
+      execute: (args) async {
+        final terminal = this.terminal;
+        if (terminal == null || !terminal.available) {
+          return '错误：终端不可用（未检测到 Termux）';
+        }
+        final command = args['command'] as String? ?? '';
+        if (command.trim().isEmpty) return '错误：command 不能为空';
+        // 保证命令在项目目录执行
+        terminal.setProjectDir(_root);
+        final result = await terminal.executeForAi(command);
+        return '命令：$command\n---\n$result';
       },
     ),
     McpTool(

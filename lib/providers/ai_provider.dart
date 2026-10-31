@@ -10,6 +10,7 @@ import '../providers/build_provider.dart';
 import '../providers/editor_provider.dart';
 import '../providers/project_provider.dart';
 import '../providers/settings_provider.dart';
+import '../providers/terminal_provider.dart';
 import '../services/account_service.dart';
 import '../services/chat_history_service.dart';
 import '../services/llm_service.dart';
@@ -32,14 +33,15 @@ class AiProvider extends ChangeNotifier {
     this._editor,
     BuildProvider build,
     this._project,
-    this._account,
-  ) {
+    this._account, {
+    TerminalProvider? terminal,
+  }) {
     _toolbox = McpToolbox(
       project: _project,
       editor: _editor,
       build: build,
-      // AI 改动落盘前必须获得用户审批（可在偏好设置中关闭）
-      approvalEnabled: () => _settings.settings.aiApprovalEnabled,
+      // 仅检测到 Termux 时向 Agent 暴露终端工具
+      terminal: terminal,
     );
     _agent = AgentService(_project, _toolbox);
   }
@@ -54,6 +56,9 @@ class AiProvider extends ChangeNotifier {
 
   final List<ChatMessage> _messages = [];
   final List<AgentToolStep> _steps = [];
+
+  /// 对话时间线：按真实顺序排列的「消息 / 工具调用卡片」
+  final List<Object> _timeline = [];
   AiStatus _status = AiStatus.idle;
   String? _error;
   bool _disposed = false;
@@ -78,6 +83,11 @@ class AiProvider extends ChangeNotifier {
 
   /// 本轮 Agent 已执行的工具调用
   List<AgentToolStep> get steps => List.unmodifiable(_steps);
+
+  /// 对话时间线（ChatMessage 与 AgentToolStep 混排）
+  ///
+  /// 工具调用及其结果会显式穿插在对话流中，而不是只显示在底部面板。
+  List<Object> get timeline => List.unmodifiable(_timeline);
 
   AiStatus get status => _status;
   String? get error => _error;
@@ -108,6 +118,7 @@ class AiProvider extends ChangeNotifier {
   Future<void> clear() async {
     _messages.clear();
     _steps.clear();
+    _timeline.clear();
     _error = null;
     _status = AiStatus.idle;
     _streamingText = '';
@@ -144,7 +155,9 @@ class AiProvider extends ChangeNotifier {
         if (content.isEmpty || existing.contains('${role.name}|$content')) {
           continue;
         }
-        _messages.add(ChatMessage(role: role, content: content));
+        final message = ChatMessage(role: role, content: content);
+        _messages.add(message);
+        _timeline.add(message);
       }
       _safeNotify();
     } catch (e) {
@@ -160,14 +173,12 @@ class AiProvider extends ChangeNotifier {
       for (final item in records) {
         final content = (item['content'] ?? '').toString();
         if (content.isEmpty) continue;
-        _messages.add(
-          ChatMessage(
-            role: item['role'] == 'assistant'
-                ? ChatRole.assistant
-                : ChatRole.user,
-            content: content,
-          ),
+        final message = ChatMessage(
+          role: item['role'] == 'assistant' ? ChatRole.assistant : ChatRole.user,
+          content: content,
         );
+        _messages.add(message);
+        _timeline.add(message);
       }
       if (_messages.isNotEmpty) _safeNotify();
     } catch (e) {
@@ -225,7 +236,9 @@ class AiProvider extends ChangeNotifier {
       return;
     }
 
-    _messages.add(ChatMessage(role: ChatRole.user, content: text));
+    final userMessage = ChatMessage(role: ChatRole.user, content: text);
+    _messages.add(userMessage);
+    _timeline.add(userMessage);
     _steps.clear();
     _status = AiStatus.thinking;
     _error = null;
@@ -255,16 +268,20 @@ class AiProvider extends ChangeNotifier {
         model: llm.model,
         history: List<ChatMessage>.from(history),
         onStep: (step) {
-          _steps.add(step);
+          if (!_steps.contains(step)) _steps.add(step);
+          if (!_timeline.contains(step)) _timeline.add(step);
           _safeNotify();
         },
         onDelta: onDelta,
       );
       _isStreaming = false;
       _streamingText = '';
-      _messages.add(
-        ChatMessage(role: ChatRole.assistant, content: result.content),
+      final reply = ChatMessage(
+        role: ChatRole.assistant,
+        content: result.content,
       );
+      _messages.add(reply);
+      _timeline.add(reply);
       _status = AiStatus.idle;
     } catch (e) {
       _isStreaming = false;

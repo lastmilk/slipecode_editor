@@ -17,6 +17,17 @@ class MainActivity : FlutterFragmentActivity() {
     private val keyEventChannelName = "slipecode/keyevent"
     private val overlayChannelName = "slipecode/overlay"
 
+    companion object {
+        /// Termux 定义的 RUN_COMMAND 权限（protectionLevel=dangerous，需运行时申请）
+        private const val TERMUX_RUN_COMMAND_PERMISSION = "com.termux.permission.RUN_COMMAND"
+        private const val REQUEST_RUN_COMMAND_PERMISSION = 0x1001
+        private const val TERMUX_PACKAGE = "com.termux"
+        private const val TERMUX_API_PACKAGE = "com.termux.api"
+    }
+
+    /// 运行时权限申请中的回调（等待用户在系统弹窗中做出选择）
+    private var pendingPermissionResult: MethodChannel.Result? = null
+
     /// Flutter 侧注册的音量键监听器；为 null 表示未监听（按键走系统默认）
     private var volumeKeyListener: ((Int) -> Boolean)? = null
 
@@ -96,14 +107,35 @@ class MainActivity : FlutterFragmentActivity() {
                     }
 
                     "isTermuxApiInstalled" -> {
-                        result.success(isPackageInstalled("com.termux.api"))
+                        result.success(isPackageInstalled(TERMUX_API_PACKAGE))
                     }
+
+                    "hasRunCommandPermission" -> {
+                        result.success(hasRunCommandPermission())
+                    }
+
+                    "requestRunCommandPermission" -> {
+                        requestRunCommandPermission(result)
+                    }
+
+                    "openTermux" -> openTermuxApp(TERMUX_PACKAGE, result)
+
+                    "openTermuxApi" -> openTermuxApp(TERMUX_API_PACKAGE, result)
 
                     "exec" -> {
                         val command = call.argument<String>("command")
                         val workDir = call.argument<String>("workDir")
                         if (command == null) {
                             result.error("bad_args", "command is null", null)
+                            return@setMethodCallHandler
+                        }
+                        // Termux 的 RUN_COMMAND 是 dangerous 权限，必须先获得用户授权
+                        if (!hasRunCommandPermission()) {
+                            result.error(
+                                "permission_denied",
+                                "缺少 com.termux.permission.RUN_COMMAND 权限（请在应用内授权）",
+                                null
+                            )
                             return@setMethodCallHandler
                         }
                         // execInTermux 内部会轮询等待命令结束，必须放到后台线程，
@@ -258,6 +290,66 @@ class MainActivity : FlutterFragmentActivity() {
         }
     }
 
+    /// 是否已获得 Termux RUN_COMMAND 运行时权限
+    private fun hasRunCommandPermission(): Boolean =
+        checkSelfPermission(TERMUX_RUN_COMMAND_PERMISSION) ==
+            PackageManager.PERMISSION_GRANTED
+
+    /// 申请 Termux RUN_COMMAND 运行时权限（系统弹窗，用户需手动允许）
+    private fun requestRunCommandPermission(result: MethodChannel.Result) {
+        if (hasRunCommandPermission()) {
+            result.success(true)
+            return
+        }
+        if (pendingPermissionResult != null) {
+            result.error("busy", "已有权限申请正在进行", null)
+            return
+        }
+        pendingPermissionResult = result
+        requestPermissions(
+            arrayOf(TERMUX_RUN_COMMAND_PERMISSION),
+            REQUEST_RUN_COMMAND_PERMISSION
+        )
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != REQUEST_RUN_COMMAND_PERMISSION) return
+        val granted = grantResults.isNotEmpty() &&
+            grantResults[0] == PackageManager.PERMISSION_GRANTED
+        pendingPermissionResult?.success(granted)
+        pendingPermissionResult = null
+    }
+
+    /// 拉起 Termux / Termux:API 应用（未安装时跳转应用商店）
+    private fun openTermuxApp(packageName: String, result: MethodChannel.Result) {
+        try {
+            val launch = packageManager.getLaunchIntentForPackage(packageName)
+            if (launch != null) {
+                launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                startActivity(launch)
+                result.success(true)
+                return
+            }
+            // 未安装：跳转 F-Droid 下载页
+            val url = if (packageName == TERMUX_API_PACKAGE)
+                "https://f-droid.org/packages/com.termux.api/"
+            else
+                "https://f-droid.org/packages/com.termux/"
+            startActivity(
+                Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+            result.success(true)
+        } catch (e: Exception) {
+            result.error("open_failed", e.message, null)
+        }
+    }
+
     /**
      * 在 Termux 中执行命令并捕获输出。
      *
@@ -296,11 +388,14 @@ class MainActivity : FlutterFragmentActivity() {
 
         // 启动 Termux RunCommandService 执行脚本
         val intent = Intent().apply {
-            setClassName("com.termux", "com.termux.app.RunCommandService")
+            setClassName(TERMUX_PACKAGE, "com.termux.app.RunCommandService")
             action = "com.termux.RUN_COMMAND"
             putExtra("com.termux.RUN_COMMAND_PATH", "/data/data/com.termux/files/usr/bin/bash")
             putExtra("com.termux.RUN_COMMAND_ARGUMENTS", arrayOf(scriptFile.absolutePath))
-            putExtra("com.termux.RUN_COMMAND_WORKDIR", "/data/data/com.termux/files/home")
+            putExtra(
+                "com.termux.RUN_COMMAND_WORKDIR",
+                workDir ?: "/data/data/com.termux/files/home"
+            )
             putExtra("com.termux.RUN_COMMAND_BACKGROUND", true)
             putExtra("com.termux.RUN_COMMAND_SESSION_ACTION", "0")
         }
@@ -312,20 +407,20 @@ class MainActivity : FlutterFragmentActivity() {
 
         try {
             startService(intent)
+        } catch (e: SecurityException) {
+            // 最常见原因：Termux 未开启 allow-external-apps
+            return Triple(
+                -1,
+                "",
+                "无法启动 Termux：${e.message}\n" +
+                    "请在 Termux 中执行：\n" +
+                    "1) pkg install termux-api\n" +
+                    "2) 在 ~/.termux/termux.properties 追加 allow-external-apps=true\n" +
+                    "3) termux-reload-settings\n" +
+                    "4) termux-setup-storage"
+            )
         } catch (e: Exception) {
-            // 尝试用 activity 方式启动
-            try {
-                val activityIntent = Intent().apply {
-                    setClassName("com.termux", "com.termux.app.RunCommandService")
-                    action = "com.termux.RUN_COMMAND"
-                    putExtra("com.termux.RUN_COMMAND_PATH", "/data/data/com.termux/files/usr/bin/bash")
-                    putExtra("com.termux.RUN_COMMAND_ARGUMENTS", arrayOf(scriptFile.absolutePath))
-                    putExtra("com.termux.RUN_COMMAND_BACKGROUND", true)
-                }
-                startService(activityIntent)
-            } catch (e2: Exception) {
-                return Triple(-1, "", "无法启动 Termux：${e2.message}")
-            }
+            return Triple(-1, "", "无法启动 Termux：${e.message}")
         }
 
         // 轮询等待退出码文件（最多 10 分钟）

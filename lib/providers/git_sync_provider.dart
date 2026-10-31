@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
+import '../services/ai_change_journal.dart';
 import '../services/github_api_service.dart' show RepoFile;
 import '../services/git_host.dart';
 import '../services/project_snapshot.dart';
@@ -115,9 +116,15 @@ class GitSyncProvider extends ChangeNotifier {
 
     try {
       final repoFiles = <RepoFile>[];
+      final blocked = <String>[];
       for (final path in files) {
         final file = File(path);
         if (!await file.exists()) continue; // 已删除的文件跳过（暂不支持删除）
+        // 未获用户确认的 AI 改动禁止推送到远程仓库
+        if (AiChangeJournal.instance.isBlocked(path)) {
+          blocked.add(path);
+          continue;
+        }
         final relative = p.relative(path, from: projectPath);
         final repoPath = relative.replaceAll(Platform.pathSeparator, '/');
         final bytes = await file.readAsBytes();
@@ -128,6 +135,12 @@ class GitSyncProvider extends ChangeNotifier {
           isText: !ProjectSnapshot.looksBinary(repoPath),
         ));
         if (repoFiles.length >= maxFilesPerPush) break;
+      }
+
+      if (blocked.isNotEmpty) {
+        // 未确认的 AI 改动不推送，等用户确认后再由保存动作重新排队
+        _pending.removeAll(blocked);
+        _error = '有 ${blocked.length} 个文件因 AI 修改未获批准，已跳过推送';
       }
 
       if (repoFiles.isEmpty) {

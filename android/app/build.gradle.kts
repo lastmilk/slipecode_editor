@@ -56,6 +56,8 @@ kotlin {
 
 dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
+    // local_auth 的 BiometricPrompt 依赖 AppCompat 主题
+    implementation("androidx.appcompat:appcompat:1.7.1")
     // 极验验证码 SDK（GT4，来自 gt4-android-sec.zip）
     implementation(files("libs/geetest_captcha_android.aar"))
 }

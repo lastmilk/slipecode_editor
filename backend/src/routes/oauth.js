@@ -120,6 +120,36 @@ function resolveGithubRedirectUri(candidate) {
   return GITHUB.redirectUri;
 }
 
+/** 取多值请求头中的第一个值（代理会追加多个） */
+function firstHeaderValue(value) {
+  return String(value || '').split(',')[0].trim();
+}
+
+/**
+ * 按「本次回调请求的真实地址」推导 redirect_uri。
+ *
+ * GitHub 换取 token 时要求 redirect_uri 与授权时使用的回调地址完全一致。
+ * 服务器环境变量里可能配的是旧域名（如 ser1996.niav.cn），
+ * 与 App 实际使用的 api.slipe.cn 不一致就会报
+ * `The redirect_uri MUST match the registered callback URL`。
+ */
+function resolveCallbackRedirectUri(req) {
+  const proto = (
+    firstHeaderValue(req.headers['x-forwarded-proto']) ||
+    firstHeaderValue(req.headers['x-scheme']) ||
+    'https'
+  ).toLowerCase();
+
+  let host = firstHeaderValue(req.headers['x-forwarded-host']) || firstHeaderValue(req.headers.host);
+  // Nginx 反代常带默认端口（api.slipe.cn:443），需去掉才能与登记的回调一致
+  if (proto === 'https' && host.endsWith(':443')) host = host.slice(0, -4);
+  if (proto === 'http' && host.endsWith(':80')) host = host.slice(0, -3);
+
+  const path = (req.url || '').split('?')[0];
+  if (!host || !path) return GITHUB.redirectUri;
+  return `${proto}://${host}${path}`;
+}
+
 // 一次性票据：ticket → token（5 分钟有效，用后即焚）
 const oauthTickets = new Map();
 
@@ -159,7 +189,7 @@ export async function handleGithubCallback(req, res) {
   try {
     const data = await githubTokenRequest({
       code,
-      redirect_uri: GITHUB.redirectUri,
+      redirect_uri: resolveCallbackRedirectUri(req),
     });
     redirectToApp({
       ticket: issueOAuthTicket({

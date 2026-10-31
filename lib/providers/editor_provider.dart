@@ -92,6 +92,14 @@ class EditorProvider extends ChangeNotifier {
     }
   }
 
+  /// 刷新全部已打开文件（撤回 AI 改动后调用）
+  Future<void> reloadAll() async {
+    for (final file in List<OpenFile>.from(_openFiles)) {
+      await reloadFile(file.path);
+    }
+    notifyListeners();
+  }
+
   /// 文件被重命名：同步更新已打开的标签
   void renameOpenFile(String oldPath, String newPath) {
     for (var i = 0; i < _openFiles.length; i++) {

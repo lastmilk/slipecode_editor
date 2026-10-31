@@ -13,6 +13,8 @@ import '../providers/editor_provider.dart';
 import '../providers/git_sync_provider.dart';
 import '../providers/project_provider.dart';
 import '../providers/settings_provider.dart';
+import '../providers/terminal_provider.dart';
+import '../services/ai_change_journal.dart';
 import '../services/dart_class_template.dart';
 import '../services/file_service.dart';
 import '../services/volume_key_service.dart';
@@ -66,6 +68,8 @@ class _EditorScreenState extends State<EditorScreen>
           projectProvider.fileTree == null) {
         projectProvider.refreshFileTree();
       }
+      // 检测 Termux：仅在存在时展示终端入口 / 开启 AI 终端工具
+      context.read<TerminalProvider>().detectTermux();
     });
     _settingsProvider = context.read<SettingsProvider>();
     _settingsProvider!.addListener(_syncVolumeKeyListener);
@@ -144,35 +148,109 @@ class _EditorScreenState extends State<EditorScreen>
   /// 退出编辑器前的未保存确认
   Future<bool> _confirmExit() async {
     final editorProvider = context.read<EditorProvider>();
-    if (!editorProvider.hasUnsavedChanges) return true;
-    final count =
-        editorProvider.openFiles.where((file) => file.isModified).length;
+    if (editorProvider.hasUnsavedChanges) {
+      final count =
+          editorProvider.openFiles.where((file) => file.isModified).length;
+      final action = await showDialog<String>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text(t('editor.unsavedTitle')),
+          content: Text(t('editor.unsavedBody', {'count': '$count'})),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop('cancel'),
+              child: Text(t('common.cancel')),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop('discard'),
+              child: Text(t('editor.discard')),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(ctx).pop('save'),
+              child: Text(t('editor.saveAndExit')),
+            ),
+          ],
+        ),
+      );
+      if (action == 'save') {
+        await _saveAllNow();
+      } else if (action != 'discard') {
+        return false;
+      }
+    }
+    return _confirmAiChanges();
+  }
+
+  /// 退出前提醒用户确认 AI 改动
+  ///
+  /// 未确认的改动不会被推送到 GitHub / Gitee（由 AiChangeJournal 拦截）。
+  Future<bool> _confirmAiChanges() async {
+    final journal = AiChangeJournal.instance;
+    if (!journal.hasPending) return true;
+    final pending = journal.pending;
     final action = await showDialog<String>(
       context: context,
+      barrierDismissible: false,
       builder: (ctx) => AlertDialog(
-        title: Text(t('editor.unsavedTitle')),
-        content: Text(t('editor.unsavedBody', {'count': '$count'})),
+        title: const Text('AI 修改待确认'),
+        content: SizedBox(
+          width: 520,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'AI 本次修改了 ${pending.length} 个文件，尚未确认。\n'
+                '未确认的修改不会推送到 GitHub / Gitee。',
+                style: const TextStyle(fontSize: 12, height: 1.5),
+              ),
+              const SizedBox(height: 8),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 220),
+                child: SingleChildScrollView(
+                  child: Text(
+                    pending
+                        .map((entry) =>
+                            '${entry.action}  ${entry.path.split(RegExp(r'[/\\\\]')).last}')
+                        .join('\n'),
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontFamily: 'monospace',
+                      height: 1.5,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(ctx).pop('cancel'),
-            child: Text(t('common.cancel')),
+            onPressed: () => Navigator.of(ctx).pop('revert'),
+            child: const Text('撤回全部'),
           ),
           TextButton(
-            onPressed: () => Navigator.of(ctx).pop('discard'),
-            child: Text(t('editor.discard')),
+            onPressed: () => Navigator.of(ctx).pop('later'),
+            child: const Text('稍后处理'),
           ),
           FilledButton(
-            onPressed: () => Navigator.of(ctx).pop('save'),
-            child: Text(t('editor.saveAndExit')),
+            onPressed: () => Navigator.of(ctx).pop('approve'),
+            child: const Text('保留全部'),
           ),
         ],
       ),
     );
-    if (action == 'save') {
-      await _saveAllNow();
+    if (action == 'approve') {
+      journal.approveAll();
       return true;
     }
-    return action == 'discard';
+    if (action == 'revert') {
+      await journal.revertAllPending();
+      if (mounted) await context.read<EditorProvider>().reloadAll();
+      return true;
+    }
+    // 稍后处理：保留待确认记录，推送时会被拦截
+    return true;
   }
 
   /// 关闭标签：有未保存修改时先确认
@@ -530,6 +608,7 @@ class _EditorScreenState extends State<EditorScreen>
     final projectProvider = context.watch<ProjectProvider>();
     final editorProvider = context.watch<EditorProvider>();
     final settings = context.watch<SettingsProvider>().settings;
+    final terminal = context.watch<TerminalProvider>();
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     final showBackground =
@@ -556,11 +635,13 @@ class _EditorScreenState extends State<EditorScreen>
               t('editor.title'),
         ),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.terminal),
-            tooltip: t('editor.terminal'),
-            onPressed: () => showTerminalSheet(context),
-          ),
+          // 仅在检测到 Termux（桌面为本地 shell）时显示终端入口
+          if (terminal.available)
+            IconButton(
+              icon: const Icon(Icons.terminal),
+              tooltip: t('editor.terminal'),
+              onPressed: () => showTerminalSheet(context),
+            ),
           IconButton(
             icon: const Icon(Icons.build),
             tooltip: t('editor.build'),

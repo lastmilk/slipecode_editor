@@ -606,15 +606,16 @@ class _SettingsScreenState extends State<SettingsScreen>
 
   List<_SectionData> _aiSections(SettingsProvider sp, AppSettings settings) {
     return [
-      _SectionData('AI 审批', [
+      _SectionData('AI 改动', [
         _Entry(
-          'AI 改动审批 approval ai write 落盘',
-          SwitchListTile(
+          'AI 改动 自动保存 撤回 未批准 推送 git push',
+          ListTile(
             contentPadding: EdgeInsets.zero,
-            title: Text(t('settings.aiApproval')),
-            subtitle: Text(t('settings.aiApprovalSub')),
-            value: settings.aiApprovalEnabled,
-            onChanged: sp.setAiApprovalEnabled,
+            title: const Text('AI 改动默认保存，可随时撤回'),
+            subtitle: const Text(
+              'AI 修改文件后直接落盘，不再弹窗审批；'
+              '在对话流或退出时可逐条撤回。未确认的改动不会被推送到 GitHub / Gitee。',
+            ),
           ),
         ),
       ]),

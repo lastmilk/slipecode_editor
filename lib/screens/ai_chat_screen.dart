@@ -4,8 +4,11 @@ import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:markdown/markdown.dart' as md;
 import 'package:provider/provider.dart';
 
+import '../agent/mcp_tools.dart';
 import '../providers/ai_provider.dart';
+import '../providers/editor_provider.dart';
 import '../providers/settings_provider.dart';
+import '../services/ai_change_journal.dart';
 import '../services/llm_service.dart';
 import 'settings_screen.dart';
 
@@ -177,9 +180,10 @@ class _AiChatScreenState extends State<AiChatScreen> {
               : ListView.builder(
                   controller: _scrollController,
                   padding: const EdgeInsets.all(12),
-                  itemCount: ai.messages.length + (ai.isStreaming ? 1 : 0),
+                  itemCount: ai.timeline.length + (ai.isStreaming ? 1 : 0),
                   itemBuilder: (context, index) {
-                    if (index >= ai.messages.length) {
+                    if (index >= ai.timeline.length) {
+                      // 流式输出气泡
                       return _MessageBubble(
                         content: ai.streamingText.isEmpty
                             ? '思考中…'
@@ -189,7 +193,12 @@ class _AiChatScreenState extends State<AiChatScreen> {
                         streaming: true,
                       );
                     }
-                    final msg = ai.messages[index];
+                    final item = ai.timeline[index];
+                    if (item is AgentToolStep) {
+                      // 工具调用及其返回结果，直接穿插在对话流中
+                      return _ToolCallCard(step: item, isDark: isDark);
+                    }
+                    final msg = item as ChatMessage;
                     return _MessageBubble(
                       content: msg.content,
                       isUser: msg.role == ChatRole.user,
@@ -199,54 +208,6 @@ class _AiChatScreenState extends State<AiChatScreen> {
                   },
                 ),
         ),
-
-        // Agent 工具调用轨迹
-        if (ai.steps.isNotEmpty)
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Icon(
-                      Icons.build_circle_outlined,
-                      size: 14,
-                      color: isDark ? Colors.white54 : Colors.black45,
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      '工具调用（${ai.steps.length}）',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: isDark ? Colors.white54 : Colors.black45,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 4),
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 4,
-                  children: ai.steps
-                      .map(
-                        (step) => Chip(
-                          visualDensity: VisualDensity.compact,
-                          materialTapTargetSize:
-                              MaterialTapTargetSize.shrinkWrap,
-                          label: Text(
-                            '${step.tool} · ${step.summary}',
-                            style: const TextStyle(fontSize: 10),
-                          ),
-                        ),
-                      )
-                      .toList(),
-                ),
-              ],
-            ),
-          ),
 
         // 错误提示
         if (ai.error != null)
@@ -265,6 +226,9 @@ class _AiChatScreenState extends State<AiChatScreen> {
               ),
             ),
           ),
+
+        // AI 改动待确认（默认已落盘，可随时撤回）
+        _PendingChangesBanner(isDark: isDark),
 
         // 输入区
         Container(
@@ -532,6 +496,274 @@ class _CodeBlock extends StatelessWidget {
               ),
             ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+/// AI 改动待确认条
+///
+/// AI 修改默认直接保存；这里汇总尚未确认的改动，
+/// 用户可逐条撤回、全部撤回或全部保留。
+class _PendingChangesBanner extends StatelessWidget {
+  const _PendingChangesBanner({required this.isDark});
+
+  final bool isDark;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: AiChangeJournal.instance,
+      builder: (context, _) {
+        final count = AiChangeJournal.instance.pendingCount;
+        if (count == 0) return const SizedBox.shrink();
+        return Container(
+          width: double.infinity,
+          padding: const EdgeInsets.fromLTRB(12, 6, 6, 6),
+          color: Colors.orange.withValues(alpha: 0.12),
+          child: Row(
+            children: [
+              const Icon(Icons.pending_actions,
+                  size: 16, color: Colors.orange),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'AI 已修改 $count 个文件，尚未确认（未确认前不会推送到仓库）',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: isDark
+                        ? Colors.orange.shade200
+                        : Colors.orange.shade900,
+                  ),
+                ),
+              ),
+              TextButton(
+                onPressed: () => _showList(context),
+                child: const Text('查看', style: TextStyle(fontSize: 12)),
+              ),
+              TextButton(
+                onPressed: () => _revertAll(context),
+                child: const Text('撤回全部', style: TextStyle(fontSize: 12)),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _revertAll(BuildContext context) async {
+    final restored = await AiChangeJournal.instance.revertAllPending();
+    if (restored == 0 || !context.mounted) return;
+    await context.read<EditorProvider>().reloadAll();
+  }
+
+  Future<void> _showList(BuildContext context) async {
+    final journal = AiChangeJournal.instance;
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('AI 修改待确认'),
+        content: SizedBox(
+          width: 560,
+          child: ListenableBuilder(
+            listenable: journal,
+            builder: (context, _) {
+              final pending = journal.pending;
+              if (pending.isEmpty) {
+                return const Text('没有待确认的修改');
+              }
+              return ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 360),
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: pending.length,
+                  itemBuilder: (context, index) {
+                    final entry = pending[index];
+                    final name = entry.path.split(RegExp(r'[/\\]')).last;
+                    return ListTile(
+                      dense: true,
+                      title: Text(
+                        name,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontFamily: 'monospace',
+                        ),
+                      ),
+                      subtitle: Text(
+                        entry.action,
+                        style: const TextStyle(fontSize: 11),
+                      ),
+                      trailing: TextButton(
+                        onPressed: entry.reversible
+                            ? () async {
+                                final ok = await journal.revert(entry);
+                                if (ok && dialogContext.mounted) {
+                                  await dialogContext
+                                      .read<EditorProvider>()
+                                      .reloadAll();
+                                }
+                              }
+                            : null,
+                        child: const Text('撤回', style: TextStyle(fontSize: 12)),
+                      ),
+                    );
+                  },
+                ),
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () async {
+              final restored = await journal.revertAllPending();
+              if (restored > 0 && dialogContext.mounted) {
+                await dialogContext.read<EditorProvider>().reloadAll();
+              }
+            },
+            child: const Text('全部撤回'),
+          ),
+          FilledButton(
+            onPressed: () {
+              journal.approveAll();
+              Navigator.of(dialogContext).pop();
+            },
+            child: const Text('全部保留'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 对话流中的一次工具调用卡片
+///
+/// 展示工具名、参数摘要与实际返回结果，结果可折叠/展开。
+class _ToolCallCard extends StatefulWidget {
+  const _ToolCallCard({
+    required this.step,
+    required this.isDark,
+  });
+
+  final AgentToolStep step;
+  final bool isDark;
+
+  @override
+  State<_ToolCallCard> createState() => _ToolCallCardState();
+}
+
+class _ToolCallCardState extends State<_ToolCallCard> {
+  bool _expanded = true;
+
+  @override
+  Widget build(BuildContext context) {
+    final step = widget.step;
+    final isDark = widget.isDark;
+    final result = step.result;
+    final color = step.running
+        ? Colors.blueAccent
+        : (step.failed ? Colors.orange : Colors.green);
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF232326) : const Color(0xFFF2F5F8),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: isDark ? const Color(0xFF3C3C3C) : const Color(0xFFE0E4E8),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          InkWell(
+            onTap: () => setState(() => _expanded = !_expanded),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              child: Row(
+                children: [
+                  if (step.running)
+                    const SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  else
+                    Icon(
+                      step.failed
+                          ? Icons.error_outline
+                          : Icons.check_circle_outline,
+                      size: 15,
+                      color: color,
+                    ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          step.tool,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            fontFamily: 'monospace',
+                          ),
+                        ),
+                        if (step.summary.isNotEmpty)
+                          Text(
+                            step.summary,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: isDark ? Colors.white54 : Colors.black45,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  if (step.running)
+                    Text(
+                      '执行中',
+                      style: TextStyle(fontSize: 10, color: color),
+                    )
+                  else
+                    Icon(
+                      _expanded ? Icons.expand_less : Icons.expand_more,
+                      size: 16,
+                      color: isDark ? Colors.white38 : Colors.black38,
+                    ),
+                ],
+              ),
+            ),
+          ),
+          if (_expanded && !step.running)
+            Container(
+              width: double.infinity,
+              constraints: const BoxConstraints(maxHeight: 200),
+              margin: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF1B1B1D) : Colors.white,
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(
+                  color: isDark ? Colors.white12 : Colors.black12,
+                ),
+              ),
+              child: SingleChildScrollView(
+                child: SelectableText(
+                  result.isEmpty ? '（无返回内容）' : result,
+                  style: TextStyle(
+                    fontFamily: 'monospace',
+                    fontSize: 11,
+                    height: 1.45,
+                    color: isDark ? const Color(0xFFD4D4D4) : const Color(0xFF1F2328),
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );

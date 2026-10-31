@@ -3,6 +3,7 @@ import 'dart:math';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:local_auth/local_auth.dart';
 
@@ -53,11 +54,13 @@ class SecurityService {
   }
 
   /// 设备是否具备可用的生物认证
+  ///
+  /// 以 [isDeviceSupported] 为准：Android 上「仅设置锁屏密码」的设备也能
+  /// 通过 BiometricPrompt 的备用凭据验证，此时 [canCheckBiometrics] 为 false，
+  /// 若强制要求会导致设置页误报「设备不支持」。
   Future<bool> biometricAvailable() async {
     try {
-      final supported = await _auth.isDeviceSupported();
-      final canCheck = await _auth.canCheckBiometrics;
-      return supported && canCheck;
+      return await _auth.isDeviceSupported();
     } catch (e) {
       debugPrint('生物认证能力检测失败：$e');
       return false;
@@ -65,16 +68,23 @@ class SecurityService {
   }
 
   /// 调起系统生物认证
+  ///
+  /// 已录入生物特征时只允许生物识别；设备仅有锁屏密码时回退到
+  /// 系统凭据（PIN / 图案 / 密码），避免直接抛错导致无法解锁。
   Future<bool> authenticate({String reason = '验证身份以解锁 SLIPE'}) async {
     try {
+      final enrolled = await _auth.getAvailableBiometrics();
       return await _auth.authenticate(
         localizedReason: reason,
-        options: const AuthenticationOptions(
-          biometricOnly: true,
+        options: AuthenticationOptions(
+          biometricOnly: enrolled.isNotEmpty,
           stickyAuth: true,
-          useErrorDialogs: true,
         ),
       );
+    } on PlatformException catch (e) {
+      // NotEnrolled / NotAvailable / PermanentlyLocked 等
+      debugPrint('生物认证调用失败（${e.code}）：${e.message}');
+      return false;
     } catch (e) {
       debugPrint('生物认证失败：$e');
       return false;

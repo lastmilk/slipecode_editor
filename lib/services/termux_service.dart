@@ -42,6 +42,74 @@ class TermuxService {
     }
   }
 
+  /// 是否已获得 Termux RUN_COMMAND 运行时权限
+  ///
+  /// Termux 把 `com.termux.permission.RUN_COMMAND` 定义为 dangerous 权限，
+  /// 仅写入 AndroidManifest 不够，必须在运行时由用户授权。
+  Future<bool> hasRunCommandPermission() async {
+    try {
+      final ok = await _channel.invokeMethod<bool>('hasRunCommandPermission');
+      return ok ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// 申请 Termux RUN_COMMAND 运行时权限（系统弹窗）
+  Future<bool> requestRunCommandPermission() async {
+    try {
+      final ok =
+          await _channel.invokeMethod<bool>('requestRunCommandPermission');
+      return ok ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// 打开 Termux 应用
+  Future<bool> openTermux() async {
+    try {
+      final ok = await _channel.invokeMethod<bool>('openTermux');
+      return ok ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// 打开 Termux:API 应用
+  Future<bool> openTermuxApi() async {
+    try {
+      final ok = await _channel.invokeMethod<bool>('openTermuxApi');
+      return ok ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// 探测 Termux 外部命令调用是否真正可用（含 allow-external-apps 配置）
+  Future<TermuxProbeResult> probe() async {
+    if (!await isTermuxInstalled()) {
+      return const TermuxProbeResult(
+        ok: false,
+        message: '未检测到 Termux，请先安装 Termux。',
+      );
+    }
+    if (!await hasRunCommandPermission()) {
+      return const TermuxProbeResult(
+        ok: false,
+        message: '尚未授予 Termux 命令执行权限（com.termux.permission.RUN_COMMAND）。',
+      );
+    }
+    final result = await exec('echo __SLIPE_OK__');
+    if (result.isSuccess && result.stdout.contains('__SLIPE_OK__')) {
+      return const TermuxProbeResult(ok: true, message: 'Termux 命令调用正常。');
+    }
+    return TermuxProbeResult(
+      ok: false,
+      message: 'Termux 命令调用失败：${result.stderr.trim().isEmpty ? result.stdout.trim() : result.stderr.trim()}',
+    );
+  }
+
   /// 检查 Termux 中是否安装了 flutter
   Future<bool> hasFlutter() async {
     final result = await exec('which flutter');
@@ -72,10 +140,14 @@ class TermuxService {
         stderr: (result?['stderr'] as String?) ?? '',
       );
     } catch (e) {
+      final message = e is PlatformException && e.code == 'permission_denied'
+          ? '缺少 Termux 命令执行权限（com.termux.permission.RUN_COMMAND），'
+              '请在应用内授权后重试'
+          : 'Termux 调用失败：$e';
       return TermuxExecResult(
         exitCode: -1,
         stdout: '',
-        stderr: 'Termux 调用失败：$e',
+        stderr: message,
       );
     }
   }
@@ -176,4 +248,12 @@ class TermuxExecResult {
   });
 
   bool get isSuccess => exitCode == 0;
+}
+
+/// Termux 可用性探测结果
+class TermuxProbeResult {
+  final bool ok;
+  final String message;
+
+  const TermuxProbeResult({required this.ok, required this.message});
 }
