@@ -2,12 +2,13 @@
 # SlipCode 账号后端部署脚本（宝塔面板 · CentOS）
 #
 # 使用前提：
-#   1. 已在宝塔「网站 → 反向代理」创建站点 ser1996.niav.cn，目标 http://127.0.0.1:8787
-#   2. 已把 backend-deploy.zip 上传到 /www/wwwroot/ser1996.niav.cn/
-#   3. 以 root 在面板「终端」执行：bash /www/wwwroot/ser1996.niav.cn/deploy.sh
+#   1. 已在宝塔「网站 → 反向代理」创建站点 api.slipe.cn，目标 http://127.0.0.1:8787
+#      （管理页域名 workadmin.slipe.cn 也反代到同一进程即可）
+#   2. 已把 backend-deploy.zip 上传到 /www/wwwroot/api.slipe.cn/
+#   3. 以 root 在面板「终端」执行：bash /www/wwwroot/api.slipe.cn/deploy.sh
 set -euo pipefail
 
-DOMAIN="ser1996.niav.cn"
+DOMAIN="api.slipe.cn"
 ROOT="/www/wwwroot/${DOMAIN}"
 ZIP="${ROOT}/backend-deploy.zip"
 NODE_DIR="/www/server/nodejs/v20.18.0"
@@ -45,6 +46,7 @@ PORT=8787
 DATA_DIR=${ROOT}/api/data
 JWT_SECRET=$(openssl rand -hex 32)
 CORS_ORIGIN=*
+GITHUB_REDIRECT_URI=https://api.slipe.cn/api/oauth/github/callback
 GITEE_CLIENT_ID=
 GITEE_CLIENT_SECRET=
 GITEE_REDIRECT_URI=slipecode://oauth/gitee/callback

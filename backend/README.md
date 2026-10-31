@@ -10,7 +10,7 @@
 - Gitee OAuth token 代理（Gitee 不支持 PKCE，必须由后端持有 `client_secret`）
 - 积分体系：每日签到 +100 积分，积分用于抵扣内置 LLM 调用
 - LLM 内置代理：OpenAI 兼容 `/chat/completions`，按 token 计积分
-- 管理端：`/admin` 静态页面 + `/api/admin/*` 接口（用户积分调整、LLM 模型管理）
+- 管理端：`workadmin.slipe.cn` Element Plus 管理页 + `/api/admin/*` 接口（凭据配置、统计、用户详情二次验证、积分调整、LLM 模型管理）
 
 ## 运行
 
@@ -22,6 +22,19 @@ npm start
 ```
 
 默认监听 `8787` 端口，数据保存在 `backend/data/db.json`（已 gitignore）。
+
+域名约定（同一进程可同时服务两个域名）：
+
+| 域名 | 用途 |
+| --- | --- |
+| `api.slipe.cn` | 全部 `/api/*` 接口（App 的 `ACCOUNT_BACKEND_BASE_URL`） |
+| `workadmin.slipe.cn` | Element Plus 管理页面（根路径即管理端） |
+
+本地开发可直接访问 `http://localhost:8787/admin`。交由 Nginx/宝塔做 HTTPS 与反向代理时，两个站点都反代到同一个 `127.0.0.1:8787` 即可。
+
+## 运行期配置
+
+极验、阿里云、管理员密码可在管理页「凭据配置」中直接修改并立即生效，写入 `db.json` 的 `config` 字段，优先级高于环境变量。环境变量仅作为初始值/兜底。
 
 ## 环境变量
 
@@ -36,9 +49,10 @@ npm start
 | `GITEE_REDIRECT_URI` | 否 | Gitee 回调地址，默认 `slipecode://oauth/gitee/callback` |
 | `GITHUB_CLIENT_ID` | GitHub 必填 | GitHub OAuth App 的 Client ID |
 | `GITHUB_CLIENT_SECRET` | GitHub 必填 | GitHub OAuth App 的 Client Secret |
-| `GITHUB_REDIRECT_URI` | 否 | GitHub OAuth App 里登记的 callback URL，默认 `https://ser1996.niav.cn/api/oauth/github/callback` |
+| `GITHUB_REDIRECT_URI` | 否 | GitHub OAuth App 里登记的 callback URL，默认 `https://api.slipe.cn/api/oauth/github/callback` |
 | `GITHUB_DEEP_LINK` | 否 | 换 token 后 302 回 App 的深链，默认 `slipecode://oauth/callback` |
-| `ADMIN_TOKEN` | 生产必填 | 管理端访问令牌，**必须改为足够长的随机串**；未设置时使用代码内的开发默认值（启动时会打印警告） |
+| `ADMIN_PASSWORD` | 否 | 管理员初始密码，默认 `slipe-admin-2026`；登录后请在管理页修改（修改后写入数据库哈希，环境变量不再生效） |
+| `ADMIN_TOKEN` | 否 | 可选静态管理令牌（兼容脚本调用），一般无需设置 |
 | `GEETEST_CAPTCHA_ID` | 生产必填 | 极验 GT4 Captcha ID（登录 / 注册二次校验） |
 | `GEETEST_CAPTCHA_KEY` | 生产必填 | 极验 GT4 Captcha Key（HMAC-SHA256 校验 sign_token） |
 | `GEETEST_ENFORCE` | 否 | 默认 `1`：强制校验极验；设为 `0` 可临时关闭 |
@@ -102,17 +116,27 @@ node src/server.js
 
 ### 管理端
 
-浏览器访问 `https://ser1996.niav.cn/admin`（或 `/admin/`），输入 `ADMIN_TOKEN` 登录后可：
+浏览器访问 `https://workadmin.slipe.cn`（或本地 `/admin`），输入管理员密码登录（默认 `slipe-admin-2026`，可通过 `ADMIN_PASSWORD` 修改初始值）。登录后签发 8 小时有效的管理员 JWT。
 
-- 查看用户列表（邮箱 / 积分 / 注册时间 / 最后签到），并对用户积分加 / 减；
-- 查看、新增、编辑、删除 LLM 模型（字段：`name` / `apiBase` / `apiKey` / `model` / `multiplier`）。
+管理页提供：
 
-管理接口（需 `Authorization: Bearer <ADMIN_TOKEN>`）：
+- **概览统计**：注册 / 登录 / 短信 / 极验通过率 / LLM 调用与 token，14 天趋势，服务状态与凭据状态；
+- **用户管理**：搜索用户、调整积分；查看用户详情需**二次输入管理员密码**（`X-Admin-Password`）；
+- **凭据配置**：极验 Captcha ID / Key / 强制开关，阿里云 AccessKey / 短信签名 / 模板，管理员密码修改；
+- **LLM 模型**：查看、新增、编辑、删除模型（字段：`name` / `apiBase` / `apiKey` / `model` / `multiplier`）。
+
+管理接口（需 `Authorization: Bearer <管理员 JWT>`）：
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| `GET` | `/api/admin/users` | 用户列表 |
-| `POST` | `/api/admin/users/:email/credits` | `{delta: 100}`，可正可负（非零整数） |
+| `POST` | `/api/admin/login` | `{password}` → `{token, expiresIn, mustChangePassword}` |
+| `GET` | `/api/admin/session` | 校验登录态 |
+| `GET` | `/api/admin/stats` | 统计数据（总量 / 今日 / 14 天 / 用户 / 内容 / 凭据 / 服务） |
+| `GET` | `/api/admin/config` | 读取凭据配置（密钥仅返回掩码） |
+| `PUT` | `/api/admin/config` | 保存凭据配置；`adminPassword` 需同时传 `currentAdminPassword` |
+| `GET` | `/api/admin/users` | 用户列表，支持 `?q=` 搜索 |
+| `GET` | `/api/admin/users/:id` | 用户详情，**额外需要 `X-Admin-Password` 头** |
+| `POST` | `/api/admin/users/:id/credits` | `{delta: 100}`，可正可负（非零整数） |
 | `GET` | `/api/admin/llm/models` | 模型完整列表（**含 apiKey**） |
 | `POST` | `/api/admin/llm/models` | 新增模型 `{name, apiBase, apiKey, model, multiplier?}` |
 | `PUT` | `/api/admin/llm/models/:id` | 编辑模型（字段均可选，按需传） |
@@ -120,6 +144,8 @@ node src/server.js
 
 ## 部署注意
 
-- 生产环境请使用 HTTPS，并把 App 的 `ACCOUNT_BACKEND_BASE_URL` 指向该地址。
-- 反向代理需放行 `POST/PUT` 与 `Authorization` 头。
+- 生产环境请使用 HTTPS，并把 App 的 `ACCOUNT_BACKEND_BASE_URL` 指向 `https://api.slipe.cn`。
+- `api.slipe.cn` 与 `workadmin.slipe.cn` 都反代到同一进程（默认 `127.0.0.1:8787`）；管理页按 Host 头返回。
+- 反向代理需放行 `POST/PUT/DELETE`、`Authorization` 与 `X-Admin-Password` 头。
+- 首次上线后请立即在管理页修改默认管理员密码，并配置极验 / 阿里云凭据。
 - 当前实现是单实例 JSON 存储，适合个人/小团队；多实例部署需换成数据库与共享会话密钥。

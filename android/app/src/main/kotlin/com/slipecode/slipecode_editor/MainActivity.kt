@@ -216,6 +216,18 @@ class MainActivity : FlutterActivity() {
         return super.dispatchKeyEvent(event)
     }
 
+    /// 极验 SDK 要求：页面销毁时释放资源
+    override fun onDestroy() {
+        GeeTestChannel.releaseIfNeeded()
+        super.onDestroy()
+    }
+
+    /// 极验 SDK 要求：横竖屏切换时通知验证窗口
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        GeeTestChannel.notifyConfigurationChanged(newConfig)
+    }
+
     // ---------------------------------------------------------------------------
     // Termux 集成
     // ---------------------------------------------------------------------------

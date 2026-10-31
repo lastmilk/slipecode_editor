@@ -35,7 +35,7 @@ jobs:
         run: |
           cat > .env <<'EOF'
           GITHUB_CLIENT_ID=Ov23li26aNK8JhfG6weT
-          GITHUB_OAUTH_REDIRECT_URI=https://ser1996.niav.cn/api/oauth/github/callback
+          GITHUB_OAUTH_REDIRECT_URI=https://api.slipe.cn/api/oauth/github/callback
           GITHUB_DEEP_LINK=slipecode://oauth/callback
           GITHUB_OAUTH_SCOPES=repo workflow read:user
           GITHUB_API_BASE=https://api.github.com
@@ -45,7 +45,7 @@ jobs:
           GITEE_OAUTH_SCOPES=projects user_info
           GITEE_API_BASE=https://gitee.com/api/v5
           GITEE_OAUTH_BASE=https://gitee.com/oauth
-          ACCOUNT_BACKEND_BASE_URL=https://ser1996.niav.cn
+          ACCOUNT_BACKEND_BASE_URL=https://api.slipe.cn
           EOF
 
       - name: Pub get
@@ -89,7 +89,7 @@ jobs:
         run: |
           cat > .env <<'EOF'
           GITHUB_CLIENT_ID=Ov23li26aNK8JhfG6weT
-          GITHUB_OAUTH_REDIRECT_URI=https://ser1996.niav.cn/api/oauth/github/callback
+          GITHUB_OAUTH_REDIRECT_URI=https://api.slipe.cn/api/oauth/github/callback
           GITHUB_DEEP_LINK=slipecode://oauth/callback
           GITHUB_OAUTH_SCOPES=repo workflow read:user
           GITHUB_API_BASE=https://api.github.com
@@ -99,7 +99,7 @@ jobs:
           GITEE_OAUTH_SCOPES=projects user_info
           GITEE_API_BASE=https://gitee.com/api/v5
           GITEE_OAUTH_BASE=https://gitee.com/oauth
-          ACCOUNT_BACKEND_BASE_URL=https://ser1996.niav.cn
+          ACCOUNT_BACKEND_BASE_URL=https://api.slipe.cn
           EOF
 
       - name: Pub get
