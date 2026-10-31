@@ -5,9 +5,9 @@ import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 
+import '../l10n/app_localizations.dart';
 import '../models/project.dart';
 import '../providers/account_provider.dart';
-import '../providers/editor_provider.dart';
 import '../providers/gitee_provider.dart';
 import '../providers/github_provider.dart';
 import '../providers/project_provider.dart';
@@ -32,7 +32,7 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen>
-    with TickerProviderStateMixin, WidgetsBindingObserver {
+    with TickerProviderStateMixin {
   List<Project> _history = [];
   String _saying = '';
   bool _loadingHistory = true;
@@ -44,7 +44,6 @@ class _HomeScreenState extends State<HomeScreen>
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this);
     _entranceController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 800),
@@ -69,20 +68,8 @@ class _HomeScreenState extends State<HomeScreen>
 
   @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
     _entranceController.dispose();
     super.dispose();
-  }
-
-  /// 切后台时确保所有打开的改动已落盘
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state != AppLifecycleState.paused) return;
-    try {
-      context.read<EditorProvider>().saveAll();
-    } catch (_) {
-      // Provider 已销毁（例如热重启）时忽略
-    }
   }
 
   Future<void> _requestPermissions() async {
@@ -145,12 +132,12 @@ class _HomeScreenState extends State<HomeScreen>
     String? path;
     try {
       path = await FilePicker.platform.getDirectoryPath(
-        dialogTitle: '选择项目根目录',
+        dialogTitle: t('home.openProject'),
       );
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('文件选择器不可用: $e')),
+          SnackBar(content: Text('${t('home.filePickerUnavailable')}: $e')),
         );
       }
       return;
@@ -202,20 +189,20 @@ class _HomeScreenState extends State<HomeScreen>
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Padding(
-              padding: EdgeInsets.fromLTRB(20, 16, 20, 4),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 4),
               child: Align(
                 alignment: Alignment.centerLeft,
                 child: Text(
-                  '登录 SLIPE',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  t('home.loginSheetTitle'),
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                 ),
               ),
             ),
             ListTile(
               leading: const Icon(Icons.account_circle),
-              title: const Text('SLIPE 账号'),
-              subtitle: const Text('邮箱登录，跨设备同步设置'),
+              title: Text(t('home.accountLogin')),
+              subtitle: Text(t('home.accountLoginSub')),
               onTap: () {
                 Navigator.pop(sheetContext);
                 Navigator.of(context).push(
@@ -226,7 +213,7 @@ class _HomeScreenState extends State<HomeScreen>
             ListTile(
               leading: const Icon(Icons.code),
               title: const Text('GitHub'),
-              subtitle: const Text('授权后可直接创建仓库'),
+              subtitle: Text(t('home.githubSub')),
               onTap: () async {
                 Navigator.pop(sheetContext);
                 await github.signIn();
@@ -235,7 +222,7 @@ class _HomeScreenState extends State<HomeScreen>
             ListTile(
               leading: const Icon(Icons.code_off),
               title: const Text('Gitee'),
-              subtitle: const Text('授权后可直接创建仓库'),
+              subtitle: Text(t('home.giteeSub')),
               onTap: () async {
                 Navigator.pop(sheetContext);
                 await gitee.signIn();
@@ -252,16 +239,16 @@ class _HomeScreenState extends State<HomeScreen>
     final ok = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('移除记录'),
-        content: Text('从列表中移除「${project.name}」？\n（不会删除磁盘上的文件）'),
+        title: Text(t('home.removeTitle')),
+        content: Text(t('home.removeBody', {'name': project.name})),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('取消'),
+            child: Text(t('common.cancel')),
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('移除'),
+            child: Text(t('home.remove')),
           ),
         ],
       ),
@@ -303,7 +290,7 @@ class _HomeScreenState extends State<HomeScreen>
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
                     IconButton(
-                      tooltip: '偏好设置',
+                      tooltip: t('home.preferences'),
                       icon: const Icon(Icons.tune),
                       onPressed: () => Navigator.of(context).push(
                         MaterialPageRoute(
@@ -320,7 +307,7 @@ class _HomeScreenState extends State<HomeScreen>
                               gitee.isSignedIn;
                           if (signedIn) return const SizedBox.shrink();
                           return IconButton(
-                            tooltip: '登录',
+                            tooltip: t('home.login'),
                             icon: const Icon(Icons.login),
                             onPressed: _showLoginSheet,
                           );
@@ -328,7 +315,7 @@ class _HomeScreenState extends State<HomeScreen>
                       ),
                     ),
                     IconButton(
-                      tooltip: 'SLIPE 账号',
+                      tooltip: t('home.account'),
                       icon: const Icon(Icons.manage_accounts),
                       onPressed: () => Navigator.of(context).push(
                         MaterialPageRoute(
@@ -414,7 +401,7 @@ class _HomeScreenState extends State<HomeScreen>
                     Expanded(
                       child: _ActionButton(
                         icon: Icons.add,
-                        label: '创建项目',
+                        label: t('home.createProject'),
                         onTap: _createNewProject,
                         isDark: isDark,
                         primary: true,
@@ -424,7 +411,7 @@ class _HomeScreenState extends State<HomeScreen>
                     Expanded(
                       child: _ActionButton(
                         icon: Icons.folder_open,
-                        label: '打开项目',
+                        label: t('home.openProject'),
                         onTap: _openExistingProject,
                         isDark: isDark,
                       ),
@@ -464,7 +451,7 @@ class _HomeScreenState extends State<HomeScreen>
             ),
             const SizedBox(height: 12),
             Text(
-              '还没有项目\n点击下方按钮创建或打开一个吧',
+              t('home.empty'),
               textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: 13,
@@ -564,7 +551,7 @@ class _LastEditedCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      '上次编辑',
+                      t('home.lastEdited'),
                       style: TextStyle(
                         fontSize: 11,
                         color: isDark ? Colors.white54 : Colors.black45,
@@ -592,7 +579,7 @@ class _LastEditedCard extends StatelessWidget {
                 ),
               ),
               Text(
-                '继续编辑',
+                t('home.continue'),
                 style: TextStyle(
                   fontSize: 11,
                   color: Theme.of(context).colorScheme.primary,
@@ -625,7 +612,7 @@ class _HomeAvatar extends StatelessWidget {
     final hasImage = file != null && file.existsSync();
 
     return Tooltip(
-      message: '点击登录 / 查看账号',
+      message: t('home.account'),
       child: Container(
         width: _size,
         height: _size,
@@ -925,7 +912,7 @@ class _HostAuthTile extends StatelessWidget {
         GestureDetector(
           onTap: onCancel,
           child: Tooltip(
-            message: '点击取消登录',
+            message: t('common.cancel'),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
@@ -937,7 +924,7 @@ class _HostAuthTile extends StatelessWidget {
                 const SizedBox(width: 8),
                 Flexible(
                   child: Text(
-                    '登录 $label…（点击取消）',
+                    '${t('home.signingIn')} $label…',
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(fontSize: 12),
                   ),
@@ -991,7 +978,7 @@ class _HostAuthTile extends StatelessWidget {
               visualDensity: VisualDensity.compact,
               padding: EdgeInsets.zero,
               constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-              tooltip: '退出 $label',
+              tooltip: '${t('home.signOut')} $label',
               icon: Icon(
                 Icons.logout,
                 size: 16,
@@ -1020,7 +1007,7 @@ class _HostAuthTile extends StatelessWidget {
               const SizedBox(width: 6),
               Flexible(
                 child: Text(
-                  '登录 $label',
+                  '${t('home.login')} $label',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(fontSize: 12),

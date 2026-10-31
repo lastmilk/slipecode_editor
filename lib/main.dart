@@ -1,9 +1,11 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:provider/provider.dart';
 
+import 'l10n/app_localizations.dart';
 import 'providers/account_provider.dart';
 import 'providers/ai_provider.dart';
 import 'providers/build_provider.dart';
@@ -16,6 +18,9 @@ import 'providers/project_provider.dart';
 import 'providers/settings_provider.dart';
 import 'providers/terminal_provider.dart';
 import 'screens/home_screen.dart';
+import 'services/app_globals.dart';
+import 'widgets/app_background.dart';
+import 'widgets/app_lock_gate.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -154,22 +159,38 @@ class SlipCodeApp extends StatelessWidget {
       ],
       child: Consumer<SettingsProvider>(
         builder: (context, settings, _) {
+          final s = settings.settings;
           return MaterialApp(
-            title: 'SLIPE — Flutter Editor',
+            title: t('app.title'),
             debugShowCheckedModeBanner: false,
-            themeMode: settings.settings.themeMode,
-            theme: _buildLightTheme(),
-            darkTheme: _buildDarkTheme(),
-            home: const HomeScreen(),
+            themeMode: s.themeMode,
+            theme: _buildLightTheme(s.fontFamily),
+            darkTheme: _buildDarkTheme(s.fontFamily),
+            locale: L10n.locale,
+            supportedLocales: const [
+              Locale('zh'),
+              Locale('zh', 'Hant'),
+              Locale('en'),
+            ],
+            localizationsDelegates: const [
+              GlobalMaterialLocalizations.delegate,
+              GlobalWidgetsLocalizations.delegate,
+              GlobalCupertinoLocalizations.delegate,
+            ],
+            navigatorKey: appNavigatorKey,
+            // 动态壁纸感知路由切换：被页面遮挡时暂停，返回时恢复
+            navigatorObservers: [AppBackground.routeObserver],
+            home: const AppLockGate(child: HomeScreen()),
           );
         },
       ),
     );
   }
 
-  ThemeData _buildLightTheme() {
+  ThemeData _buildLightTheme(String fontFamily) {
     return ThemeData(
       useMaterial3: true,
+      fontFamily: fontFamily.isEmpty ? null : fontFamily,
       colorScheme: ColorScheme.fromSeed(
         seedColor: const Color(0xFF0175C2), // Flutter 蓝
         brightness: Brightness.light,
@@ -178,9 +199,10 @@ class SlipCodeApp extends StatelessWidget {
     );
   }
 
-  ThemeData _buildDarkTheme() {
+  ThemeData _buildDarkTheme(String fontFamily) {
     return ThemeData(
       useMaterial3: true,
+      fontFamily: fontFamily.isEmpty ? null : fontFamily,
       colorScheme: ColorScheme.fromSeed(
         seedColor: const Color(0xFF0175C2),
         brightness: Brightness.dark,

@@ -27,6 +27,9 @@ class CodeEditor extends StatefulWidget {
   /// 代码字号
   final double fontSize;
 
+  /// 代码字体族（空字符串使用等宽字体）
+  final String fontFamily;
+
   /// 是否启用补全建议
   final bool enableCompletion;
 
@@ -46,6 +49,7 @@ class CodeEditor extends StatefulWidget {
     this.onChanged,
     this.readOnly = false,
     this.fontSize = 14,
+    this.fontFamily = '',
     this.enableCompletion = true,
     this.translucent = false,
     this.onVibeRequest,
@@ -156,6 +160,21 @@ class CodeEditorState extends State<CodeEditor> {
     if (requirement.isEmpty) return;
 
     widget.onVibeRequest!(requirement, lineStart, lineEnd);
+  }
+
+  /// 在光标处插入文本（底部符号小键盘使用）
+  void insertAtCursor(String text) {
+    final value = _controller.value;
+    final selection = value.selection;
+    final start = selection.isValid ? selection.start : value.text.length;
+    final end = selection.isValid ? selection.end : value.text.length;
+    final newText = value.text.replaceRange(start, end, text);
+    _controller.value = TextEditingValue(
+      text: newText,
+      selection: TextSelection.collapsed(offset: start + text.length),
+    );
+    widget.onChanged?.call(newText);
+    _focusNode.requestFocus();
   }
 
   // ---------------------------------------------------------------------------
@@ -313,7 +332,9 @@ class CodeEditorState extends State<CodeEditor> {
                 fontSize: widget.fontSize,
                 height: 1.5,
                 color: _colors.plain,
-                fontFamily: 'monospace',
+                fontFamily: widget.fontFamily.isEmpty
+                    ? 'monospace'
+                    : widget.fontFamily,
               ),
               cursorColor: isDark ? Colors.white70 : Colors.black87,
               decoration: const InputDecoration(
@@ -389,7 +410,9 @@ class CodeEditorState extends State<CodeEditor> {
                             item.label,
                             style: TextStyle(
                               fontSize: 12,
-                              fontFamily: 'monospace',
+                              fontFamily: widget.fontFamily.isEmpty
+                                  ? 'monospace'
+                                  : widget.fontFamily,
                               color: selected
                                   ? Colors.blueAccent
                                   : (isDark ? Colors.white70 : Colors.black87),

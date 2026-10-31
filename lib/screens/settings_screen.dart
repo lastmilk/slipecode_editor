@@ -5,12 +5,14 @@ import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 
+import '../l10n/app_localizations.dart';
 import '../models/app_settings.dart';
 import '../models/llm_profile.dart';
 import '../providers/account_provider.dart';
 import '../providers/settings_provider.dart';
 import '../services/git_host.dart';
 import '../services/llm_presets.dart';
+import '../services/security_service.dart';
 import '../widgets/ai_floating_ball.dart';
 import '../widgets/image_crop_dialog.dart';
 import 'account_screen.dart';
@@ -32,7 +34,15 @@ class _SettingsScreenState extends State<SettingsScreen>
   final TextEditingController _searchController = TextEditingController();
   String _query = '';
 
-  static const _tabNames = ['外观', '编辑器', '项目与Git', 'AI模型', 'AI助手', '账号'];
+  List<String> get _tabNames => [
+        t('settings.tab.appearance'),
+        t('settings.tab.editor'),
+        t('settings.tab.git'),
+        t('settings.tab.llm'),
+        t('settings.tab.ai'),
+        t('settings.tab.security'),
+        t('settings.tab.account'),
+      ];
 
   @override
   void initState() {
@@ -62,12 +72,13 @@ class _SettingsScreenState extends State<SettingsScreen>
       _gitSections(settingsProvider, settings),
       _llmSections(settingsProvider, account, settings),
       _aiSections(settingsProvider, settings),
+      _securitySections(settingsProvider, settings),
       _accountSections(account, settingsProvider, settings, isDark),
     ];
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('偏好设置'),
+        title: Text(t('settings.title')),
         elevation: 0,
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(96),
@@ -79,7 +90,7 @@ class _SettingsScreenState extends State<SettingsScreen>
                   controller: _searchController,
                   onChanged: (value) => setState(() => _query = value),
                   decoration: InputDecoration(
-                    hintText: '搜索设置项…',
+                    hintText: t('settings.search'),
                     prefixIcon: const Icon(Icons.search, size: 20),
                     suffixIcon: searching
                         ? IconButton(
@@ -126,8 +137,8 @@ class _SettingsScreenState extends State<SettingsScreen>
   Widget _buildSearchResults(List<List<_SectionData>> tabSections, bool isDark) {
     final query = _query.trim().toLowerCase();
     final results = <Widget>[];
-    for (var t = 0; t < tabSections.length; t++) {
-      for (final section in tabSections[t]) {
+    for (var tabIndex = 0; tabIndex < tabSections.length; tabIndex++) {
+      for (final section in tabSections[tabIndex]) {
         final matched = section.entries
             .where((e) => e.keywords.toLowerCase().contains(query))
             .toList();
@@ -136,7 +147,7 @@ class _SettingsScreenState extends State<SettingsScreen>
           Padding(
             padding: const EdgeInsets.only(left: 4, bottom: 8, top: 16),
             child: Text(
-              '${_tabNames[t]} · ${section.title}',
+              '${_tabNames[tabIndex]} · ${section.title}',
               style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
@@ -177,6 +188,52 @@ class _SettingsScreenState extends State<SettingsScreen>
     final isVideo = hasWallpaper &&
         settings.backgroundImagePath.toLowerCase().endsWith('.mp4');
     return [
+      _SectionData('语言与字体', [
+        _Entry(
+          '界面语言 简体 繁体 英文 language locale english',
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            title: Text(t('settings.language')),
+            subtitle: Text(t('settings.languageSub')),
+            trailing: DropdownButton<String>(
+              value: settings.language,
+              underline: const SizedBox.shrink(),
+              items: [
+                for (final option in appLanguageOptions)
+                  DropdownMenuItem(
+                    value: option.id,
+                    child: Text(option.label),
+                  ),
+              ],
+              onChanged: (value) {
+                if (value != null) sp.setLanguage(value);
+              },
+            ),
+          ),
+        ),
+        _Entry(
+          '字体 font family typeface',
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            title: Text(t('settings.font')),
+            subtitle: Text(t('settings.fontSub')),
+            trailing: DropdownButton<String>(
+              value: settings.fontFamily,
+              underline: const SizedBox.shrink(),
+              items: [
+                for (final option in appFontOptions)
+                  DropdownMenuItem(
+                    value: option.id,
+                    child: Text(option.label),
+                  ),
+              ],
+              onChanged: (value) {
+                if (value != null) sp.setFontFamily(value);
+              },
+            ),
+          ),
+        ),
+      ]),
       _SectionData('主题', [
         _Entry(
           '主题模式 深色 浅色 跟随系统 appearance theme',
@@ -350,16 +407,6 @@ class _SettingsScreenState extends State<SettingsScreen>
   List<_SectionData> _editorSections(SettingsProvider sp, AppSettings settings) {
     return [
       _SectionData('编辑行为', [
-        _Entry(
-          '自动保存 auto save 退出保存',
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('自动保存'),
-            subtitle: const Text('编辑文件后自动写入并同步到远程仓库；退出界面时也会统一保存'),
-            value: settings.autoSave,
-            onChanged: sp.setAutoSave,
-          ),
-        ),
         _Entry(
           '代码字号 font size',
           Column(
@@ -559,6 +606,18 @@ class _SettingsScreenState extends State<SettingsScreen>
 
   List<_SectionData> _aiSections(SettingsProvider sp, AppSettings settings) {
     return [
+      _SectionData('AI 审批', [
+        _Entry(
+          'AI 改动审批 approval ai write 落盘',
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: Text(t('settings.aiApproval')),
+            subtitle: Text(t('settings.aiApprovalSub')),
+            value: settings.aiApprovalEnabled,
+            onChanged: sp.setAiApprovalEnabled,
+          ),
+        ),
+      ]),
       _SectionData('AI 助手', [
         _Entry(
           '对话记录云同步 chat history cloud',
@@ -618,6 +677,20 @@ class _SettingsScreenState extends State<SettingsScreen>
               style: TextStyle(fontSize: 11, color: Colors.grey, height: 1.4),
             ),
           ),
+        ),
+      ]),
+    ];
+  }
+
+  List<_SectionData> _securitySections(
+    SettingsProvider sp,
+    AppSettings settings,
+  ) {
+    return [
+      _SectionData('应用锁', [
+        _Entry(
+          '应用锁 生物认证 指纹 面容 解锁密码 biometric app lock',
+          _SecurityCard(settingsProvider: sp, settings: settings),
         ),
       ]),
     ];
@@ -975,6 +1048,198 @@ class _SectionCard extends StatelessWidget {
         ),
       ),
       child: Column(children: children),
+    );
+  }
+}
+
+/// 应用锁设置卡片（生物认证 + 密码兜底）
+class _SecurityCard extends StatefulWidget {
+  const _SecurityCard({required this.settingsProvider, required this.settings});
+
+  final SettingsProvider settingsProvider;
+  final AppSettings settings;
+
+  @override
+  State<_SecurityCard> createState() => _SecurityCardState();
+}
+
+class _SecurityCardState extends State<_SecurityCard> {
+  bool _hasPassword = false;
+  bool _biometricAvailable = false;
+  bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final hasPassword = await SecurityService.instance.hasPassword();
+    final available = await SecurityService.instance.biometricAvailable();
+    if (!mounted) return;
+    setState(() {
+      _hasPassword = hasPassword;
+      _biometricAvailable = available;
+    });
+  }
+
+  Future<void> _toggleLock(bool enable) async {
+    final messenger = ScaffoldMessenger.of(context);
+    if (enable) {
+      if (!_hasPassword) {
+        final ok = await _promptPassword();
+        if (!ok) return;
+      }
+      if (!_biometricAvailable) {
+        messenger.showSnackBar(
+          SnackBar(content: Text(t('settings.biometricUnavailable'))),
+        );
+      }
+      await SecurityService.instance.setBiometricEnabled(true);
+      await widget.settingsProvider.setAppLockEnabled(true);
+    } else {
+      await SecurityService.instance.setBiometricEnabled(false);
+      await widget.settingsProvider.setAppLockEnabled(false);
+    }
+    if (mounted) await _load();
+  }
+
+  /// 设置 / 修改解锁密码；返回是否设置成功
+  Future<bool> _promptPassword({bool requireOld = false}) async {
+    final oldController = TextEditingController();
+    final controller = TextEditingController();
+    final confirmController = TextEditingController();
+    String? error;
+
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: Text(
+            requireOld ? t('settings.changePassword') : t('settings.setPassword'),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (requireOld)
+                TextField(
+                  controller: oldController,
+                  obscureText: true,
+                  decoration: const InputDecoration(labelText: '当前密码'),
+                ),
+              TextField(
+                controller: controller,
+                obscureText: true,
+                decoration: InputDecoration(labelText: t('settings.setPassword')),
+              ),
+              TextField(
+                controller: confirmController,
+                obscureText: true,
+                decoration: const InputDecoration(labelText: '确认密码'),
+              ),
+              if (error != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(
+                    error!,
+                    style: const TextStyle(
+                      color: Colors.redAccent,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: Text(t('common.cancel')),
+            ),
+            FilledButton(
+              onPressed: () async {
+                if (controller.text.length < 4) {
+                  setDialogState(() => error = '密码至少需要 4 位');
+                  return;
+                }
+                if (controller.text != confirmController.text) {
+                  setDialogState(() => error = '两次输入的密码不一致');
+                  return;
+                }
+                if (requireOld &&
+                    !await SecurityService.instance
+                        .verifyPassword(oldController.text)) {
+                  setDialogState(() => error = '当前密码错误');
+                  return;
+                }
+                if (!ctx.mounted) return;
+                Navigator.of(ctx).pop(true);
+              },
+              child: Text(t('common.confirm')),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (result == true) {
+      await SecurityService.instance.setPassword(controller.text);
+    }
+    oldController.dispose();
+    controller.dispose();
+    confirmController.dispose();
+    return result == true;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = widget.settings.appLockEnabled;
+    return Column(
+      children: [
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          secondary: const Icon(Icons.lock_outline),
+          title: Text(t('settings.security')),
+          subtitle: Text(t('settings.securitySub')),
+          value: enabled,
+          onChanged: _busy
+              ? null
+              : (value) async {
+                  setState(() => _busy = true);
+                  await _toggleLock(value);
+                  if (mounted) setState(() => _busy = false);
+                },
+        ),
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          title: Text(t('settings.setPassword')),
+          subtitle: Text(
+            _hasPassword ? t('settings.passwordSet') : t('settings.passwordNotSet'),
+          ),
+          trailing: TextButton(
+            onPressed: () async {
+              final ok = await _promptPassword(requireOld: _hasPassword);
+              if (ok) await _load();
+            },
+            child: Text(
+              _hasPassword ? t('settings.changePassword') : t('settings.setPassword'),
+            ),
+          ),
+        ),
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          title: Text(t('settings.biometric')),
+          subtitle: Text(
+            _biometricAvailable
+                ? '指纹 / 面容 / 虹膜'
+                : t('settings.biometricUnavailable'),
+          ),
+          trailing: Icon(
+            _biometricAvailable ? Icons.fingerprint : Icons.no_accounts,
+            color: _biometricAvailable ? Colors.green : Colors.grey,
+          ),
+        ),
+      ],
     );
   }
 }

@@ -107,9 +107,34 @@ class HighlightingController extends TextEditingController {
     'while', 'yield',
   };
 
-  /// 单个正则覆盖所有可上色片段（顺序即优先级）
-  static final _tokenPattern = RegExp(
+  /// 代码类语言（Dart / JVM / JS）的通用分词正则
+  static final _codePattern = RegExp(
     r'''//[^\n]*|/\*[\s\S]*?\*/|'(?:[^'\\\n]|\\.)*'|"(?:[^"\\\n]|\\.)*"|@[A-Za-z_]\w*|\b\d+(?:\.\d+)?\b|\b[A-Za-z_]\w*\b''',
+  );
+
+  /// JSON：字符串 / 数字 / 字面量 / 注释
+  static final _jsonPattern = RegExp(
+    r'''//[^\n]*|"(?:[^"\\\n]|\\.)*"|\b\d+(?:\.\d+)?(?:[eE][+-]?\d+)?\b|\b(?:true|false|null)\b''',
+  );
+
+  /// XML / HTML：注释、声明、标签、实体
+  static final _xmlPattern = RegExp(
+    r'''<!--[\s\S]*?-->|<\?[\s\S]*?\?>|<![^>]*>|<[^>]*>|&[#A-Za-z0-9]+;''',
+  );
+
+  static final _xmlInnerPattern = RegExp(
+    r'''"[^"]*"|'[^']*'|[A-Za-z_:][\w:.-]*|=|/|[\s\S]''',
+  );
+
+  /// YAML：字符串、注释、数字、布尔、键
+  static final _yamlPattern = RegExp(
+    r'''"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|#[^\n]*|\b\d+(?:\.\d+)?\b|\b(?:true|false|null|yes|no|on|off)\b|[A-Za-z_][\w.-]*|[&*!][A-Za-z_]\w*|[|>][-+]?|[\[\]{}]''',
+  );
+
+  /// Markdown：标题、代码块、行内代码、粗体、链接、引用、列表
+  static final _markdownPattern = RegExp(
+    r'''```[\s\S]*?```|^#{1,6}[^\n]*|`[^`\n]*`|<!--[\s\S]*?-->|\*\*[^\n*]*\*\*|__[^\n_]*__|\[[^\]\n]*\]\([^)]*\)|^>[^\n]*|^[ \t]*(?:[-*+]|\d+\.)[ \t]''',
+    multiLine: true,
   );
 
   Set<String> get _keywords => switch (language) {
@@ -138,11 +163,33 @@ class HighlightingController extends TextEditingController {
     }
 
     final text = value.text;
-    final keywords = _keywords;
+    switch (language) {
+      case 'json':
+        return _buildJson(text, baseStyle);
+      case 'xml':
+      case 'html':
+      case 'svg':
+        return _buildXml(text, baseStyle);
+      case 'yaml':
+        return _buildYaml(text, baseStyle);
+      case 'markdown':
+      case 'md':
+        return _buildMarkdown(text, baseStyle);
+      default:
+        return _buildCode(text, baseStyle);
+    }
+  }
+
+  /// 通用：按正则扫描并逐段上色
+  TextSpan _scan(
+    String text,
+    TextStyle baseStyle,
+    RegExp pattern,
+    Color Function(String token, int start) colorOf,
+  ) {
     final spans = <TextSpan>[];
     var index = 0;
-
-    for (final match in _tokenPattern.allMatches(text)) {
+    for (final match in pattern.allMatches(text)) {
       if (match.start > index) {
         spans.add(TextSpan(
           text: text.substring(index, match.start),
@@ -152,7 +199,7 @@ class HighlightingController extends TextEditingController {
       final token = match.group(0)!;
       spans.add(TextSpan(
         text: token,
-        style: baseStyle.copyWith(color: _colorFor(token, keywords)),
+        style: baseStyle.copyWith(color: colorOf(token, match.start)),
       ));
       index = match.end;
     }
@@ -162,26 +209,142 @@ class HighlightingController extends TextEditingController {
         style: baseStyle.copyWith(color: colors.plain),
       ));
     }
-
     return TextSpan(style: baseStyle, children: spans);
   }
 
-  Color _colorFor(String token, Set<String> keywords) {
-    if (token.startsWith('//') || token.startsWith('/*')) {
-      return colors.comment;
+  TextSpan _buildCode(String text, TextStyle baseStyle) {
+    final keywords = _keywords;
+    return _scan(text, baseStyle, _codePattern, (token, _) {
+      if (token.startsWith('//') || token.startsWith('/*')) {
+        return colors.comment;
+      }
+      if (token.startsWith("'") || token.startsWith('"')) return colors.string;
+      if (token.startsWith('@')) return colors.annotation;
+      final code = token.codeUnitAt(0);
+      if (code >= 48 && code <= 57) return colors.number;
+      if (keywords.contains(token)) return colors.keyword;
+      // 首字母大写视为类型/Widget
+      if (code >= 65 && code <= 90) return colors.type;
+      return colors.plain;
+    });
+  }
+
+  TextSpan _buildJson(String text, TextStyle baseStyle) {
+    return _scan(text, baseStyle, _jsonPattern, (token, start) {
+      if (token.startsWith('//')) return colors.comment;
+      if (token.startsWith('"')) {
+        // 形如 "key": 的字符串按对象键上色
+        final after = text.substring(start + token.length);
+        final trimmed = after.replaceFirst(RegExp(r'^\s*'), '');
+        if (trimmed.startsWith(':')) return colors.type;
+        return colors.string;
+      }
+      final code = token.codeUnitAt(0);
+      if (code >= 48 && code <= 57) return colors.number;
+      return colors.keyword; // true / false / null
+    });
+  }
+
+  TextSpan _buildXml(String text, TextStyle baseStyle) {
+    final spans = <TextSpan>[];
+    var index = 0;
+    for (final match in _xmlPattern.allMatches(text)) {
+      if (match.start > index) {
+        spans.add(TextSpan(
+          text: text.substring(index, match.start),
+          style: baseStyle.copyWith(color: colors.plain),
+        ));
+      }
+      final token = match.group(0)!;
+      if (token.startsWith('<!--') || token.startsWith('<?') ||
+          token.startsWith('<!')) {
+        spans.add(TextSpan(
+          text: token,
+          style: baseStyle.copyWith(color: colors.comment),
+        ));
+      } else if (token.startsWith('&')) {
+        spans.add(TextSpan(
+          text: token,
+          style: baseStyle.copyWith(color: colors.annotation),
+        ));
+      } else {
+        spans.addAll(_xmlTagSpans(token, baseStyle));
+      }
+      index = match.end;
     }
-    if (token.startsWith("'") || token.startsWith('"')) {
-      return colors.string;
+    if (index < text.length) {
+      spans.add(TextSpan(
+        text: text.substring(index),
+        style: baseStyle.copyWith(color: colors.plain),
+      ));
     }
-    if (token.startsWith('@')) {
-      return colors.annotation;
+    return TextSpan(style: baseStyle, children: spans);
+  }
+
+  /// 标签内部：标签名（类型色）、属性名（注解色）、属性值（字符串色）
+  List<TextSpan> _xmlTagSpans(String tag, TextStyle baseStyle) {
+    final spans = <TextSpan>[];
+    var seenName = false;
+    for (final match in _xmlInnerPattern.allMatches(tag)) {
+      final token = match.group(0)!;
+      Color color;
+      if (token.startsWith('"') || token.startsWith("'")) {
+        color = colors.string;
+      } else if (RegExp(r'^[A-Za-z_:]').hasMatch(token)) {
+        if (!seenName) {
+          seenName = true;
+          color = colors.type;
+        } else {
+          color = colors.annotation;
+        }
+      } else if (token == '<' || token == '>' || token == '/' || token == '=') {
+        color = colors.keyword;
+      } else {
+        color = colors.plain;
+      }
+      spans.add(TextSpan(
+        text: token,
+        style: baseStyle.copyWith(color: color),
+      ));
     }
-    final code = token.codeUnitAt(0);
-    // 数字
-    if (code >= 48 && code <= 57) return colors.number;
-    if (keywords.contains(token)) return colors.keyword;
-    // 首字母大写视为类型/Widget
-    if (code >= 65 && code <= 90) return colors.type;
-    return colors.plain;
+    return spans;
+  }
+
+  TextSpan _buildYaml(String text, TextStyle baseStyle) {
+    return _scan(text, baseStyle, _yamlPattern, (token, start) {
+      if (token.startsWith('#')) return colors.comment;
+      if (token.startsWith('"') || token.startsWith("'")) return colors.string;
+      final code = token.codeUnitAt(0);
+      if (code >= 48 && code <= 57) return colors.number;
+      // 位于行首（允许缩进）且后面紧跟冒号的标识符视为键
+      final lineStart =
+          text.lastIndexOf('\n', start < 0 ? 0 : start) + 1;
+      final prefix = text.substring(lineStart, start);
+      final after = text.substring(start + token.length);
+      if (prefix.trim().isEmpty &&
+          after.replaceFirst(RegExp(r'^\s*'), '').startsWith(':')) {
+        return colors.type;
+      }
+      if (_yamlKeywords.contains(token)) return colors.keyword;
+      if (token.startsWith('&') || token.startsWith('*') || token.startsWith('!')) {
+        return colors.annotation;
+      }
+      return colors.plain;
+    });
+  }
+
+  TextSpan _buildMarkdown(String text, TextStyle baseStyle) {
+    return _scan(text, baseStyle, _markdownPattern, (token, _) {
+      if (token.startsWith('```')) return colors.type;
+      if (token.startsWith('<!--')) return colors.comment;
+      if (token.startsWith('#')) return colors.keyword;
+      if (token.startsWith('`')) return colors.string;
+      if (token.startsWith('**') || token.startsWith('__')) {
+        return colors.annotation;
+      }
+      if (token.startsWith('[')) return colors.string;
+      if (token.startsWith('>')) return colors.comment;
+      return colors.keyword; // 列表标记
+    });
   }
 }

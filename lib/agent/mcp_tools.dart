@@ -3,9 +3,11 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
+import '../l10n/app_localizations.dart';
 import '../providers/build_provider.dart';
 import '../providers/editor_provider.dart';
 import '../providers/project_provider.dart';
+import '../services/ai_approval_service.dart';
 import '../services/dart_class_template.dart';
 import '../services/file_service.dart';
 
@@ -51,13 +53,28 @@ class McpToolbox {
     required this.project,
     required this.editor,
     required this.build,
-  });
+    Future<bool> Function(AiChangeProposal proposal)? approve,
+    bool Function()? approvalEnabled,
+  })  : _approve = approve ?? AiApprovalService.instance.request,
+        _approvalEnabled = approvalEnabled ?? (() => true);
 
   final ProjectProvider project;
   final EditorProvider editor;
   final BuildProvider build;
 
+  /// 审批回调：返回 true 才允许落盘
+  final Future<bool> Function(AiChangeProposal proposal) _approve;
+
+  /// 是否启用审批（偏好设置可关闭）
+  final bool Function() _approvalEnabled;
+
   final FileService _fs = FileService();
+
+  /// 请求用户审批；未启用审批时直接放行
+  Future<bool> _requestApproval(AiChangeProposal proposal) async {
+    if (!_approvalEnabled()) return true;
+    return _approve(proposal);
+  }
 
   /// 供 LLM 使用的工具定义
   List<Map<String, dynamic>> get definitions =>
@@ -149,6 +166,18 @@ class McpToolbox {
         final path = _resolve(args['path'] as String?);
         if (path == null) return '错误：缺少 path';
         final content = args['content'] as String? ?? '';
+        final existed = await File(path).exists();
+        final old = existed ? await _fs.readFile(path) : '';
+        if (old == content) return '文件内容未变化，无需写入 ${_rel(path)}';
+        final approved = await _requestApproval(
+          AiChangeProposal(
+            action: existed ? t('approval.write') : t('approval.create'),
+            path: _rel(path),
+            before: old,
+            after: content,
+          ),
+        );
+        if (!approved) return '用户拒绝写入 ${_rel(path)}，文件未修改';
         await _fs.writeFile(path, content);
         await _afterFileChanged(path);
         return '已写入 ${_rel(path)}（${content.length} 字符）';
@@ -176,6 +205,15 @@ class McpToolbox {
           return '错误：文件中未找到指定文本，请先 read_file 确认原文';
         }
         final updated = content.replaceFirst(oldText, newText);
+        final approved = await _requestApproval(
+          AiChangeProposal(
+            action: t('approval.replace'),
+            path: _rel(path),
+            before: content,
+            after: updated,
+          ),
+        );
+        if (!approved) return '用户拒绝修改 ${_rel(path)}，文件未修改';
         await _fs.writeFile(path, updated);
         await _afterFileChanged(path);
         return '已修改 ${_rel(path)}';
@@ -195,7 +233,17 @@ class McpToolbox {
         final path = _resolve(args['path'] as String?);
         if (path == null) return '错误：缺少 path';
         if (await File(path).exists()) return '错误：文件已存在 $path';
-        await _fs.writeFile(path, args['content'] as String? ?? '');
+        final content = args['content'] as String? ?? '';
+        final approved = await _requestApproval(
+          AiChangeProposal(
+            action: t('approval.create'),
+            path: _rel(path),
+            before: '',
+            after: content,
+          ),
+        );
+        if (!approved) return '用户拒绝创建 ${_rel(path)}，文件未创建';
+        await _fs.writeFile(path, content);
         await _afterFileChanged(path);
         return '已创建 ${_rel(path)}';
       },
@@ -224,7 +272,17 @@ class McpToolbox {
         final fileName = DartClassTemplate.fileNameFor(className);
         final path = p.join(dir, fileName);
         if (await File(path).exists()) return '错误：文件已存在 ${_rel(path)}';
-        await _fs.writeFile(path, DartClassTemplate.generate(kind, className));
+        final content = DartClassTemplate.generate(kind, className);
+        final approved = await _requestApproval(
+          AiChangeProposal(
+            action: t('approval.create'),
+            path: _rel(path),
+            before: '',
+            after: content,
+          ),
+        );
+        if (!approved) return '用户拒绝创建 ${_rel(path)}，文件未创建';
+        await _fs.writeFile(path, content);
         await _afterFileChanged(path);
         return '已创建 ${_rel(path)}（${kind.label}）';
       },
@@ -243,7 +301,17 @@ class McpToolbox {
         final path = _resolve(args['path'] as String?);
         final newName = args['new_name'] as String? ?? '';
         if (path == null || newName.isEmpty) return '错误：缺少参数';
-        final newPath = await _fs.renameEntity(path, newName);
+        final newPath = p.join(p.dirname(path), newName);
+        final approved = await _requestApproval(
+          AiChangeProposal(
+            action: t('approval.rename'),
+            path: _rel(path),
+            before: _rel(path),
+            after: _rel(newPath),
+          ),
+        );
+        if (!approved) return '用户拒绝重命名 ${_rel(path)}，未做修改';
+        await _fs.renameEntity(path, newName);
         final isDir = await Directory(newPath).exists();
         if (isDir) {
           editor.renameDirectory(path, newPath);
@@ -264,6 +332,15 @@ class McpToolbox {
       execute: (args) async {
         final path = _resolve(args['path'] as String?);
         if (path == null) return '错误：缺少 path';
+        final approved = await _requestApproval(
+          AiChangeProposal(
+            action: t('approval.delete'),
+            path: _rel(path),
+            before: _rel(path),
+            after: '',
+          ),
+        );
+        if (!approved) return '用户拒绝删除 ${_rel(path)}，未做修改';
         await _fs.deleteEntity(path);
         editor.closeFilesUnder(path);
         await project.refreshFileTree();

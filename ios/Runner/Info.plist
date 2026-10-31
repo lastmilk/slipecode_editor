@@ -45,6 +45,9 @@
 	<true/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<!-- 应用锁：Face ID / Touch ID 生物认证 -->
+	<key>NSFaceIDUsageDescription</key>
+	<string>用于验证身份并解锁 SLIPE；认证失败时可输入解锁密码。</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

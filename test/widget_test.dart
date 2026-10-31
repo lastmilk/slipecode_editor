@@ -9,7 +9,8 @@ void main() {
     const settings = AppSettings.defaults;
     expect(settings.themeMode, ThemeMode.system);
     expect(settings.editorFontSize, 14);
-    expect(settings.autoSave, isTrue);
+    expect(settings.language, 'zh');
+    expect(settings.aiApprovalEnabled, isTrue);
     expect(settings.showSaying, isTrue);
     expect(settings.defaultGitHost, GitHost.github);
     expect(settings.createRepoOnCreate, isTrue);
@@ -19,7 +20,8 @@ void main() {
     const settings = AppSettings(
       themeMode: ThemeMode.dark,
       editorFontSize: 18,
-      autoSave: false,
+      language: 'en',
+      aiApprovalEnabled: false,
       showSaying: false,
       defaultGitHost: GitHost.gitee,
       createRepoOnCreate: false,
@@ -27,7 +29,8 @@ void main() {
     final restored = AppSettings.fromJson(settings.toJson());
     expect(restored.themeMode, ThemeMode.dark);
     expect(restored.editorFontSize, 18);
-    expect(restored.autoSave, isFalse);
+    expect(restored.language, 'en');
+    expect(restored.aiApprovalEnabled, isFalse);
     expect(restored.showSaying, isFalse);
     expect(restored.defaultGitHost, GitHost.gitee);
     expect(restored.createRepoOnCreate, isFalse);

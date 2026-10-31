@@ -1,50 +1,58 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 
-import '../providers/container_provider.dart';
+import '../l10n/app_localizations.dart';
 import '../providers/project_provider.dart';
 import '../providers/terminal_provider.dart';
 import '../widgets/log_console.dart';
-import 'container_setup_screen.dart';
+import '../widgets/symbol_keypad.dart';
 
-/// 项目命令行终端
-///
-/// 基于 proot 容器中的常驻 /bin/sh 会话
-class TerminalScreen extends StatefulWidget {
-  const TerminalScreen({super.key});
-
-  @override
-  State<TerminalScreen> createState() => _TerminalScreenState();
+/// 从底部弹出终端面板
+Future<void> showTerminalSheet(BuildContext context) {
+  return showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    useSafeArea: true,
+    backgroundColor: Colors.transparent,
+    builder: (sheetContext) => const FractionallySizedBox(
+      heightFactor: 0.86,
+      child: TerminalSheet(),
+    ),
+  );
 }
 
-class _TerminalScreenState extends State<TerminalScreen> {
+/// 底部弹出式终端
+///
+/// 只要有 Termux 即可使用，无需 proot 容器。
+class TerminalSheet extends StatefulWidget {
+  const TerminalSheet({super.key});
+
+  @override
+  State<TerminalSheet> createState() => _TerminalSheetState();
+}
+
+class _TerminalSheetState extends State<TerminalSheet> {
   final TextEditingController _inputController = TextEditingController();
   final FocusNode _inputFocus = FocusNode();
   final List<String> _history = [];
+  int _historyIndex = -1;
 
   static const List<String> _quickCommands = [
     'pwd',
     'ls -la',
-    'cat /etc/os-release',
-    'flutter --version',
-    'dart --version',
-    'apk update',
+    'cd ..',
+    'termux-info',
+    'git status',
   ];
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      final projectPath = context.read<ProjectProvider>().projectPath;
       final terminal = context.read<TerminalProvider>();
-      terminal.setProjectDir(projectPath);
-
-      final container = context.read<ContainerProvider>();
-      container.refresh().then((_) {
-        if (mounted && container.ready) {
-          terminal.ensureStarted();
-        }
-      });
+      terminal.setProjectDir(context.read<ProjectProvider>().projectPath);
+      terminal.ensureStarted();
     });
   }
 
@@ -53,6 +61,19 @@ class _TerminalScreenState extends State<TerminalScreen> {
     _inputController.dispose();
     _inputFocus.dispose();
     super.dispose();
+  }
+
+  void _insertSymbol(String symbol) {
+    final value = _inputController.value;
+    final selection = value.selection;
+    final start = selection.isValid ? selection.start : value.text.length;
+    final end = selection.isValid ? selection.end : value.text.length;
+    final newText = value.text.replaceRange(start, end, symbol);
+    _inputController.value = TextEditingValue(
+      text: newText,
+      selection: TextSelection.collapsed(offset: start + symbol.length),
+    );
+    _inputFocus.requestFocus();
   }
 
   Future<void> _send([String? override]) async {
@@ -64,6 +85,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
 
     if (override == null) {
       _history.add(text);
+      _historyIndex = -1;
       _inputController.clear();
     }
 
@@ -71,222 +93,222 @@ class _TerminalScreenState extends State<TerminalScreen> {
     await terminal.runCommand(text);
   }
 
-  Future<void> _openSetup() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const ContainerSetupScreen()),
-    );
-    if (!mounted) return;
-    final container = context.read<ContainerProvider>();
-    final terminal = context.read<TerminalProvider>();
-    await container.refresh();
-    if (container.ready && !terminal.isReady) {
-      await terminal.ensureStarted();
+  void _historyBack() {
+    if (_history.isEmpty) return;
+    if (_historyIndex < 0) {
+      _historyIndex = _history.length - 1;
+    } else if (_historyIndex > 0) {
+      _historyIndex--;
+    }
+    final text = _history[_historyIndex];
+    _inputController.text = text;
+    _inputController.selection =
+        TextSelection.fromPosition(TextPosition(offset: text.length));
+  }
+
+  Future<void> _openTermuxSite() async {
+    final uri = Uri.parse('https://f-droid.org/packages/com.termux/');
+    if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(t('terminal.openFailed', {'url': uri.toString()})),
+        ),
+      );
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final terminal = context.watch<TerminalProvider>();
-    final container = context.watch<ContainerProvider>();
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('终端'),
-        actions: [
+    return Material(
+      color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+      borderRadius: const BorderRadius.vertical(top: Radius.circular(18)),
+      clipBehavior: Clip.antiAlias,
+      child: Padding(
+        padding: EdgeInsets.only(bottom: bottomInset),
+        child: Column(
+          children: [
+            // 拖动条
+            const SizedBox(height: 8),
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: isDark ? Colors.white24 : Colors.black26,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            _buildHeader(terminal, isDark),
+            const Divider(height: 1),
+            if (!terminal.isReady && terminal.supported)
+              _buildSetupBanner(terminal),
+            if (!terminal.supported) _buildUnsupportedBanner(),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
+                child: LogConsole(
+                  lines: terminal.lines,
+                  emptyText: terminal.isReady
+                      ? t('terminal.emptyHint')
+                      : t('terminal.checking'),
+                ),
+              ),
+            ),
+
+            // 快捷命令
+            SizedBox(
+              height: 40,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                itemCount: _quickCommands.length,
+                separatorBuilder: (_, _) => const SizedBox(width: 6),
+                itemBuilder: (context, index) {
+                  final command = _quickCommands[index];
+                  return ActionChip(
+                    label: Text(
+                      command,
+                      style: const TextStyle(
+                        fontSize: 11,
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                    visualDensity: VisualDensity.compact,
+                    onPressed: terminal.busy ? null : () => _send(command),
+                  );
+                },
+              ),
+            ),
+
+            // 符号小键盘
+            SymbolKeypad(
+              isDark: isDark,
+              onInsert: _insertSymbol,
+            ),
+
+            // 输入区
+            SafeArea(
+              top: false,
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
+                color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.history, size: 20),
+                      tooltip: t('terminal.history'),
+                      onPressed: _historyBack,
+                    ),
+                    Expanded(
+                      child: TextField(
+                        controller: _inputController,
+                        focusNode: _inputFocus,
+                        enabled: !terminal.busy,
+                        style: const TextStyle(
+                          fontFamily: 'monospace',
+                          fontSize: 13,
+                        ),
+                        decoration: InputDecoration(
+                          prefixText: '\$ ',
+                          prefixStyle: const TextStyle(
+                            fontFamily: 'monospace',
+                            color: Colors.grey,
+                          ),
+                          hintText: t('terminal.inputHint'),
+                          isDense: true,
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                        textInputAction: TextInputAction.send,
+                        onSubmitted: (_) => _send(),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    IconButton.filled(
+                      icon: const Icon(Icons.send, size: 18),
+                      tooltip: t('terminal.execute'),
+                      onPressed: terminal.busy ? null : () => _send(),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.keyboard_arrow_down),
+                      tooltip: t('terminal.collapse'),
+                      onPressed: () => Navigator.of(context).maybePop(),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHeader(TerminalProvider terminal, bool isDark) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
+      child: Row(
+        children: [
+          Icon(
+            terminal.isReady ? Icons.terminal : Icons.terminal_outlined,
+            size: 16,
+            color: terminal.isReady ? Colors.green : Colors.grey,
+          ),
+          const SizedBox(width: 8),
+          const Text(
+            'Terminal',
+            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              terminal.cwd,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 11,
+                fontFamily: 'monospace',
+                color: isDark ? Colors.white60 : Colors.black54,
+              ),
+            ),
+          ),
+          if (terminal.lastExitCode != null)
+            Text(
+              'exit ${terminal.lastExitCode}',
+              style: TextStyle(
+                fontSize: 11,
+                fontFamily: 'monospace',
+                color: terminal.lastExitCode == 0
+                    ? Colors.green
+                    : Colors.redAccent,
+              ),
+            ),
           IconButton(
-            icon: const Icon(Icons.restart_alt),
-            tooltip: '重启会话',
+            visualDensity: VisualDensity.compact,
+            icon: const Icon(Icons.restart_alt, size: 18),
+            tooltip: t('terminal.restart'),
             onPressed: terminal.busy ? null : terminal.restart,
           ),
           IconButton(
-            icon: const Icon(Icons.clear_all),
-            tooltip: '清空输出',
+            visualDensity: VisualDensity.compact,
+            icon: const Icon(Icons.clear_all, size: 18),
+            tooltip: t('terminal.clear'),
             onPressed: terminal.clear,
-          ),
-          IconButton(
-            icon: const Icon(Icons.settings),
-            tooltip: '容器设置',
-            onPressed: _openSetup,
-          ),
-        ],
-      ),
-      body: Column(
-        children: [
-          if (!container.ready)
-            _SetupBanner(
-              isDark: isDark,
-              checking: container.checking,
-              onSetup: _openSetup,
-              onRetry: container.refresh,
-            ),
-
-          // 状态条
-          Container(
-            height: 30,
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            color: isDark ? const Color(0xFF252526) : const Color(0xFFEDEDED),
-            child: Row(
-              children: [
-                Icon(
-                  terminal.isReady ? Icons.terminal : Icons.terminal_outlined,
-                  size: 14,
-                  color: terminal.isReady ? Colors.green : Colors.grey,
-                ),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    terminal.cwd,
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontFamily: 'monospace',
-                      color: isDark ? Colors.white70 : Colors.black87,
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                if (terminal.lastExitCode != null)
-                  Text(
-                    'exit ${terminal.lastExitCode}',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontFamily: 'monospace',
-                      color: terminal.lastExitCode == 0
-                          ? Colors.green
-                          : Colors.redAccent,
-                    ),
-                  ),
-                if (terminal.busy) ...[
-                  const SizedBox(width: 8),
-                  const SizedBox(
-                    width: 12,
-                    height: 12,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
-                ],
-              ],
-            ),
-          ),
-
-          // 输出
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
-              child: LogConsole(
-                lines: terminal.lines,
-                emptyText: terminal.isReady
-                    ? '输入命令开始操作，例如 ls -la'
-                    : '等待容器会话启动...',
-              ),
-            ),
-          ),
-
-          // 快捷命令
-          SizedBox(
-            height: 44,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-              itemCount: _quickCommands.length,
-              separatorBuilder: (_, _) => const SizedBox(width: 6),
-              itemBuilder: (context, index) {
-                final command = _quickCommands[index];
-                return ActionChip(
-                  label: Text(
-                    command,
-                    style: const TextStyle(
-                      fontSize: 11,
-                      fontFamily: 'monospace',
-                    ),
-                  ),
-                  visualDensity: VisualDensity.compact,
-                  onPressed: terminal.busy ? null : () => _send(command),
-                );
-              },
-            ),
-          ),
-
-          // 输入区
-          SafeArea(
-            top: false,
-            child: Container(
-              padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
-              color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  if (_history.isNotEmpty)
-                    IconButton(
-                      icon: const Icon(Icons.history, size: 20),
-                      tooltip: '上一条命令',
-                      onPressed: () {
-                        _inputController.text = _history.last;
-                        _inputController.selection = TextSelection.fromPosition(
-                          TextPosition(offset: _inputController.text.length),
-                        );
-                      },
-                    ),
-                  Expanded(
-                    child: TextField(
-                      controller: _inputController,
-                      focusNode: _inputFocus,
-                      enabled: !terminal.busy,
-                      style: const TextStyle(
-                        fontFamily: 'monospace',
-                        fontSize: 13,
-                      ),
-                      decoration: InputDecoration(
-                        prefixText: '\$ ',
-                        prefixStyle: const TextStyle(
-                          fontFamily: 'monospace',
-                          color: Colors.grey,
-                        ),
-                        hintText: '输入 shell 命令',
-                        isDense: true,
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                      ),
-                      textInputAction: TextInputAction.send,
-                      onSubmitted: (_) => _send(),
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  IconButton.filled(
-                    icon: const Icon(Icons.send, size: 18),
-                    tooltip: '执行',
-                    onPressed: terminal.busy ? null : () => _send(),
-                  ),
-                ],
-              ),
-            ),
           ),
         ],
       ),
     );
   }
-}
 
-class _SetupBanner extends StatelessWidget {
-  final bool isDark;
-  final bool checking;
-  final VoidCallback onSetup;
-  final VoidCallback onRetry;
-
-  const _SetupBanner({
-    required this.isDark,
-    required this.checking,
-    required this.onSetup,
-    required this.onRetry,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    if (checking) {
-      return const LinearProgressIndicator(minHeight: 3);
-    }
-
+  Widget _buildSetupBanner(TerminalProvider terminal) {
     return Container(
+      width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       color: Colors.orange.withValues(alpha: 0.15),
       child: Row(
@@ -294,21 +316,36 @@ class _SetupBanner extends StatelessWidget {
           const Icon(Icons.warning_amber_rounded,
               size: 18, color: Colors.orange),
           const SizedBox(width: 8),
-          const Expanded(
+          Expanded(
             child: Text(
-              'proot 容器未就绪，无法执行命令',
-              style: TextStyle(fontSize: 12),
+              terminal.needsTermux
+                  ? t('terminal.needsTermux')
+                  : (terminal.error ?? t('terminal.notReady')),
+              style: const TextStyle(fontSize: 12),
             ),
           ),
+          if (terminal.needsTermux)
+            TextButton(
+              onPressed: _openTermuxSite,
+              child: Text(t('terminal.install')),
+            ),
           TextButton(
-            onPressed: onRetry,
-            child: const Text('重试'),
-          ),
-          FilledButton.tonal(
-            onPressed: onSetup,
-            child: const Text('去设置'),
+            onPressed: terminal.starting ? null : terminal.ensureStarted,
+            child: Text(t('common.retry')),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildUnsupportedBanner() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      color: Colors.red.withValues(alpha: 0.1),
+      child: Text(
+        t('terminal.unsupported'),
+        style: const TextStyle(fontSize: 12, color: Colors.redAccent),
       ),
     );
   }

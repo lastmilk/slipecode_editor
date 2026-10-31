@@ -155,7 +155,7 @@ class EditorProvider extends ChangeNotifier {
 
   /// 把指定内容写入文件并刷新保存基线
   ///
-  /// 用于自动保存：定时器捕获的是「改动时的文件路径 + 内容」快照，
+  /// 用于「路径 + 内容」快照的写入（如 VibeCoding），
   /// 避免用户切换标签后把内容写到别的文件里。
   Future<bool> saveContent(String path, String content) async {
     final index = _openFiles.indexWhere((f) => f.path == path);

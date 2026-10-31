@@ -5,12 +5,13 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Environment
 import android.util.Log
-import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
 
-class MainActivity : FlutterActivity() {
+// local_auth 的生物认证需要 Activity 实现 FragmentActivity 才能弹出 BiometricPrompt
+class MainActivity : FlutterFragmentActivity() {
     private val channelName = "slipecode/container"
     private val termuxChannelName = "slipecode/termux"
     private val keyEventChannelName = "slipecode/keyevent"
@@ -105,19 +106,27 @@ class MainActivity : FlutterActivity() {
                             result.error("bad_args", "command is null", null)
                             return@setMethodCallHandler
                         }
-                        try {
-                            val execResult = execInTermux(command, workDir)
-                            result.success(
-                                mapOf(
-                                    "exitCode" to execResult.first,
-                                    "stdout" to execResult.second,
-                                    "stderr" to execResult.third
-                                )
-                            )
-                        } catch (e: Exception) {
-                            Log.e("SlipCode", "termux exec failed", e)
-                            result.error("exec_failed", e.message, null)
-                        }
+                        // execInTermux 内部会轮询等待命令结束，必须放到后台线程，
+                        // 否则会阻塞 Flutter 的平台线程导致界面卡死
+                        Thread {
+                            try {
+                                val execResult = execInTermux(command, workDir)
+                                runOnUiThread {
+                                    result.success(
+                                        mapOf(
+                                            "exitCode" to execResult.first,
+                                            "stdout" to execResult.second,
+                                            "stderr" to execResult.third
+                                        )
+                                    )
+                                }
+                            } catch (e: Exception) {
+                                Log.e("SlipCode", "termux exec failed", e)
+                                runOnUiThread {
+                                    result.error("exec_failed", e.message, null)
+                                }
+                            }
+                        }.start()
                     }
 
                     else -> result.notImplemented()
@@ -260,10 +269,12 @@ class MainActivity : FlutterActivity() {
      * 需要 Termux 已获取存储权限（termux-setup-storage）。
      */
     private fun execInTermux(command: String, workDir: String?): Triple<Int, String, String> {
-        // 使用外部存储共享目录作为 Termux 与本应用的交换区
+        // 使用外部存储共享目录作为 Termux 与本应用的交换区。
+        // 注意：Android 11+ 禁止其他应用写入 com.termux 的 Android/data，
+        // 因此改用共享存储根目录（Termux 执行 termux-setup-storage 后可读）。
         val sharedDir = File(
             Environment.getExternalStorageDirectory(),
-            "Android/data/com.termux/files/slipecode_tmp"
+            "slipecode_tmp"
         )
         if (!sharedDir.exists()) sharedDir.mkdirs()
 

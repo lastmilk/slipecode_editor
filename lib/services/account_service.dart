@@ -5,6 +5,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 
 import '../config/app_config.dart';
+import 'backend_http.dart';
 
 /// SlipCode 账号用户
 class AccountUser {
@@ -74,6 +75,9 @@ class AccountService {
   );
   static const _tokenKey = 'slipecode_account_token';
 
+  /// 账号后端专用客户端：容忍该后端域名的证书主机名不匹配
+  final http.Client _client = BackendHttp.client;
+
   Future<String?> get savedToken => _storage.read(key: _tokenKey);
 
   Future<void> saveToken(String token) =>
@@ -130,7 +134,7 @@ class AccountService {
     String captchaPlatform = 'android',
   }) async {
     _ensureConfigured();
-    final res = await http
+    final res = await _client
         .post(
           _u('/api/auth/register'),
           headers: _headers(),
@@ -154,7 +158,7 @@ class AccountService {
   /// 返回 `(是否成功, 是否为开发模式, 开发模式验证码)`。
   Future<(bool, bool, String?)> sendSmsCode(String phone) async {
     _ensureConfigured();
-    final res = await http
+    final res = await _client
         .post(
           _u('/api/auth/sms/send'),
           headers: _headers(),
@@ -176,7 +180,7 @@ class AccountService {
     String captchaPlatform = 'android',
   }) async {
     _ensureConfigured();
-    final res = await http
+    final res = await _client
         .post(
           _u('/api/auth/login'),
           headers: _headers(),
@@ -194,7 +198,7 @@ class AccountService {
 
   Future<AccountUser> me(String token) async {
     _ensureConfigured();
-    final res = await http
+    final res = await _client
         .get(_u('/api/me'), headers: _headers(token))
         .timeout(const Duration(seconds: 20));
     final data = await _decode(res, '获取账号信息失败');
@@ -207,7 +211,7 @@ class AccountService {
   /// 拉取云端设置；未设置过时返回 null
   Future<Map<String, dynamic>?> fetchSettings(String token) async {
     _ensureConfigured();
-    final res = await http
+    final res = await _client
         .get(_u('/api/settings'), headers: _headers(token))
         .timeout(const Duration(seconds: 20));
     final data = await _decode(res, '获取设置失败');
@@ -224,7 +228,7 @@ class AccountService {
     Map<String, dynamic> settings,
   ) async {
     _ensureConfigured();
-    final res = await http
+    final res = await _client
         .put(
           _u('/api/settings'),
           headers: _headers(token),
@@ -240,7 +244,7 @@ class AccountService {
 
   Future<List<Map<String, dynamic>>> fetchProjects(String token) async {
     _ensureConfigured();
-    final res = await http
+    final res = await _client
         .get(_u('/api/projects'), headers: _headers(token))
         .timeout(const Duration(seconds: 20));
     final data = await _decode(res, '获取项目列表失败');
@@ -256,7 +260,7 @@ class AccountService {
     List<Map<String, dynamic>> projects,
   ) async {
     _ensureConfigured();
-    final res = await http
+    final res = await _client
         .put(
           _u('/api/projects'),
           headers: _headers(token),
@@ -272,7 +276,7 @@ class AccountService {
 
   Future<List<Map<String, dynamic>>> fetchChatHistory(String token) async {
     _ensureConfigured();
-    final res = await http
+    final res = await _client
         .get(_u('/api/chat/history'), headers: _headers(token))
         .timeout(const Duration(seconds: 20));
     final data = await _decode(res, '获取对话记录失败');
@@ -288,7 +292,7 @@ class AccountService {
     List<Map<String, dynamic>> messages,
   ) async {
     _ensureConfigured();
-    final res = await http
+    final res = await _client
         .put(
           _u('/api/chat/history'),
           headers: _headers(token),
@@ -300,7 +304,7 @@ class AccountService {
 
   Future<void> deleteChatHistory(String token) async {
     _ensureConfigured();
-    final res = await http
+    final res = await _client
         .delete(_u('/api/chat/history'), headers: _headers(token))
         .timeout(const Duration(seconds: 20));
     await _decode(res, '清空云端对话记录失败');
@@ -317,7 +321,7 @@ class AccountService {
     String mime,
   ) async {
     _ensureConfigured();
-    final res = await http
+    final res = await _client
         .post(
           _u('/api/me/avatar'),
           headers: _headers(token),
@@ -335,7 +339,7 @@ class AccountService {
     final uri = avatarUrl.startsWith('http')
         ? Uri.parse(avatarUrl)
         : Uri.parse('${AppConfig.accountBackendBase}$avatarUrl');
-    final res = await http.get(uri).timeout(const Duration(seconds: 30));
+    final res = await _client.get(uri).timeout(const Duration(seconds: 30));
     if (res.statusCode != 200) return null;
     return res.bodyBytes;
   }
@@ -347,7 +351,7 @@ class AccountService {
     String mime,
   ) async {
     _ensureConfigured();
-    final res = await http
+    final res = await _client
         .post(
           _u('/api/me/wallpaper'),
           headers: _headers(token),
@@ -363,7 +367,7 @@ class AccountService {
     String token,
   ) async {
     _ensureConfigured();
-    final res = await http
+    final res = await _client
         .get(_u('/api/me/wallpaper'), headers: _headers(token))
         .timeout(const Duration(seconds: 90));
     if (res.statusCode == 404) return null;
@@ -379,7 +383,7 @@ class AccountService {
 
   Future<void> deleteWallpaper(String token) async {
     _ensureConfigured();
-    final res = await http
+    final res = await _client
         .delete(_u('/api/me/wallpaper'), headers: _headers(token))
         .timeout(const Duration(seconds: 20));
     await _decode(res, '删除云端壁纸失败');
@@ -388,7 +392,7 @@ class AccountService {
   /// 云端 LLM 模型列表（SLIPE 云端模型预置使用）
   Future<List<Map<String, dynamic>>> fetchLlmModels(String token) async {
     _ensureConfigured();
-    final res = await http
+    final res = await _client
         .get(_u('/api/llm/models'), headers: _headers(token))
         .timeout(const Duration(seconds: 20));
     final data = await _decode(res, '获取云端模型失败');
