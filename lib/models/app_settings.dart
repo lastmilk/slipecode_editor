@@ -133,6 +133,12 @@ class AppSettings {
   /// 用户头像图片路径（空字符串表示使用默认头像）
   final String avatarPath;
 
+  /// 首页自定义文案库（一行一条）
+  final List<String> homeCustomTexts;
+
+  /// 首页文案是否同时混入一言源（开启后各 50% 概率；关闭则纯自定义）
+  final bool homeSayingSourceEnabled;
+
   const AppSettings({
     this.themeMode = ThemeMode.system,
     this.editorFontSize = 14,
@@ -161,6 +167,8 @@ class AppSettings {
     this.volumeKeyCompletionEnabled = true,
     this.homeTitle = 'SLIPE',
     this.avatarPath = '',
+    this.homeCustomTexts = const [],
+    this.homeSayingSourceEnabled = true,
   });
 
   static const defaults = AppSettings();
@@ -205,6 +213,8 @@ class AppSettings {
     bool? volumeKeyCompletionEnabled,
     String? homeTitle,
     String? avatarPath,
+    List<String>? homeCustomTexts,
+    bool? homeSayingSourceEnabled,
   }) {
     return AppSettings(
       themeMode: themeMode ?? this.themeMode,
@@ -238,6 +248,9 @@ class AppSettings {
           volumeKeyCompletionEnabled ?? this.volumeKeyCompletionEnabled,
       homeTitle: homeTitle ?? this.homeTitle,
       avatarPath: avatarPath ?? this.avatarPath,
+      homeCustomTexts: homeCustomTexts ?? this.homeCustomTexts,
+      homeSayingSourceEnabled:
+          homeSayingSourceEnabled ?? this.homeSayingSourceEnabled,
     );
   }
 
@@ -278,6 +291,8 @@ class AppSettings {
       'volumeKeyCompletionEnabled': volumeKeyCompletionEnabled,
       'homeTitle': homeTitle,
       'avatarPath': avatarPath,
+      'homeCustomTexts': homeCustomTexts,
+      'homeSayingSourceEnabled': homeSayingSourceEnabled,
     };
   }
 
@@ -366,6 +381,15 @@ class AppSettings {
           defaults.volumeKeyCompletionEnabled,
       homeTitle: json['homeTitle'] as String? ?? defaults.homeTitle,
       avatarPath: json['avatarPath'] as String? ?? defaults.avatarPath,
+      homeCustomTexts: switch (json['homeCustomTexts']) {
+        final List list => [
+            for (final item in list)
+              if (item is String && item.trim().isNotEmpty) item.trim(),
+          ],
+        _ => const [],
+      },
+      homeSayingSourceEnabled: json['homeSayingSourceEnabled'] as bool? ??
+          defaults.homeSayingSourceEnabled,
     );
   }
 }

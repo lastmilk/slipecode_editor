@@ -58,6 +58,7 @@
           <el-menu-item index="users">用户管理</el-menu-item>
           <el-menu-item index="config">凭据配置</el-menu-item>
           <el-menu-item index="llm">LLM 模型</el-menu-item>
+          <el-menu-item index="docs">使用文档</el-menu-item>
         </el-menu>
         <div class="sidebar-footer">
           <span class="dot" :class="online ? 'ok' : 'bad'"></span>
@@ -284,6 +285,23 @@
 
           <div class="card">
             <div class="card-head">
+              <h3>QQ 群引流</h3>
+              <el-tag :type="cfg.portal.qqGroup ? 'success' : 'info'" size="small">
+                {{ cfg.portal.qqGroup ? '已设置，App 端可见' : '未设置，App 端不显示' }}
+              </el-tag>
+            </div>
+            <el-form label-width="120px" class="cfg-form">
+              <el-form-item label="QQ 群号">
+                <el-input v-model="cfg.portal.qqGroup" placeholder="例如 123456789（留空则 App 端隐藏入口）" />
+              </el-form-item>
+              <el-form-item>
+                <el-button type="primary" :loading="savingPortal" @click="savePortal">保存群号</el-button>
+              </el-form-item>
+            </el-form>
+          </div>
+
+          <div class="card">
+            <div class="card-head">
               <h3>管理员密码</h3>
               <el-tag :type="cfgInfo.admin.usingDefaultPassword ? 'warning' : 'success'" size="small">
                 {{ cfgInfo.admin.usingDefaultPassword ? '仍在使用默认密码，建议立即修改' : '已自定义' }}
@@ -326,6 +344,44 @@
                 <template #default="{ row }">
                   <el-button link type="primary" @click="openModelDialog(row)">编辑</el-button>
                   <el-button link type="danger" @click="removeModel(row)">删除</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+          </div>
+        </section>
+        <!-- 使用文档 -->
+        <section v-else-if="tab === 'docs'" class="panel">
+          <header class="panel-head">
+            <div>
+              <h2>使用文档</h2>
+              <p>发布后立即对 App 端可见；支持 Markdown 语法。</p>
+            </div>
+            <div class="toolbar">
+              <el-button :loading="loadingDocs" @click="loadDocs">刷新</el-button>
+              <el-button type="primary" @click="openDocDialog()">新增文档</el-button>
+            </div>
+          </header>
+
+          <div class="card">
+            <el-table :data="docs" stripe empty-text="暂无文档">
+              <el-table-column prop="title" label="标题" min-width="200" show-overflow-tooltip />
+              <el-table-column label="状态" width="100">
+                <template #default="{ row }">
+                  <el-tag :type="row.published ? 'success' : 'info'" size="small">
+                    {{ row.published ? '已发布' : '草稿' }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="更新时间" min-width="160">
+                <template #default="{ row }">{{ dateText(row.updatedAt) }}</template>
+              </el-table-column>
+              <el-table-column label="操作" width="220" fixed="right">
+                <template #default="{ row }">
+                  <el-button link type="primary" @click="openDocDialog(row)">编辑</el-button>
+                  <el-button link :type="row.published ? 'warning' : 'success'" @click="toggleDocPublished(row)">
+                    {{ row.published ? '下架' : '发布' }}
+                  </el-button>
+                  <el-button link type="danger" @click="removeDoc(row)">删除</el-button>
                 </template>
               </el-table-column>
             </el-table>
@@ -416,6 +472,30 @@
       <template #footer>
         <el-button @click="creditsDialog = false">取消</el-button>
         <el-button type="primary" :loading="savingCredits" @click="saveCredits">确定</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 新增 / 编辑文档 -->
+    <el-dialog v-model="docDialog" :title="docForm.id ? '编辑文档' : '新增文档'" width="720px" top="6vh">
+      <el-form label-width="80px">
+        <el-form-item label="标题">
+          <el-input v-model="docForm.title" placeholder="例如：快速上手" maxlength="80" show-word-limit />
+        </el-form-item>
+        <el-form-item label="正文">
+          <el-input
+            v-model="docForm.content"
+            type="textarea"
+            :rows="16"
+            placeholder="支持 Markdown：# 标题、- 列表、```代码块、[链接](https://…) 等"
+          />
+        </el-form-item>
+        <el-form-item label="发布">
+          <el-switch v-model="docForm.published" active-text="对 App 端可见" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="docDialog = false">取消</el-button>
+        <el-button type="primary" :loading="savingDoc" @click="saveDoc">保存</el-button>
       </template>
     </el-dialog>
 

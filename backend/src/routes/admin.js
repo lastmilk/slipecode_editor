@@ -149,6 +149,9 @@ export async function handleAdminGetConfig(req, res) {
       passwordSet: Boolean(adminPasswordHash()),
       usingDefaultPassword: !adminPasswordHash(),
     },
+    portal: {
+      qqGroup: String(getDb().config?.portal?.qqGroup || ''),
+    },
   });
 }
 
@@ -190,6 +193,12 @@ export async function handleAdminPutConfig(req, res) {
     }
     if (typeof a.templateCode === 'string' && a.templateCode.trim()) {
       config.aliyun.templateCode = a.templateCode.trim().slice(0, 32);
+    }
+  }
+
+  if (body.portal && typeof body.portal === 'object') {
+    if (typeof body.portal.qqGroup === 'string') {
+      config.portal.qqGroup = body.portal.qqGroup.trim().slice(0, 32);
     }
   }
 

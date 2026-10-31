@@ -398,6 +398,13 @@ class GitHubApiService {
   // Actions
   // ---------------------------------------------------------------------------
 
+  /// GitHub Actions 接口的 workflow 参数只接受「文件 basename」或数字 ID，
+  /// 传完整路径（如 .github/workflows/x.yml）会返回 404。
+  static String _workflowRef(String pathOrId) {
+    if (pathOrId.contains('/')) return pathOrId.split('/').last;
+    return pathOrId;
+  }
+
   /// 触发 workflow_dispatch
   Future<void> dispatchWorkflow(
     String fullName,
@@ -406,7 +413,7 @@ class GitHubApiService {
     Map<String, String> inputs = const {},
   }) async {
     final res = await _client.post(
-      _u('/repos/$fullName/actions/workflows/$workflowFile/dispatches'),
+      _u('/repos/$fullName/actions/workflows/${_workflowRef(workflowFile)}/dispatches'),
       headers: {..._headers, 'Content-Type': 'application/json'},
       body: jsonEncode({'ref': ref, 'inputs': inputs}),
     );
@@ -423,7 +430,7 @@ class GitHubApiService {
     String branch = 'main',
   }) async {
     final res = await _client.get(
-      _u('/repos/$fullName/actions/workflows/$workflowFile/runs', {
+      _u('/repos/$fullName/actions/workflows/${_workflowRef(workflowFile)}/runs', {
         'branch': branch,
         'per_page': '5',
         'created': '>=${since.toUtc().subtract(const Duration(seconds: 5)).toIso8601String()}',

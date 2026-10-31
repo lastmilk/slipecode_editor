@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 
@@ -10,6 +11,7 @@ import '../models/app_settings.dart';
 import '../models/llm_profile.dart';
 import '../providers/account_provider.dart';
 import '../providers/settings_provider.dart';
+import '../services/docs_service.dart';
 import '../services/git_host.dart';
 import '../services/llm_presets.dart';
 import '../services/security_service.dart';
@@ -195,19 +197,24 @@ class _SettingsScreenState extends State<SettingsScreen>
             contentPadding: EdgeInsets.zero,
             title: Text(t('settings.language')),
             subtitle: Text(t('settings.languageSub')),
-            trailing: DropdownButton<String>(
-              value: settings.language,
-              underline: const SizedBox.shrink(),
-              items: [
-                for (final option in appLanguageOptions)
-                  DropdownMenuItem(
-                    value: option.id,
-                    child: Text(option.label),
-                  ),
-              ],
-              onChanged: (value) {
-                if (value != null) sp.setLanguage(value);
-              },
+            // DropdownButton 的宽度取「最宽菜单项」，不约束会把标题挤成竖排
+            trailing: SizedBox(
+              width: 132,
+              child: DropdownButton<String>(
+                value: settings.language,
+                isExpanded: true,
+                underline: const SizedBox.shrink(),
+                items: [
+                  for (final option in appLanguageOptions)
+                    DropdownMenuItem(
+                      value: option.id,
+                      child: Text(option.label, overflow: TextOverflow.ellipsis),
+                    ),
+                ],
+                onChanged: (value) {
+                  if (value != null) sp.setLanguage(value);
+                },
+              ),
             ),
           ),
         ),
@@ -217,19 +224,23 @@ class _SettingsScreenState extends State<SettingsScreen>
             contentPadding: EdgeInsets.zero,
             title: Text(t('settings.font')),
             subtitle: Text(t('settings.fontSub')),
-            trailing: DropdownButton<String>(
-              value: settings.fontFamily,
-              underline: const SizedBox.shrink(),
-              items: [
-                for (final option in appFontOptions)
-                  DropdownMenuItem(
-                    value: option.id,
-                    child: Text(option.label),
-                  ),
-              ],
-              onChanged: (value) {
-                if (value != null) sp.setFontFamily(value);
-              },
+            trailing: SizedBox(
+              width: 132,
+              child: DropdownButton<String>(
+                value: settings.fontFamily,
+                isExpanded: true,
+                underline: const SizedBox.shrink(),
+                items: [
+                  for (final option in appFontOptions)
+                    DropdownMenuItem(
+                      value: option.id,
+                      child: Text(option.label, overflow: TextOverflow.ellipsis),
+                    ),
+                ],
+                onChanged: (value) {
+                  if (value != null) sp.setFontFamily(value);
+                },
+              ),
             ),
           ),
         ),
@@ -237,19 +248,25 @@ class _SettingsScreenState extends State<SettingsScreen>
       _SectionData('主题', [
         _Entry(
           '主题模式 深色 浅色 跟随系统 appearance theme',
+          // SegmentedButton 过宽，标题与控件上下排列，避免标题被挤成竖排
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 8),
-            child: Row(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Expanded(child: Text('主题模式')),
-                SegmentedButton<ThemeMode>(
-                  segments: const [
-                    ButtonSegment(value: ThemeMode.system, label: Text('跟随系统')),
-                    ButtonSegment(value: ThemeMode.light, label: Text('浅色')),
-                    ButtonSegment(value: ThemeMode.dark, label: Text('深色')),
-                  ],
-                  selected: {settings.themeMode},
-                  onSelectionChanged: (value) => sp.setThemeMode(value.first),
+                const Text('主题模式'),
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: SegmentedButton<ThemeMode>(
+                    segments: const [
+                      ButtonSegment(value: ThemeMode.system, label: Text('跟随系统')),
+                      ButtonSegment(value: ThemeMode.light, label: Text('浅色')),
+                      ButtonSegment(value: ThemeMode.dark, label: Text('深色')),
+                    ],
+                    selected: {settings.themeMode},
+                    onSelectionChanged: (value) => sp.setThemeMode(value.first),
+                  ),
                 ),
               ],
             ),
@@ -400,6 +417,31 @@ class _SettingsScreenState extends State<SettingsScreen>
             onChanged: sp.setShowSaying,
           ),
         ),
+        _Entry(
+          '首页文案库 自定义文案 custom texts',
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('首页文案库'),
+            subtitle: Text(
+              settings.homeCustomTexts.isEmpty
+                  ? '未设置（使用一言源）'
+                  : '已设置 ${settings.homeCustomTexts.length} 条',
+            ),
+            trailing: const Icon(Icons.edit, size: 18),
+            onTap: () => _editHomeTexts(context, sp, settings),
+          ),
+        ),
+        if (settings.homeCustomTexts.isNotEmpty)
+          _Entry(
+            '混入一言源 saying source mix',
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('混入一言源'),
+              subtitle: const Text('开启后每次启动各有 50% 概率显示一言或自定义文案'),
+              value: settings.homeSayingSourceEnabled,
+              onChanged: sp.setHomeSayingSourceEnabled,
+            ),
+          ),
       ]),
     ];
   }
@@ -798,6 +840,12 @@ class _SettingsScreenState extends State<SettingsScreen>
                   )
                 : null,
           ),
+        ),
+      ]),
+      _SectionData('官方社群', [
+        _Entry(
+          '官方 QQ 群 qq group community',
+          const _QqGroupTile(),
         ),
       ]),
     ];
@@ -1583,5 +1631,97 @@ Future<void> _editText(
   );
   if (confirmed == true) {
     await onSave(controller.text);
+  }
+}
+
+/// 弹出首页文案库编辑对话框（一行一条，空行自动过滤）
+Future<void> _editHomeTexts(
+  BuildContext context,
+  SettingsProvider sp,
+  AppSettings settings,
+) async {
+  final controller =
+      TextEditingController(text: settings.homeCustomTexts.join('\n'));
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text('首页文案库'),
+      content: SizedBox(
+        width: double.maxFinite,
+        child: TextField(
+          controller: controller,
+          autofocus: true,
+          minLines: 6,
+          maxLines: 12,
+          decoration: const InputDecoration(
+            hintText: '一行一条文案，例如：\n今天也要加油写代码\n保持热爱，奔赴山海',
+            border: OutlineInputBorder(),
+            isDense: true,
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, true),
+          child: const Text('保存'),
+        ),
+      ],
+    ),
+  );
+  if (confirmed == true) {
+    await sp.setHomeCustomTexts(controller.text.split('\n'));
+  }
+}
+
+/// 官方 QQ 群磁贴：从后端拉取最新群号，支持一键复制；未配置时不显示
+class _QqGroupTile extends StatefulWidget {
+  const _QqGroupTile();
+
+  @override
+  State<_QqGroupTile> createState() => _QqGroupTileState();
+}
+
+class _QqGroupTileState extends State<_QqGroupTile> {
+  String? _qqGroup;
+
+  @override
+  void initState() {
+    super.initState();
+    DocsService.instance.fetchQqGroup().then((value) {
+      if (mounted) setState(() => _qqGroup = value);
+    });
+  }
+
+  Future<void> _copy() async {
+    final group = _qqGroup;
+    if (group == null || group.isEmpty) return;
+    await Clipboard.setData(ClipboardData(text: group));
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('QQ 群号 $group 已复制')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final group = _qqGroup;
+    if (group == null || group.isEmpty) return const SizedBox.shrink();
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: const Icon(Icons.groups_outlined),
+      title: const Text('官方 QQ 群'),
+      subtitle: Text(group),
+      trailing: IconButton(
+        tooltip: '复制群号',
+        icon: const Icon(Icons.copy, size: 18),
+        onPressed: _copy,
+      ),
+      onTap: _copy,
+    );
   }
 }

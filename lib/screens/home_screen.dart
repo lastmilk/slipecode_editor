@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:math';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -20,6 +21,7 @@ import 'account_screen.dart';
 import 'create_project_screen.dart';
 import 'editor_screen.dart';
 import 'settings_screen.dart';
+import 'docs_screen.dart';
 
 /// 应用主页
 ///
@@ -93,8 +95,27 @@ class _HomeScreenState extends State<HomeScreen>
     });
   }
 
-  /// 先显示缓存随机语句（离线可用），再尝试拉取新语句替换
+  /// 首页文案：
+  /// - 未设置自定义文案 → 一言源（先缓存后拉新）
+  /// - 有自定义文案且关闭一言混入 → 纯自定义随机
+  /// - 有自定义文案且开启一言混入 → 各 50% 概率
   Future<void> _loadSaying() async {
+    final settings = context.read<SettingsProvider>().settings;
+    final custom = settings.homeCustomTexts;
+
+    String? pickCustom() =>
+        custom.isEmpty ? null : custom[Random().nextInt(custom.length)];
+
+    if (custom.isNotEmpty) {
+      final useCustom = !settings.homeSayingSourceEnabled || Random().nextBool();
+      if (useCustom) {
+        final text = pickCustom();
+        if (!mounted || text == null) return;
+        setState(() => _saying = text);
+        return;
+      }
+    }
+
     final cached = await SayingService.instance.cached();
     if (!mounted) return;
     setState(() => _saying = cached);
@@ -285,10 +306,19 @@ class _HomeScreenState extends State<HomeScreen>
             padding: const EdgeInsets.symmetric(horizontal: 24.0),
             child: Column(
               children: [
-                // 右上角入口：偏好设置 / SLIPE 账号（登录后隐藏登录按钮）
+                // 右上角入口：使用文档 / 偏好设置 / SLIPE 账号（登录后隐藏登录按钮）
                 Row(
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
+                    IconButton(
+                      tooltip: '使用文档',
+                      icon: const Icon(Icons.menu_book_outlined),
+                      onPressed: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const DocsScreen(),
+                        ),
+                      ),
+                    ),
                     IconButton(
                       tooltip: t('home.preferences'),
                       icon: const Icon(Icons.tune),

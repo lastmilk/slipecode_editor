@@ -6,12 +6,20 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:local_auth/local_auth.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// 应用安全服务
 ///
-/// - 解锁密码仅保存加盐 SHA-256 摘要（flutter_secure_storage）
+/// - 解锁密码仅保存加盐 SHA-256 摘要
 /// - 生物认证调用系统能力（Android BiometricPrompt / iOS Face ID·Touch ID）
 /// - 生物认证失败时回退到密码校验
+///
+/// 持久化说明：
+/// 早期版本把密码摘要与开关保存在 flutter_secure_storage，
+/// 部分设备（Keystore 解密失败 / 数据丢失）重启后会全部读不到，
+/// 表现为「设置成功 → 重启后应用锁消失、安全页显示未设置」。
+/// 现改为 SharedPreferences（存的是加盐摘要，无法反推密码），
+/// 首次读取时自动从旧的 secure storage 迁移。
 class SecurityService {
   SecurityService._();
 
@@ -21,36 +29,78 @@ class SecurityService {
   static const _kSalt = 'slipe_app_lock_salt';
   static const _kBiometric = 'slipe_app_lock_biometric';
 
-  final FlutterSecureStorage _storage = const FlutterSecureStorage();
+  final FlutterSecureStorage _secure = const FlutterSecureStorage();
   final LocalAuthentication _auth = LocalAuthentication();
 
+  bool _migrated = false;
+
+  Future<SharedPreferences> _prefs() => SharedPreferences.getInstance();
+
+  /// 一次性把旧 secure storage 数据迁移到 SharedPreferences
+  Future<void> _ensureMigrated() async {
+    if (_migrated) return;
+    _migrated = true;
+    try {
+      final prefs = await _prefs();
+      // 本地已有数据则无需迁移
+      if (prefs.getString(_kHash) != null) return;
+      final hash = await _secure.read(key: _kHash);
+      final salt = await _secure.read(key: _kSalt);
+      final biometric = await _secure.read(key: _kBiometric);
+      if (hash != null && hash.isNotEmpty) {
+        await prefs.setString(_kHash, hash);
+        if (salt != null && salt.isNotEmpty) {
+          await prefs.setString(_kSalt, salt);
+        }
+        await prefs.setString(_kBiometric, biometric == '1' ? '1' : '0');
+        // 迁移完成后清理旧位置，避免两份数据漂移
+        await _secure.delete(key: _kHash);
+        await _secure.delete(key: _kSalt);
+        await _secure.delete(key: _kBiometric);
+      }
+    } catch (e) {
+      debugPrint('应用锁数据迁移失败（忽略，继续使用新存储）：$e');
+    }
+  }
+
   Future<bool> hasPassword() async {
-    final hash = await _storage.read(key: _kHash);
+    await _ensureMigrated();
+    final prefs = await _prefs();
+    final hash = prefs.getString(_kHash);
     return hash != null && hash.isNotEmpty;
   }
 
   /// 设置 / 修改解锁密码
   Future<void> setPassword(String password) async {
+    await _ensureMigrated();
     final salt = _randomSalt();
-    await _storage.write(key: _kSalt, value: salt);
-    await _storage.write(key: _kHash, value: _hash(password, salt));
+    final prefs = await _prefs();
+    await prefs.setString(_kSalt, salt);
+    await prefs.setString(_kHash, _hash(password, salt));
   }
 
   /// 校验密码
   Future<bool> verifyPassword(String password) async {
-    final salt = await _storage.read(key: _kSalt);
-    final hash = await _storage.read(key: _kHash);
+    await _ensureMigrated();
+    final prefs = await _prefs();
+    final salt = prefs.getString(_kSalt);
+    final hash = prefs.getString(_kHash);
     if (salt == null || salt.isEmpty || hash == null || hash.isEmpty) {
       return false;
     }
     return _hash(password, salt) == hash;
   }
 
-  Future<bool> isBiometricEnabled() async =>
-      (await _storage.read(key: _kBiometric)) == '1';
+  Future<bool> isBiometricEnabled() async {
+    await _ensureMigrated();
+    final prefs = await _prefs();
+    return prefs.getString(_kBiometric) == '1';
+  }
 
   Future<void> setBiometricEnabled(bool value) async {
-    await _storage.write(key: _kBiometric, value: value ? '1' : '0');
+    await _ensureMigrated();
+    final prefs = await _prefs();
+    await prefs.setString(_kBiometric, value ? '1' : '0');
   }
 
   /// 设备是否具备可用的生物认证
@@ -93,9 +143,11 @@ class SecurityService {
 
   /// 关闭应用锁并清除密码
   Future<void> disable() async {
-    await _storage.delete(key: _kHash);
-    await _storage.delete(key: _kSalt);
-    await _storage.write(key: _kBiometric, value: '0');
+    await _ensureMigrated();
+    final prefs = await _prefs();
+    await prefs.remove(_kHash);
+    await prefs.remove(_kSalt);
+    await prefs.setString(_kBiometric, '0');
   }
 
   static String _randomSalt() {

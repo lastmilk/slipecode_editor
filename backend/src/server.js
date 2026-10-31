@@ -67,6 +67,15 @@ import {
   handleGithubCallback,
   handleGithubToken,
 } from './routes/oauth.js';
+import {
+  handleAdminCreateDoc,
+  handleAdminDeleteDoc,
+  handleAdminListDocs,
+  handleAdminUpdateDoc,
+  handleGetDoc,
+  handleListDocs,
+  handlePortalInfo,
+} from './routes/docs.js';
 import { handleGetProjects, handlePutProjects } from './routes/projects.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -116,6 +125,10 @@ const ROUTES = {
   'GET /api/llm/models': handleLlmModels,
   'POST /api/llm/chat': handleLlmChat,
 
+  // 使用文档（公开只读）与门户信息
+  'GET /api/docs': handleListDocs,
+  'GET /api/public/info': handlePortalInfo,
+
   // 管理端 API
   'POST /api/admin/login': handleAdminLogin,
   'GET /api/admin/session': handleAdminSession,
@@ -125,6 +138,8 @@ const ROUTES = {
   'GET /api/admin/users': handleAdminUsers,
   'GET /api/admin/llm/models': handleAdminListModels,
   'POST /api/admin/llm/models': handleAdminCreateModel,
+  'GET /api/admin/docs': handleAdminListDocs,
+  'POST /api/admin/docs': handleAdminCreateDoc,
 };
 
 /** 带路径参数的路由（正则捕获，handler 第三个参数为正则 match） */
@@ -154,6 +169,21 @@ const DYNAMIC_ROUTES = [
     method: 'DELETE',
     pattern: /^\/api\/admin\/llm\/models\/([^/]+)$/,
     handler: (req, res, match) => handleAdminDeleteModel(req, res, match[1]),
+  },
+  {
+    method: 'GET',
+    pattern: /^\/api\/docs\/([^/]+)$/,
+    handler: (req, res, match) => handleGetDoc(req, res, match[1]),
+  },
+  {
+    method: 'PUT',
+    pattern: /^\/api\/admin\/docs\/([^/]+)$/,
+    handler: (req, res, match) => handleAdminUpdateDoc(req, res, match[1]),
+  },
+  {
+    method: 'DELETE',
+    pattern: /^\/api\/admin\/docs\/([^/]+)$/,
+    handler: (req, res, match) => handleAdminDeleteDoc(req, res, match[1]),
   },
 ];
 

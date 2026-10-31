@@ -260,6 +260,22 @@ class SettingsProvider extends ChangeNotifier {
     await _save();
   }
 
+  /// 设置首页自定义文案库（一行一条，空行自动过滤）
+  Future<void> setHomeCustomTexts(List<String> texts) async {
+    final cleaned = [
+      for (final line in texts)
+        if (line.trim().isNotEmpty) line.trim(),
+    ];
+    _settings = _settings.copyWith(homeCustomTexts: cleaned);
+    await _save();
+  }
+
+  /// 首页文案是否混入一言源（开启后一言/自定义各 50% 概率）
+  Future<void> setHomeSayingSourceEnabled(bool value) async {
+    _settings = _settings.copyWith(homeSayingSourceEnabled: value);
+    await _save();
+  }
+
   Future<void> setAvatarPath(String path) async {
     _settings = _settings.copyWith(avatarPath: path);
     await _save();

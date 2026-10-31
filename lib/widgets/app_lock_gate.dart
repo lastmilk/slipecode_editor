@@ -95,9 +95,11 @@ class _AppLockGateState extends State<AppLockGate> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      return const ColoredBox(
-        color: Colors.black,
-        child: Center(child: CircularProgressIndicator()),
+      // 读取持久化状态期间的占位页：跟随主题色，避免突兀黑屏
+      final isDark = Theme.of(context).brightness == Brightness.dark;
+      return Scaffold(
+        backgroundColor: isDark ? const Color(0xFF121212) : const Color(0xFFF5F7FA),
+        body: const Center(child: CircularProgressIndicator()),
       );
     }
     if (!_locked) return widget.child;

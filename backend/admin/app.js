@@ -71,6 +71,7 @@ const app = Vue.createApp({
       cfg: {
         geetest: { captchaId: '', captchaKey: '', enforce: true },
         aliyun: { accessKeyId: '', accessKeySecret: '', signName: '', templateCode: '' },
+        portal: { qqGroup: '' },
       },
       cfgInfo: {
         geetest: { captchaKeyMasked: '' },
@@ -82,6 +83,13 @@ const app = Vue.createApp({
       savingGee: false,
       savingAli: false,
       savingPwd: false,
+      savingPortal: false,
+
+      docs: [],
+      loadingDocs: false,
+      docDialog: false,
+      docForm: { id: '', title: '', content: '', published: true },
+      savingDoc: false,
 
       models: [],
       loadingModels: false,
@@ -216,6 +224,7 @@ const app = Vue.createApp({
       if (tab === 'users') this.loadUsers();
       if (tab === 'config') this.loadConfig();
       if (tab === 'llm') this.loadModels();
+      if (tab === 'docs') this.loadDocs();
     },
 
     async loadStats() {
@@ -274,6 +283,7 @@ const app = Vue.createApp({
           signName: data.aliyun.signName || '',
           templateCode: data.aliyun.templateCode || '',
         };
+        this.cfg.portal = { qqGroup: (data.portal && data.portal.qqGroup) || '' };
       } catch (err) {
         this.handleError(err);
       } finally {
@@ -459,6 +469,102 @@ const app = Vue.createApp({
         await this.loadModels();
       } catch (err) {
         this.handleError(err);
+      }
+    },
+    async loadDocs() {
+      this.loadingDocs = true;
+      try {
+        const data = await request('/api/admin/docs');
+        this.docs = data.docs || [];
+      } catch (err) {
+        this.handleError(err);
+      } finally {
+        this.loadingDocs = false;
+      }
+    },
+
+    openDocDialog(row) {
+      this.docForm = row
+        ? { id: row.id, title: row.title, content: row.content, published: Boolean(row.published) }
+        : { id: '', title: '', content: '', published: true };
+      this.docDialog = true;
+    },
+
+    async saveDoc() {
+      const form = this.docForm;
+      if (!form.title.trim()) {
+        ElementPlus.ElMessage.warning('标题不能为空');
+        return;
+      }
+      if (!form.content.trim()) {
+        ElementPlus.ElMessage.warning('正文不能为空');
+        return;
+      }
+      this.savingDoc = true;
+      try {
+        if (form.id) {
+          await request(`/api/admin/docs/${encodeURIComponent(form.id)}`, {
+            method: 'PUT',
+            body: { ...form },
+          });
+        } else {
+          await request('/api/admin/docs', { method: 'POST', body: { ...form } });
+        }
+        ElementPlus.ElMessage.success('已保存');
+        this.docDialog = false;
+        await this.loadDocs();
+      } catch (err) {
+        this.handleError(err);
+      } finally {
+        this.savingDoc = false;
+      }
+    },
+
+    async toggleDocPublished(row) {
+      try {
+        await request(`/api/admin/docs/${encodeURIComponent(row.id)}`, {
+          method: 'PUT',
+          body: { published: !row.published },
+        });
+        ElementPlus.ElMessage.success(row.published ? '已下架' : '已发布');
+        await this.loadDocs();
+      } catch (err) {
+        this.handleError(err);
+      }
+    },
+
+    async removeDoc(row) {
+      try {
+        await ElementPlus.ElMessageBox.confirm(`确定删除文档「${row.title}」？`, '删除确认', {
+          type: 'warning',
+          confirmButtonText: '删除',
+          cancelButtonText: '取消',
+        });
+      } catch {
+        return;
+      }
+      try {
+        await request(`/api/admin/docs/${encodeURIComponent(row.id)}`, { method: 'DELETE' });
+        ElementPlus.ElMessage.success('已删除');
+        await this.loadDocs();
+      } catch (err) {
+        this.handleError(err);
+      }
+    },
+
+    async savePortal() {
+      this.savingPortal = true;
+      try {
+        await request('/api/admin/config', {
+          method: 'PUT',
+          body: { portal: { qqGroup: this.cfg.portal.qqGroup.trim() } },
+        });
+        ElementPlus.ElMessage.success('QQ 群号已保存');
+        await this.loadConfig();
+      } catch (err) {
+        this.handleError(err);
+      } finally {
+        this.savingPortal = false;
       }
     },
   },

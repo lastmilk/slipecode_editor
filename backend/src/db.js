@@ -24,11 +24,15 @@ const DEFAULT_DB = {
   llmModels: [],
   projects: {},
   chatHistory: {},
+  // 管理员发布的使用文档（Markdown）
+  docs: [],
   // 运行期配置（优先级高于环境变量，便于在管理端热更新）
   config: {
     geetest: {},
     aliyun: {},
     admin: { passwordHash: '' },
+    // 面向用户端的运营信息（公开只读）
+    portal: { qqGroup: '' },
   },
   stats: {
     totals: {
@@ -68,6 +72,7 @@ export async function loadDb() {
         parsed.chatHistory && typeof parsed.chatHistory === 'object'
           ? parsed.chatHistory
           : {},
+      docs: Array.isArray(parsed.docs) ? parsed.docs : [],
       config: mergeConfig(parsed.config),
       stats: mergeStats(parsed.stats),
     };
@@ -85,6 +90,7 @@ function mergeConfig(raw) {
     geetest: { ...base.geetest, ...(raw.geetest || {}) },
     aliyun: { ...base.aliyun, ...(raw.aliyun || {}) },
     admin: { ...base.admin, ...(raw.admin || {}) },
+    portal: { ...base.portal, ...(raw.portal || {}) },
   };
 }
 
