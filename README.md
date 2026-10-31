@@ -1,2 +1,7 @@
 # kaoqing
-Created by SLIPE
+
+A new Flutter project created by SlipCode.
+
+本项目不包含 Android 平台工程：首次推送到 GitHub 后，
+GitHub Actions 会自动运行 `flutter create --platforms=android .`
+生成平台工程并完成 APK 构建，产物可在 Actions 运行记录中下载。
