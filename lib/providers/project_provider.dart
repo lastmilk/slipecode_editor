@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+
 import '../models/file_node.dart';
 import '../payloads/project_payload.dart';
 import '../services/file_service.dart';
@@ -27,19 +28,25 @@ class ProjectProvider extends ChangeNotifier {
   String? _error;
   String? get error => _error;
 
+  /// 项目切换回调（main 中注入，用于重置编辑器 / 构建等按项目隔离的状态）
+  Future<void> Function(String? projectPath)? onProjectChanged;
+
   /// 打开已有项目
   Future<void> openProject(String path) async {
     _projectPath = path;
     _payload = await PayloadRegistry.detect(path);
+    // 先切换工作区，再加载文件树，避免新项目首帧仍显示上一个项目的标签页
+    await onProjectChanged?.call(path);
     await refreshFileTree();
   }
 
   /// 关闭当前项目
-  void closeProject() {
+  Future<void> closeProject() async {
     _projectPath = null;
     _fileTree = null;
     _payload = null;
     _error = null;
+    await onProjectChanged?.call(null);
     notifyListeners();
   }
 

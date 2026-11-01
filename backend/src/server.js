@@ -77,6 +77,12 @@ import {
   handlePortalInfo,
 } from './routes/docs.js';
 import { handleGetProjects, handlePutProjects } from './routes/projects.js';
+import {
+  handleCreateBuildWatch,
+  handleDownloadBuildArtifact,
+  handleGetBuildWatch,
+  handleLatestBuildWatch,
+} from './routes/builds.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ADMIN_DIR = join(__dirname, '..', 'admin');
@@ -129,6 +135,10 @@ const ROUTES = {
   'GET /api/docs': handleListDocs,
   'GET /api/public/info': handlePortalInfo,
 
+  // 云端构建监听（登录用户：服务端持续同步 + 产物中转）
+  'POST /api/build/watch': handleCreateBuildWatch,
+  'GET /api/build/watch': handleLatestBuildWatch,
+
   // 管理端 API
   'POST /api/admin/login': handleAdminLogin,
   'GET /api/admin/session': handleAdminSession,
@@ -144,6 +154,18 @@ const ROUTES = {
 
 /** 带路径参数的路由（正则捕获，handler 第三个参数为正则 match） */
 const DYNAMIC_ROUTES = [
+  {
+    method: 'GET',
+    pattern: /^\/api\/build\/watch\/([^/]+)\/artifact$/,
+    handler: (req, res, match) =>
+      handleDownloadBuildArtifact(req, res, decodeURIComponent(match[1])),
+  },
+  {
+    method: 'GET',
+    pattern: /^\/api\/build\/watch\/([^/]+)$/,
+    handler: (req, res, match) =>
+      handleGetBuildWatch(req, res, decodeURIComponent(match[1])),
+  },
   {
     method: 'GET',
     pattern: /^\/api\/avatars\/([^/]+)$/,

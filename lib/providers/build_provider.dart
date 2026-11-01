@@ -1,16 +1,23 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import '../payloads/project_payload.dart';
+import '../services/build_notification_service.dart';
 import '../services/build_service.dart';
+import '../services/build_watch_service.dart';
 import '../services/git_host.dart';
 import '../services/gitee_go_templates.dart';
-import '../services/github_api_service.dart' show RepoFile, RunArtifact;
+import '../services/github_api_service.dart'
+    show RepoFile, RunArtifact, WorkflowJob, WorkflowRun;
+import 'account_provider.dart';
 import 'git_sync_provider.dart';
 import 'gitee_provider.dart';
 import 'github_provider.dart';
 import 'project_provider.dart';
+import 'settings_provider.dart';
 
 /// 构建状态
 enum BuildStatus { idle, running, success, failed, cancelled }
@@ -21,10 +28,17 @@ enum BuildStatus { idle, running, success, failed, cancelled }
 /// - Gitee：Gitee Go（仅 Android；Gitee Go 无 macOS Runner）
 ///
 /// GitHub 流程：同步代码 → 确保 workflow → dispatch → 轮询 → 下载产物。
-/// Gitee 流程：同步代码 → 确保 Gitee Go 流水线 → push 触发 → 打开 Gitee 查看。
-/// （Gitee Go 没有公开的运行状态/产物下载 API）
+/// 登录用户额外把监听注册到服务端：退出构建页 / 退出 IDE 后仍由服务端
+/// 持续同步进度，构建产物可先下发到服务端再由客户端下载。
 class BuildProvider extends ChangeNotifier {
-  BuildProvider(this._github, this._gitee, this._gitSync, [this._project]);
+  BuildProvider(
+    this._github,
+    this._gitee,
+    this._gitSync, [
+    this._project,
+    this._account,
+    this._settings,
+  ]);
 
   final GitHubProvider _github;
   final GiteeProvider _gitee;
@@ -32,6 +46,12 @@ class BuildProvider extends ChangeNotifier {
 
   /// 用于读取当前项目的载荷（模板 / workflow / 构建类型）
   final ProjectProvider? _project;
+
+  /// 账号（登录后把构建监听交给服务端）
+  final AccountProvider? _account;
+
+  /// 偏好设置（自动下载 / 服务端中转开关）
+  final SettingsProvider? _settings;
 
   /// 当前项目载荷，未打开项目时退回默认载荷
   ProjectPayload get payload => _project?.payload ?? PayloadRegistry.fallback;
@@ -44,6 +64,15 @@ class BuildProvider extends ChangeNotifier {
   String _error = '';
   String _currentTask = '';
   String _runUrl = '';
+
+  /// 当前运行的 workflow job / step 列表（用于展示完整构建流程）
+  List<WorkflowJob> _jobs = const [];
+
+  /// GitHub Actions run id（取消工作流 / 服务端监听需要）
+  int? _runId;
+
+  /// 服务端监听记录 id
+  String _watchId = '';
 
   DateTime? _startedAt;
   DateTime? _finishedAt;
@@ -58,11 +87,14 @@ class BuildProvider extends ChangeNotifier {
     if (types.isEmpty || types.contains(_type)) return _type;
     return types.first;
   }
+
   List<String> get logs => List.unmodifiable(_logs);
   String? get artifactPath => _artifactPath;
   String get error => _error;
   String get currentTask => _currentTask;
   String get runUrl => _runUrl;
+  List<WorkflowJob> get jobs => List.unmodifiable(_jobs);
+  int? get runId => _runId;
   DateTime? get startedAt => _startedAt;
   DateTime? get finishedAt => _finishedAt;
 
@@ -83,7 +115,9 @@ class BuildProvider extends ChangeNotifier {
     return switch (host) {
       // Gitee Go 只有 Flutter 流水线，且没有 macOS Runner
       GitHost.gitee =>
-        payload.supportsGitee ? types.where((t) => !t.isIos).toList() : const [],
+        payload.supportsGitee
+            ? types.where((t) => !t.isIos).toList()
+            : const [],
       GitHost.github => types,
       null => types,
     };
@@ -119,11 +153,37 @@ class BuildProvider extends ChangeNotifier {
     _artifactPath = null;
     _error = '';
     _runUrl = '';
+    _jobs = const [];
+    _runId = null;
+    _watchId = '';
     _startedAt = DateTime.now();
     _finishedAt = null;
     _cancelRequested = false;
     _safeNotify();
   }
+
+  /// 切换项目时重置构建状态（保留正在进行的构建，避免丢失监听）
+  void resetForProject() {
+    if (isRunning) return;
+    _status = BuildStatus.idle;
+    _logs.clear();
+    _jobs = const [];
+    _artifactPath = null;
+    _error = '';
+    _runUrl = '';
+    _currentTask = '';
+    _runId = null;
+    _watchId = '';
+    _startedAt = null;
+    _finishedAt = null;
+    _cancelRequested = false;
+    unawaited(BuildNotificationService.instance.stop());
+    _safeNotify();
+  }
+
+  // ---------------------------------------------------------------------------
+  // 构建流程
+  // ---------------------------------------------------------------------------
 
   /// 开始云端构建
   Future<void> startBuild({required String projectDir}) async {
@@ -168,6 +228,9 @@ class BuildProvider extends ChangeNotifier {
     _reset();
     _append('==> 开始构建 ${_type.label}（${host.ciName}）');
 
+    // 构建期间启动前台服务 + 常驻通知，避免退到后台后进程被回收
+    await _startKeepAlive('正在准备云端构建');
+
     try {
       // 1. 同步本地未提交改动
       _currentTask = '同步本地改动';
@@ -195,8 +258,46 @@ class BuildProvider extends ChangeNotifier {
     } finally {
       _finishedAt = DateTime.now();
       _currentTask = '';
+      if (BuildNotificationService.instance.isRunning) {
+        unawaited(BuildNotificationService.instance.stop());
+      }
       _safeNotify();
     }
+  }
+
+  /// 申请通知权限并启动构建保活前台服务
+  Future<void> _startKeepAlive(String text) async {
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+      try {
+        await Permission.notification.request();
+      } catch (_) {
+        // 用户拒绝通知权限时前台服务仍会运行
+      }
+    }
+    await BuildNotificationService.instance.start(text);
+  }
+
+  String _stepSummary() {
+    for (final job in _jobs) {
+      for (final step in job.steps) {
+        if (step.isRunning) return step.name;
+      }
+    }
+    for (final job in _jobs) {
+      if (job.isRunning) return job.name;
+    }
+    return _currentTask.isEmpty ? '云端构建进行中' : _currentTask;
+  }
+
+  /// 刷新 workflow 步骤并同步常驻通知文案
+  void _setJobs(List<WorkflowJob> jobs) {
+    _jobs = jobs;
+    final summary = _stepSummary();
+    if (isRunning && summary.isNotEmpty) {
+      _currentTask = summary;
+      unawaited(BuildNotificationService.instance.update(summary));
+    }
+    _safeNotify();
   }
 
   // ---------------------------------------------------------------------------
@@ -234,11 +335,16 @@ class BuildProvider extends ChangeNotifier {
       isCancelled: () => _cancelRequested,
       onUpdate: (run) {
         _runUrl = run.htmlUrl;
+        _runId = run.id;
         _append('==> 运行 #${run.runNumber} 状态：${run.status}');
+        // 登录用户把监听注册到服务端（退出 IDE 后继续同步）
+        unawaited(_registerServerWatch(repo, run));
         _safeNotify();
       },
+      onJobs: _setJobs,
     );
     _runUrl = run.htmlUrl;
+    _runId = run.id;
     _append('==> 运行结束：${run.conclusion}');
     _append('    $runUrl');
 
@@ -247,8 +353,29 @@ class BuildProvider extends ChangeNotifier {
       return;
     }
 
-    _currentTask = '下载构建产物';
-    _append('==> 下载构建产物');
+    final settings = _settings?.settings;
+    if (settings != null && !settings.buildAutoDownload) {
+      _status = BuildStatus.success;
+      _append('==> 构建成功（已按偏好设置跳过自动下载产物）');
+      return;
+    }
+
+    _currentTask = '获取构建产物';
+    _append('==> 获取构建产物');
+    final relay = settings?.buildServerRelay ?? true;
+    if (relay && _account?.isSignedIn == true && _watchId.isNotEmpty) {
+      _append('    优先从服务端中转下载（缓解国内访问 GitHub 慢）');
+      final path = await _downloadArtifactFromServer(projectDir);
+      if (path != null) {
+        _artifactPath = path;
+        _append('==> 构建产物：$path');
+        _status = BuildStatus.success;
+        _append('==> 构建成功（耗时 ${_durationText()}）');
+        return;
+      }
+      _append('    服务端产物暂不可用，回退为直接下载');
+    }
+
     final artifacts = await api.listArtifacts(repo, run.id);
     final usable = artifactsForType(artifacts: artifacts, type: _type);
     if (usable == null) {
@@ -270,6 +397,143 @@ class BuildProvider extends ChangeNotifier {
     _append('==> 构建产物：$path');
     _status = BuildStatus.success;
     _append('==> 构建成功（耗时 ${_durationText()}）');
+  }
+
+  /// 把本次运行注册到服务端（仅登录用户）
+  Future<void> _registerServerWatch(String repo, WorkflowRun run) async {
+    if (_watchId.isNotEmpty) return;
+    final account = _account;
+    final githubToken = _github.token;
+    if (account == null || !account.isSignedIn || githubToken == null) return;
+    if (!BuildWatchService.instance.isConfigured) return;
+    final watch = await BuildWatchService.instance.register(
+      accountToken: account.token!,
+      githubToken: githubToken,
+      repo: repo,
+      runId: run.id,
+      runUrl: run.htmlUrl,
+      buildType: _type.inputValue,
+    );
+    if (watch != null && watch.id.isNotEmpty) {
+      _watchId = watch.id;
+      _append('    已注册服务端构建监听（退出 IDE 后仍会同步）');
+    }
+  }
+
+  /// 等待服务端把产物下载完成，再取回本地
+  Future<String?> _downloadArtifactFromServer(String projectDir) async {
+    final account = _account;
+    if (account == null || !account.isSignedIn) return null;
+    final token = account.token!;
+    final deadline = DateTime.now().add(const Duration(minutes: 5));
+    BuildWatch? watch;
+    while (DateTime.now().isBefore(deadline)) {
+      if (_cancelRequested) return null;
+      watch = await BuildWatchService.instance.fetch(
+        accountToken: token,
+        id: _watchId,
+      );
+      if (watch != null && watch.artifactReady) break;
+      if (watch != null && watch.error.isNotEmpty) {
+        _append('    服务端下载产物失败：${watch.error}');
+        return null;
+      }
+      await Future.delayed(const Duration(seconds: 8));
+    }
+    if (watch == null || !watch.artifactReady) return null;
+    _append('    服务端已就绪（${watch.artifactName}），开始下发到本地');
+    final bytes = await BuildWatchService.instance.downloadArtifact(
+      accountToken: token,
+      id: _watchId,
+    );
+    if (bytes == null) return null;
+    return BuildService.instance.saveArtifactZip(bytes, projectDir, _type);
+  }
+
+  // ---------------------------------------------------------------------------
+  // 服务端监听恢复（重新进入 IDE 时同步构建进度）
+  // ---------------------------------------------------------------------------
+
+  /// 从服务端恢复当前仓库最新一次构建进度
+  ///
+  /// [projectDir] 用于自动下载已完成的服务端中转产物。
+  Future<void> syncFromServer({String? projectDir}) async {
+    final account = _account;
+    if (account == null || !account.isSignedIn) return;
+    final repo = _gitSync.currentLink?.repo;
+    if (repo == null || !BuildWatchService.instance.isConfigured) return;
+    final watch = await BuildWatchService.instance.latest(
+      accountToken: account.token!,
+      repo: repo,
+    );
+    if (watch == null || watch.runId == 0) return;
+    // 本地正在轮询同一运行时不覆盖
+    if (isRunning && _runId == watch.runId) return;
+    if (_runId == watch.runId && _status != BuildStatus.idle) {
+      // 本地已有同一运行的最终状态，仅补全步骤
+      if (watch.jobs.isNotEmpty) _jobs = watch.jobs;
+      _safeNotify();
+      return;
+    }
+
+    final conclusion = watch.conclusion ?? '';
+    _runId = watch.runId;
+    _watchId = watch.id;
+    _runUrl = watch.htmlUrl;
+    _startedAt ??= watch.jobs.isNotEmpty ? watch.jobs.first.startedAt : null;
+    _finishedAt = null;
+    _logs.clear();
+    _append('==> 从服务端恢复构建进度（运行 #${watch.runId}）');
+    _jobs = watch.jobs;
+
+    if (!watch.isCompleted) {
+      _status = BuildStatus.running;
+      _currentTask = '云端构建中（服务端监听）';
+      _append('    当前状态：${watch.status}');
+      _append('    关闭 IDE 后仍会由服务端持续同步');
+      _safeNotify();
+      return;
+    }
+
+    _finishedAt = DateTime.now();
+    switch (conclusion) {
+      case 'success':
+        _status = BuildStatus.success;
+        _append('==> 构建成功');
+        final settings = _settings?.settings;
+        if (watch.artifactReady &&
+            (settings?.buildAutoDownload ?? true) &&
+            (settings?.buildServerRelay ?? true) &&
+            projectDir != null) {
+          _currentTask = '获取构建产物';
+          _safeNotify();
+          final bytes = await BuildWatchService.instance.downloadArtifact(
+            accountToken: account.token!,
+            id: watch.id,
+          );
+          if (bytes != null) {
+            _artifactPath = await BuildService.instance.saveArtifactZip(
+              bytes,
+              projectDir,
+              _type,
+            );
+            if (_artifactPath != null) {
+              _append('==> 构建产物：$_artifactPath');
+            }
+          }
+          _currentTask = '';
+        }
+        break;
+      case 'cancelled':
+        _status = BuildStatus.cancelled;
+        _append('==> 构建已取消');
+        break;
+      default:
+        _status = BuildStatus.failed;
+        _error = '云端构建未成功（$conclusion）';
+        _append('==> 失败：$_error');
+    }
+    _safeNotify();
   }
 
   // ---------------------------------------------------------------------------
@@ -360,11 +624,21 @@ class BuildProvider extends ChangeNotifier {
     return '${d.inSeconds} 秒';
   }
 
-  /// 取消当前任务（停止本地轮询；云端运行不会被取消）
-  void cancel() {
+  /// 取消当前构建（同时请求 GitHub 取消云端工作流）
+  Future<void> cancel() async {
     if (!isRunning) return;
+    _append('==> 正在请求取消云端工作流...');
+    final runId = _runId;
+    final repo = _gitSync.currentLink?.repo;
+    if (runId != null && repo != null && _github.isSignedIn) {
+      try {
+        await _github.api!.cancelRun(repo, runId);
+        _append('    已向 GitHub 发送取消请求');
+      } catch (e) {
+        _append('    取消请求失败：$e');
+      }
+    }
     _cancelRequested = true;
-    _append('==> 正在取消...');
     _safeNotify();
   }
 

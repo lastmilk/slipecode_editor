@@ -80,12 +80,7 @@ class BuildService {
     if (exists) return;
     await api.pushFiles(
       repoFullName,
-      [
-        RepoFile(
-          path,
-          Uint8List.fromList(utf8.encode(content)),
-        ),
-      ],
+      [RepoFile(path, Uint8List.fromList(utf8.encode(content)))],
       message: 'ci: add SlipCode build workflow',
       branch: branch,
     );
@@ -111,7 +106,8 @@ class BuildService {
 
   /// 等待触发后出现的新运行并轮询至完成。
   ///
-  /// [onUpdate] 每次状态变化时回调（用于日志）。
+  /// [onUpdate] 每次运行状态变化时回调（用于日志）。
+  /// [onJobs] 每次轮询都回调 Job / 步骤列表（用于展示完整构建流程）。
   /// [isCancelled] 返回 true 时抛出 [_CancelledError]。
   Future<WorkflowRun> waitForCompletion(
     GitHubApiService api,
@@ -119,6 +115,7 @@ class BuildService {
     DateTime triggeredAt, {
     String branch = 'main',
     void Function(WorkflowRun run)? onUpdate,
+    void Function(List<WorkflowJob> jobs)? onJobs,
     bool Function()? isCancelled,
     Duration timeout = const Duration(minutes: 30),
   }) async {
@@ -141,19 +138,33 @@ class BuildService {
     }
     onUpdate?.call(run);
 
-    // 轮询至完成
+    // 轮询至完成（同时刷新 Job / 步骤进度）
     var lastStatus = run.status;
+    var jobsFetched = false;
     while (!run!.isCompleted) {
       _throwIfCancelled(isCancelled);
       if (DateTime.now().isAfter(deadline)) {
         throw TimeoutException('构建超时（>${timeout.inMinutes} 分钟）');
       }
-      await Future.delayed(const Duration(seconds: 5));
+      await Future.delayed(const Duration(seconds: 4));
       run = await api.getRun(repoFullName, run.id);
       if (run.status != lastStatus) {
         lastStatus = run.status;
         onUpdate?.call(run);
       }
+      if (onJobs != null) {
+        try {
+          onJobs(await api.listJobs(repoFullName, run.id));
+          jobsFetched = true;
+        } catch (_) {
+          // 步骤接口偶发失败不影响整体轮询
+        }
+      }
+    }
+    if (onJobs != null && !jobsFetched) {
+      try {
+        onJobs(await api.listJobs(repoFullName, run.id));
+      } catch (_) {}
     }
     return run;
   }
@@ -170,12 +181,24 @@ class BuildService {
     BuildType type,
   ) async {
     final zipBytes = await api.downloadArtifact(repoFullName, artifact.id);
+    return saveArtifactZip(zipBytes, projectDir, type);
+  }
 
+  /// 把产物 zip 字节保存 / 解压到 `项目目录/build/github/`
+  ///
+  /// 服务端中转下载与直接下载共用该实现。
+  Future<String?> saveArtifactZip(
+    Uint8List zipBytes,
+    String projectDir,
+    BuildType type,
+  ) async {
     final outDir = Directory(p.join(projectDir, 'build', 'github'));
     await outDir.create(recursive: true);
 
     if (type.savesRawZip) {
-      final suffix = type.isIos ? 'ios-unsigned' : '${type.inputValue}-artifacts';
+      final suffix = type.isIos
+          ? 'ios-unsigned'
+          : '${type.inputValue}-artifacts';
       final outPath = p.join(outDir.path, 'slipecode-$suffix.zip');
       await File(outPath).writeAsBytes(zipBytes, flush: true);
       return outPath;
@@ -197,7 +220,9 @@ class BuildService {
   /// 通过系统安装器安装 APK
   Future<bool> installApk(String apkPath) async {
     try {
-      final ok = await _channel.invokeMethod<bool>('installApk', {'path': apkPath});
+      final ok = await _channel.invokeMethod<bool>('installApk', {
+        'path': apkPath,
+      });
       return ok ?? false;
     } catch (_) {
       return false;

@@ -48,6 +48,12 @@ class AppSettings {
   /// 创建项目时默认勾选「创建仓库并推送」
   final bool createRepoOnCreate;
 
+  /// 云端构建完成后自动下载构建产物到本地
+  final bool buildAutoDownload;
+
+  /// 登录用户构建产物先由服务端中转下载（缓解国内访问 GitHub 的网络问题）
+  final bool buildServerRelay;
+
   // ---------------------------------------------------------------------------
   // LLM / AI 助手配置
   // ---------------------------------------------------------------------------
@@ -149,6 +155,8 @@ class AppSettings {
     this.showSaying = true,
     this.defaultGitHost = GitHost.github,
     this.createRepoOnCreate = true,
+    this.buildAutoDownload = true,
+    this.buildServerRelay = true,
     this.llmApiBase = '',
     this.llmApiKey = '',
     this.llmModel = 'gpt-4o-mini',
@@ -195,6 +203,8 @@ class AppSettings {
     bool? showSaying,
     GitHost? defaultGitHost,
     bool? createRepoOnCreate,
+    bool? buildAutoDownload,
+    bool? buildServerRelay,
     String? llmApiBase,
     String? llmApiKey,
     String? llmModel,
@@ -226,6 +236,8 @@ class AppSettings {
       showSaying: showSaying ?? this.showSaying,
       defaultGitHost: defaultGitHost ?? this.defaultGitHost,
       createRepoOnCreate: createRepoOnCreate ?? this.createRepoOnCreate,
+      buildAutoDownload: buildAutoDownload ?? this.buildAutoDownload,
+      buildServerRelay: buildServerRelay ?? this.buildServerRelay,
       llmApiBase: llmApiBase ?? this.llmApiBase,
       llmApiKey: llmApiKey ?? this.llmApiKey,
       llmModel: llmModel ?? this.llmModel,
@@ -270,6 +282,8 @@ class AppSettings {
       'showSaying': showSaying,
       'defaultGitHost': defaultGitHost.id,
       'createRepoOnCreate': createRepoOnCreate,
+      'buildAutoDownload': buildAutoDownload,
+      'buildServerRelay': buildServerRelay,
       // 旧字段继续输出，便于旧版本读取；Key 是否输出由 includeSecrets 决定
       'llmApiBase': llm?.apiBase ?? llmApiBase,
       'llmApiKey': includeSecrets ? (llm?.apiKey ?? llmApiKey) : '',
@@ -334,7 +348,8 @@ class AppSettings {
         'dark' => ThemeMode.dark,
         _ => ThemeMode.system,
       },
-      editorFontSize: (json['editorFontSize'] as num?)?.toDouble() ??
+      editorFontSize:
+          (json['editorFontSize'] as num?)?.toDouble() ??
           defaults.editorFontSize,
       language: switch (json['language'] as String?) {
         'zhHant' => 'zhHant',
@@ -347,10 +362,16 @@ class AppSettings {
       appLockEnabled:
           json['appLockEnabled'] as bool? ?? defaults.appLockEnabled,
       showSaying: json['showSaying'] as bool? ?? defaults.showSaying,
-      defaultGitHost:
-          GitHost.fromId(json['defaultGitHost'] as String?, fallback: GitHost.github),
+      defaultGitHost: GitHost.fromId(
+        json['defaultGitHost'] as String?,
+        fallback: GitHost.github,
+      ),
       createRepoOnCreate:
           json['createRepoOnCreate'] as bool? ?? defaults.createRepoOnCreate,
+      buildAutoDownload:
+          json['buildAutoDownload'] as bool? ?? defaults.buildAutoDownload,
+      buildServerRelay:
+          json['buildServerRelay'] as bool? ?? defaults.buildServerRelay,
       llmApiBase: json['llmApiBase'] as String? ?? defaults.llmApiBase,
       llmApiKey: json['llmApiKey'] as String? ?? defaults.llmApiKey,
       llmModel: json['llmModel'] as String? ?? defaults.llmModel,
@@ -361,34 +382,39 @@ class AppSettings {
       syncNetwork: json['syncNetwork'] as String? ?? defaults.syncNetwork,
       wallpaperCloudVersion:
           json['wallpaperCloudVersion'] as String? ??
-              defaults.wallpaperCloudVersion,
+          defaults.wallpaperCloudVersion,
       backgroundImagePath:
-          json['backgroundImagePath'] as String? ?? defaults.backgroundImagePath,
+          json['backgroundImagePath'] as String? ??
+          defaults.backgroundImagePath,
       backgroundImageScope: switch (json['backgroundImageScope'] as String?) {
         backgroundScopeIdeOnly => backgroundScopeIdeOnly,
         _ => defaults.backgroundImageScope,
       },
       backgroundImageOpacity:
           (json['backgroundImageOpacity'] as num?)?.toDouble() ??
-              defaults.backgroundImageOpacity,
-      aiFloatingBallEnabled: json['aiFloatingBallEnabled'] as bool? ??
+          defaults.backgroundImageOpacity,
+      aiFloatingBallEnabled:
+          json['aiFloatingBallEnabled'] as bool? ??
           defaults.aiFloatingBallEnabled,
       systemOverlayEnabled:
-          json['systemOverlayEnabled'] as bool? ?? defaults.systemOverlayEnabled,
+          json['systemOverlayEnabled'] as bool? ??
+          defaults.systemOverlayEnabled,
       completionEnabled:
           json['completionEnabled'] as bool? ?? defaults.completionEnabled,
-      volumeKeyCompletionEnabled: json['volumeKeyCompletionEnabled'] as bool? ??
+      volumeKeyCompletionEnabled:
+          json['volumeKeyCompletionEnabled'] as bool? ??
           defaults.volumeKeyCompletionEnabled,
       homeTitle: json['homeTitle'] as String? ?? defaults.homeTitle,
       avatarPath: json['avatarPath'] as String? ?? defaults.avatarPath,
       homeCustomTexts: switch (json['homeCustomTexts']) {
         final List list => [
-            for (final item in list)
-              if (item is String && item.trim().isNotEmpty) item.trim(),
-          ],
+          for (final item in list)
+            if (item is String && item.trim().isNotEmpty) item.trim(),
+        ],
         _ => const [],
       },
-      homeSayingSourceEnabled: json['homeSayingSourceEnabled'] as bool? ??
+      homeSayingSourceEnabled:
+          json['homeSayingSourceEnabled'] as bool? ??
           defaults.homeSayingSourceEnabled,
     );
   }

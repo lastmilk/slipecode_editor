@@ -21,11 +21,11 @@ class GitHubUser {
   });
 
   factory GitHubUser.fromJson(Map<String, dynamic> json) => GitHubUser(
-        login: json['login'] as String,
-        name: json['name'] as String?,
-        avatarUrl: json['avatar_url'] as String?,
-        htmlUrl: json['html_url'] as String? ?? '',
-      );
+    login: json['login'] as String,
+    name: json['name'] as String?,
+    avatarUrl: json['avatar_url'] as String?,
+    htmlUrl: json['html_url'] as String? ?? '',
+  );
 }
 
 /// GitHub 仓库
@@ -43,11 +43,11 @@ class GitHubRepo {
   });
 
   factory GitHubRepo.fromJson(Map<String, dynamic> json) => GitHubRepo(
-        fullName: json['full_name'] as String,
-        defaultBranch: json['default_branch'] as String? ?? 'main',
-        htmlUrl: json['html_url'] as String? ?? '',
-        private: json['private'] as bool? ?? true,
-      );
+    fullName: json['full_name'] as String,
+    defaultBranch: json['default_branch'] as String? ?? 'main',
+    htmlUrl: json['html_url'] as String? ?? '',
+    private: json['private'] as bool? ?? true,
+  );
 }
 
 /// Actions 运行记录
@@ -75,17 +75,96 @@ class WorkflowRun {
   bool get isCompleted => status == 'completed';
 
   factory WorkflowRun.fromJson(Map<String, dynamic> json) => WorkflowRun(
-        id: json['id'] as int,
-        name: json['name'] as String? ?? '',
-        status: json['status'] as String? ?? '',
-        conclusion: json['conclusion'] as String?,
-        htmlUrl: json['html_url'] as String? ?? '',
-        createdAt:
-            DateTime.tryParse(json['created_at'] as String? ?? '')?.toLocal() ??
-                DateTime.now(),
-        runNumber: json['run_number'] as int? ?? 0,
-        headBranch: json['head_branch'] as String? ?? '',
-      );
+    id: json['id'] as int,
+    name: json['name'] as String? ?? '',
+    status: json['status'] as String? ?? '',
+    conclusion: json['conclusion'] as String?,
+    htmlUrl: json['html_url'] as String? ?? '',
+    createdAt:
+        DateTime.tryParse(json['created_at'] as String? ?? '')?.toLocal() ??
+        DateTime.now(),
+    runNumber: json['run_number'] as int? ?? 0,
+    headBranch: json['head_branch'] as String? ?? '',
+  );
+}
+
+/// Actions 运行中的单个步骤
+class WorkflowStep {
+  final int number;
+  final String name;
+  final String status; // queued / in_progress / completed
+  final String? conclusion; // success / failure / skipped / cancelled / ...
+  final DateTime? startedAt;
+  final DateTime? completedAt;
+
+  const WorkflowStep({
+    required this.number,
+    required this.name,
+    required this.status,
+    this.conclusion,
+    this.startedAt,
+    this.completedAt,
+  });
+
+  bool get isRunning => status == 'in_progress';
+  bool get isCompleted => status == 'completed';
+  bool get isSuccess => isCompleted && (conclusion ?? '') == 'success';
+
+  Duration? get duration {
+    if (startedAt == null) return null;
+    return (completedAt ?? DateTime.now()).difference(startedAt!);
+  }
+
+  factory WorkflowStep.fromJson(Map<String, dynamic> json) => WorkflowStep(
+    number: json['number'] as int? ?? 0,
+    name: json['name'] as String? ?? '',
+    status: json['status'] as String? ?? 'queued',
+    conclusion: json['conclusion'] as String?,
+    startedAt: DateTime.tryParse(json['started_at'] as String? ?? '')
+        ?.toLocal(),
+    completedAt: DateTime.tryParse(json['completed_at'] as String? ?? '')
+        ?.toLocal(),
+  );
+}
+
+/// Actions 运行中的一个 Job（包含步骤列表）
+class WorkflowJob {
+  final int id;
+  final String name;
+  final String status;
+  final String? conclusion;
+  final DateTime? startedAt;
+  final DateTime? completedAt;
+  final List<WorkflowStep> steps;
+
+  const WorkflowJob({
+    required this.id,
+    required this.name,
+    required this.status,
+    this.conclusion,
+    this.startedAt,
+    this.completedAt,
+    this.steps = const [],
+  });
+
+  bool get isRunning => status == 'in_progress';
+
+  bool get isSuccess =>
+      status == 'completed' && (conclusion ?? '') == 'success';
+
+  factory WorkflowJob.fromJson(Map<String, dynamic> json) => WorkflowJob(
+    id: json['id'] as int? ?? 0,
+    name: json['name'] as String? ?? '',
+    status: json['status'] as String? ?? 'queued',
+    conclusion: json['conclusion'] as String?,
+    startedAt: DateTime.tryParse(json['started_at'] as String? ?? '')
+        ?.toLocal(),
+    completedAt: DateTime.tryParse(json['completed_at'] as String? ?? '')
+        ?.toLocal(),
+    steps: (json['steps'] as List? ?? [])
+        .map((e) => WorkflowStep.fromJson(e as Map<String, dynamic>))
+        .toList(),
+  );
 }
 
 /// Actions 构建产物
@@ -103,11 +182,11 @@ class RunArtifact {
   });
 
   factory RunArtifact.fromJson(Map<String, dynamic> json) => RunArtifact(
-        id: json['id'] as int,
-        name: json['name'] as String? ?? '',
-        sizeInBytes: json['size_in_bytes'] as int? ?? 0,
-        expired: json['expired'] as bool? ?? false,
-      );
+    id: json['id'] as int,
+    name: json['name'] as String? ?? '',
+    sizeInBytes: json['size_in_bytes'] as int? ?? 0,
+    expired: json['expired'] as bool? ?? false,
+  );
 }
 
 /// 推送结果
@@ -143,10 +222,10 @@ class GitHubApiService {
   final http.Client _client = http.Client();
 
   Map<String, String> get _headers => {
-        'Authorization': 'Bearer $_token',
-        'Accept': 'application/vnd.github+json',
-        'X-GitHub-Api-Version': '2022-11-28',
-      };
+    'Authorization': 'Bearer $_token',
+    'Accept': 'application/vnd.github+json',
+    'X-GitHub-Api-Version': '2022-11-28',
+  };
 
   Uri _u(String path, [Map<String, String>? query]) =>
       Uri.parse('${AppConfig.apiBase}$path').replace(queryParameters: query);
@@ -161,8 +240,10 @@ class GitHubApiService {
   /// 启动时 token 校验若卡住会导致首屏白屏，因此所有请求都必须带超时。
   static const _timeout = Duration(seconds: 10);
 
-  Future<Map<String, dynamic>> _getJson(String path,
-      [Map<String, String>? query]) async {
+  Future<Map<String, dynamic>> _getJson(
+    String path, [
+    Map<String, String>? query,
+  ]) async {
     final res = await _client
         .get(_u(path, query), headers: _headers)
         .timeout(_timeout);
@@ -171,7 +252,9 @@ class GitHubApiService {
   }
 
   Future<Map<String, dynamic>> _postJson(
-      String path, Map<String, dynamic> body) async {
+    String path,
+    Map<String, dynamic> body,
+  ) async {
     final res = await _client
         .post(
           _u(path),
@@ -185,7 +268,9 @@ class GitHubApiService {
   }
 
   Future<Map<String, dynamic>> _patchJson(
-      String path, Map<String, dynamic> body) async {
+    String path,
+    Map<String, dynamic> body,
+  ) async {
     final res = await _client
         .patch(
           _u(path),
@@ -298,9 +383,9 @@ class GitHubApiService {
         );
       } catch (e) {
         lastError = e;
-        final retryable = e is HttpExceptionWithBody &&
-            (e.message.contains('HTTP 409') ||
-                e.message.contains('HTTP 422'));
+        final retryable =
+            e is HttpExceptionWithBody &&
+            (e.message.contains('HTTP 409') || e.message.contains('HTTP 422'));
         if (!retryable || attempt == 2) rethrow;
         await Future.delayed(Duration(milliseconds: 800 * (attempt + 1)));
       }
@@ -315,21 +400,18 @@ class GitHubApiService {
     required String message,
     String branch = 'main',
   }) async {
-
     // 1. 取当前分支 HEAD（空仓库会 404/409）
     String? headCommitSha;
     String? baseTreeSha;
     final refRes = await _client
-        .get(
-          _u('/repos/$fullName/git/ref/heads/$branch'),
-          headers: _headers,
-        )
+        .get(_u('/repos/$fullName/git/ref/heads/$branch'), headers: _headers)
         .timeout(_timeout);
     if (refRes.statusCode == 200) {
       final ref = jsonDecode(refRes.body) as Map<String, dynamic>;
       headCommitSha = (ref['object'] as Map<String, dynamic>)['sha'] as String;
-      final commit =
-          await _getJson('/repos/$fullName/git/commits/$headCommitSha');
+      final commit = await _getJson(
+        '/repos/$fullName/git/commits/$headCommitSha',
+      );
       baseTreeSha = (commit['tree'] as Map<String, dynamic>)['sha'] as String;
     } else if (refRes.statusCode != 404 && refRes.statusCode != 409) {
       _check(refRes, 'GET git/ref/heads/$branch');
@@ -413,7 +495,9 @@ class GitHubApiService {
     Map<String, String> inputs = const {},
   }) async {
     final res = await _client.post(
-      _u('/repos/$fullName/actions/workflows/${_workflowRef(workflowFile)}/dispatches'),
+      _u(
+        '/repos/$fullName/actions/workflows/${_workflowRef(workflowFile)}/dispatches',
+      ),
       headers: {..._headers, 'Content-Type': 'application/json'},
       body: jsonEncode({'ref': ref, 'inputs': inputs}),
     );
@@ -430,11 +514,15 @@ class GitHubApiService {
     String branch = 'main',
   }) async {
     final res = await _client.get(
-      _u('/repos/$fullName/actions/workflows/${_workflowRef(workflowFile)}/runs', {
-        'branch': branch,
-        'per_page': '5',
-        'created': '>=${since.toUtc().subtract(const Duration(seconds: 5)).toIso8601String()}',
-      }),
+      _u(
+        '/repos/$fullName/actions/workflows/${_workflowRef(workflowFile)}/runs',
+        {
+          'branch': branch,
+          'per_page': '5',
+          'created':
+              '>=${since.toUtc().subtract(const Duration(seconds: 5)).toIso8601String()}',
+        },
+      ),
       headers: _headers,
     );
     if (res.statusCode == 404) return null;
@@ -455,30 +543,52 @@ class GitHubApiService {
 
   /// 列出某次运行的产物
   Future<List<RunArtifact>> listArtifacts(String fullName, int runId) async {
-    final json =
-        await _getJson('/repos/$fullName/actions/runs/$runId/artifacts');
+    final json = await _getJson(
+      '/repos/$fullName/actions/runs/$runId/artifacts',
+    );
     return (json['artifacts'] as List? ?? [])
         .map((e) => RunArtifact.fromJson(e as Map<String, dynamic>))
         .toList();
+  }
+
+  /// 列出某次运行的 Job 与步骤（用于展示完整构建流程）
+  Future<List<WorkflowJob>> listJobs(String fullName, int runId) async {
+    final json = await _getJson('/repos/$fullName/actions/runs/$runId/jobs', {
+      'per_page': '20',
+    });
+    return (json['jobs'] as List? ?? [])
+        .map((e) => WorkflowJob.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// 取消一次正在运行的工作流
+  Future<void> cancelRun(String fullName, int runId) async {
+    final res = await _client
+        .post(
+          _u('/repos/$fullName/actions/runs/$runId/cancel'),
+          headers: _headers,
+        )
+        .timeout(_timeout);
+    // 202 表示已接受取消请求；409 表示运行已结束（无需报错）
+    if (res.statusCode == 202 || res.statusCode == 409) return;
+    _check(res, '取消工作流');
   }
 
   /// 下载产物（返回 zip 字节）。
   ///
   /// 手动跟随 302，避免把 Authorization 头泄露给签名 URL 域名。
   Future<Uint8List> downloadArtifact(String fullName, int artifactId) async {
-    final request = http.Request(
-      'GET',
-      _u('/repos/$fullName/actions/artifacts/$artifactId/zip'),
-    )
-      ..headers.addAll(_headers)
-      ..followRedirects = false;
+    final request =
+        http.Request(
+            'GET',
+            _u('/repos/$fullName/actions/artifacts/$artifactId/zip'),
+          )
+          ..headers.addAll(_headers)
+          ..followRedirects = false;
     final streamed = await _client.send(request);
     if (streamed.statusCode != 302) {
       final body = await streamed.stream.bytesToString();
-      throw HttpExceptionWithBody(
-        '下载产物失败（HTTP ${streamed.statusCode}）',
-        body,
-      );
+      throw HttpExceptionWithBody('下载产物失败（HTTP ${streamed.statusCode}）', body);
     }
     final location = streamed.headers['location'];
     if (location == null) {
@@ -486,10 +596,7 @@ class GitHubApiService {
     }
     final zipRes = await http.get(Uri.parse(location));
     if (zipRes.statusCode != 200) {
-      throw HttpExceptionWithBody(
-        '下载产物失败（HTTP ${zipRes.statusCode}）',
-        '',
-      );
+      throw HttpExceptionWithBody('下载产物失败（HTTP ${zipRes.statusCode}）', '');
     }
     return zipRes.bodyBytes;
   }

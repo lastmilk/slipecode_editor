@@ -1,20 +1,111 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
 import '../models/open_file.dart';
 import '../services/file_service.dart';
 
 /// 编辑器状态 Provider
 ///
-/// 管理多标签页打开、切换、保存等操作
+/// 管理多标签页打开、切换、保存等操作。
+/// 每个项目拥有独立的标签页工作区：切换项目时先保存当前项目的
+/// 打开列表，再恢复目标项目上次打开的文件。
 class EditorProvider extends ChangeNotifier {
   final FileService _fileService = FileService();
 
   final List<OpenFile> _openFiles = [];
+
+  /// 当前绑定的项目路径（用于按项目持久化标签页）
+  String? _boundProjectPath;
+  String? get boundProjectPath => _boundProjectPath;
+
   List<OpenFile> get openFiles => List.unmodifiable(_openFiles);
 
   OpenFile? _activeFile;
   OpenFile? get activeFile => _activeFile;
 
   bool get hasActiveFile => _activeFile != null;
+
+  // ---------------------------------------------------------------------------
+  // 按项目隔离的工作区
+  // ---------------------------------------------------------------------------
+
+  static const _tabsPrefix = 'editor_tabs_';
+
+  String _tabsKey(String projectPath) =>
+      '$_tabsPrefix${base64Url.encode(utf8.encode(projectPath))}';
+
+  /// 切换项目：保存旧项目的标签页，再恢复新项目的标签页
+  ///
+  /// [projectPath] 为 null 表示关闭项目（清空工作区）。
+  Future<void> switchProject(String? projectPath) async {
+    if (_boundProjectPath == projectPath) return;
+    await _persistTabs();
+    _boundProjectPath = projectPath;
+    _openFiles.clear();
+    _activeFile = null;
+    if (projectPath != null) {
+      await _restoreTabs(projectPath);
+    }
+    notifyListeners();
+  }
+
+  /// 保存当前项目的打开文件列表（只记录路径，内容打开时重新读取）
+  Future<void> _persistTabs() async {
+    final projectPath = _boundProjectPath;
+    if (projectPath == null) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final key = _tabsKey(projectPath);
+      if (_openFiles.isEmpty) {
+        await prefs.remove(key);
+        return;
+      }
+      await prefs.setString(
+        key,
+        jsonEncode({
+          'files': _openFiles.map((f) => f.path).toList(),
+          'active': _activeFile?.path,
+        }),
+      );
+    } catch (e) {
+      debugPrint('保存编辑器工作区失败：$e');
+    }
+  }
+
+  /// 恢复项目上次打开的标签页
+  Future<void> _restoreTabs(String projectPath) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_tabsKey(projectPath));
+      if (raw == null || raw.isEmpty) return;
+      final data = jsonDecode(raw) as Map<String, dynamic>;
+      final paths = (data['files'] as List? ?? [])
+          .whereType<String>()
+          .where((path) => File(path).existsSync())
+          .toList();
+      final activePath = data['active'] as String?;
+      for (final path in paths) {
+        try {
+          final content = await _fileService.readFile(path);
+          _openFiles.add(OpenFile(path: path, content: content));
+        } catch (e) {
+          debugPrint('跳过无法读取的文件 $path：$e');
+        }
+      }
+      if (_openFiles.isNotEmpty) {
+        _activeFile = _openFiles.firstWhere(
+          (f) => f.path == activePath,
+          orElse: () => _openFiles.first,
+        );
+      }
+    } catch (e) {
+      debugPrint('恢复编辑器工作区失败：$e');
+    }
+  }
 
   /// 打开文件（如果已打开则切换到它）
   Future<OpenFile?> openFile(String path) async {
@@ -32,6 +123,7 @@ class EditorProvider extends ChangeNotifier {
       _openFiles.add(openFile);
       _activeFile = openFile;
       notifyListeners();
+      unawaited(_persistTabs());
       return openFile;
     } catch (e) {
       debugPrint('Error opening file $path: $e');
@@ -57,6 +149,7 @@ class EditorProvider extends ChangeNotifier {
       }
     }
     notifyListeners();
+    unawaited(_persistTabs());
   }
 
   /// 切换活动文件
@@ -65,6 +158,7 @@ class EditorProvider extends ChangeNotifier {
     if (file != null) {
       _activeFile = file;
       notifyListeners();
+      unawaited(_persistTabs());
     }
   }
 
@@ -114,6 +208,7 @@ class EditorProvider extends ChangeNotifier {
       if (_activeFile?.path == oldPath) _activeFile = renamed;
     }
     notifyListeners();
+    unawaited(_persistTabs());
   }
 
   /// 目录被重命名：同步更新目录下已打开的标签
@@ -134,12 +229,18 @@ class EditorProvider extends ChangeNotifier {
       }
     }
     notifyListeners();
+    unawaited(_persistTabs());
   }
 
   /// 文件或目录被删除：关闭受影响的标签
   void closeFilesUnder(String path) {
     final deleted = _openFiles
-        .where((f) => f.path == path || f.path.startsWith('$path/') || f.path.startsWith('$path\\'))
+        .where(
+          (f) =>
+              f.path == path ||
+              f.path.startsWith('$path/') ||
+              f.path.startsWith('$path\\'),
+        )
         .map((f) => f.path)
         .toList();
     for (final filePath in deleted) {
@@ -198,9 +299,7 @@ class EditorProvider extends ChangeNotifier {
     final index = _openFiles.indexWhere((f) => f.path == path);
     if (index == -1) return false;
     final file = _openFiles[index];
-    if (start < 0 ||
-        end > file.content.length ||
-        start > end) {
+    if (start < 0 || end > file.content.length || start > end) {
       return false;
     }
     file.updateContent(file.content.replaceRange(start, end, replacement));

@@ -16,6 +16,7 @@ class MainActivity : FlutterFragmentActivity() {
     private val termuxChannelName = "slipecode/termux"
     private val keyEventChannelName = "slipecode/keyevent"
     private val overlayChannelName = "slipecode/overlay"
+    private val buildWatchChannelName = "slipecode/build_watch"
 
     companion object {
         /// Termux 定义的 RUN_COMMAND 权限（protectionLevel=dangerous，需运行时申请）
@@ -235,6 +236,39 @@ class MainActivity : FlutterFragmentActivity() {
                     }
                     "isOverlayShowing" -> {
                         result.success(AiOverlayService.isShowing)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+
+        // 云端构建保活通知：构建期间以前台服务常驻通知保持进程存活
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, buildWatchChannelName)
+            .setMethodCallHandler { call, result ->
+                val text = call.argument<String>("text") ?: "云端构建进行中"
+                when (call.method) {
+                    "start" -> {
+                        try {
+                            BuildKeepAliveService.start(this, text)
+                            result.success(true)
+                        } catch (e: Exception) {
+                            result.error("build_notify_failed", e.message, null)
+                        }
+                    }
+                    "update" -> {
+                        try {
+                            BuildKeepAliveService.update(this, text)
+                            result.success(true)
+                        } catch (e: Exception) {
+                            result.error("build_notify_failed", e.message, null)
+                        }
+                    }
+                    "stop" -> {
+                        try {
+                            BuildKeepAliveService.stop(this)
+                            result.success(true)
+                        } catch (e: Exception) {
+                            result.error("build_notify_failed", e.message, null)
+                        }
                     }
                     else -> result.notImplemented()
                 }

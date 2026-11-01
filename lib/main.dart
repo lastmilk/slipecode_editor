@@ -42,9 +42,7 @@ Future<void> main() async {
     github: githubProvider,
     gitee: giteeProvider,
   );
-  settingsProvider.attachRemoteSync(
-    accountProvider.pushSettingsIfLoggedIn,
-  );
+  settingsProvider.attachRemoteSync(accountProvider.pushSettingsIfLoggedIn);
 
   // 其余 Provider 依赖上面三者，直接实例化后注入
   final projectProvider = ProjectProvider();
@@ -61,7 +59,15 @@ Future<void> main() async {
     giteeProvider,
     gitSyncProvider,
     projectProvider,
+    accountProvider,
+    settingsProvider,
   );
+
+  // 项目隔离：切换项目时重置编辑器工作区（按项目恢复标签页）与构建状态
+  projectProvider.onProjectChanged = (path) async {
+    await editorProvider.switchProject(path);
+    buildProvider.resetForProject();
+  };
   // AI 助手（Agent 面板依赖它；未注册会导致侧边栏 Agent 页空白）
   final aiProvider = AiProvider(
     settingsProvider,
@@ -89,7 +95,9 @@ Future<void> main() async {
   );
 
   // 首帧渲染后再恢复登录态；任一初始化失败只影响对应入口
-  unawaited(_initAuthInBackground(githubProvider, giteeProvider, accountProvider));
+  unawaited(
+    _initAuthInBackground(githubProvider, giteeProvider, accountProvider),
+  );
 }
 
 /// 后台恢复各平台登录态，带超时与异常兜底（降级为未登录）

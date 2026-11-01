@@ -37,14 +37,14 @@ class _SettingsScreenState extends State<SettingsScreen>
   String _query = '';
 
   List<String> get _tabNames => [
-        t('settings.tab.appearance'),
-        t('settings.tab.editor'),
-        t('settings.tab.git'),
-        t('settings.tab.llm'),
-        t('settings.tab.ai'),
-        t('settings.tab.security'),
-        t('settings.tab.account'),
-      ];
+    t('settings.tab.appearance'),
+    t('settings.tab.editor'),
+    t('settings.tab.git'),
+    t('settings.tab.llm'),
+    t('settings.tab.ai'),
+    t('settings.tab.security'),
+    t('settings.tab.account'),
+  ];
 
   @override
   void initState() {
@@ -136,7 +136,10 @@ class _SettingsScreenState extends State<SettingsScreen>
   }
 
   /// 搜索结果：跨 Tab 扁平展示匹配项，并标注所属位置
-  Widget _buildSearchResults(List<List<_SectionData>> tabSections, bool isDark) {
+  Widget _buildSearchResults(
+    List<List<_SectionData>> tabSections,
+    bool isDark,
+  ) {
     final query = _query.trim().toLowerCase();
     final results = <Widget>[];
     for (var tabIndex = 0; tabIndex < tabSections.length; tabIndex++) {
@@ -158,9 +161,12 @@ class _SettingsScreenState extends State<SettingsScreen>
             ),
           ),
         );
-        results.add(_SectionCard(isDark: isDark, children: [
-          for (final e in matched) e.child,
-        ]));
+        results.add(
+          _SectionCard(
+            isDark: isDark,
+            children: [for (final e in matched) e.child],
+          ),
+        );
       }
     }
     if (results.isEmpty) {
@@ -187,7 +193,8 @@ class _SettingsScreenState extends State<SettingsScreen>
     bool isDark,
   ) {
     final hasWallpaper = settings.backgroundImagePath.isNotEmpty;
-    final isVideo = hasWallpaper &&
+    final isVideo =
+        hasWallpaper &&
         settings.backgroundImagePath.toLowerCase().endsWith('.mp4');
     return [
       _SectionData('语言与字体', [
@@ -208,7 +215,10 @@ class _SettingsScreenState extends State<SettingsScreen>
                   for (final option in appLanguageOptions)
                     DropdownMenuItem(
                       value: option.id,
-                      child: Text(option.label, overflow: TextOverflow.ellipsis),
+                      child: Text(
+                        option.label,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                 ],
                 onChanged: (value) {
@@ -234,7 +244,10 @@ class _SettingsScreenState extends State<SettingsScreen>
                   for (final option in appFontOptions)
                     DropdownMenuItem(
                       value: option.id,
-                      child: Text(option.label, overflow: TextOverflow.ellipsis),
+                      child: Text(
+                        option.label,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                 ],
                 onChanged: (value) {
@@ -260,7 +273,10 @@ class _SettingsScreenState extends State<SettingsScreen>
                   width: double.infinity,
                   child: SegmentedButton<ThemeMode>(
                     segments: const [
-                      ButtonSegment(value: ThemeMode.system, label: Text('跟随系统')),
+                      ButtonSegment(
+                        value: ThemeMode.system,
+                        label: Text('跟随系统'),
+                      ),
                       ButtonSegment(value: ThemeMode.light, label: Text('浅色')),
                       ButtonSegment(value: ThemeMode.dark, label: Text('深色')),
                     ],
@@ -281,7 +297,8 @@ class _SettingsScreenState extends State<SettingsScreen>
             child: Row(
               children: [
                 const Expanded(child: Text('壁纸（支持 GIF / MP4）')),
-                if (hasWallpaper && File(settings.backgroundImagePath).existsSync())
+                if (hasWallpaper &&
+                    File(settings.backgroundImagePath).existsSync())
                   Padding(
                     padding: const EdgeInsets.only(right: 8),
                     child: ClipRRect(
@@ -370,9 +387,9 @@ class _SettingsScreenState extends State<SettingsScreen>
                       const Expanded(child: Text('不透明度')),
                       Text(
                         settings.backgroundImageOpacity.toStringAsFixed(2),
-                        style: const TextStyle(fontFeatures: [
-                          FontFeature.tabularFigures(),
-                        ]),
+                        style: const TextStyle(
+                          fontFeatures: [FontFeature.tabularFigures()],
+                        ),
                       ),
                     ],
                   ),
@@ -446,7 +463,10 @@ class _SettingsScreenState extends State<SettingsScreen>
     ];
   }
 
-  List<_SectionData> _editorSections(SettingsProvider sp, AppSettings settings) {
+  List<_SectionData> _editorSections(
+    SettingsProvider sp,
+    AppSettings settings,
+  ) {
     return [
       _SectionData('编辑行为', [
         _Entry(
@@ -460,9 +480,9 @@ class _SettingsScreenState extends State<SettingsScreen>
                     const Expanded(child: Text('代码字号')),
                     Text(
                       settings.editorFontSize.toStringAsFixed(0),
-                      style: const TextStyle(fontFeatures: [
-                        FontFeature.tabularFigures(),
-                      ]),
+                      style: const TextStyle(
+                        fontFeatures: [FontFeature.tabularFigures()],
+                      ),
                     ),
                   ],
                 ),
@@ -498,12 +518,13 @@ class _SettingsScreenState extends State<SettingsScreen>
             subtitle: Text(
               Platform.isAndroid
                   ? '编辑器内音量键不再调节音量。有补全候选时，音量下键切换候选、音量上键确认；'
-                      '无候选时音量下键唤出文件栏。关闭后恢复系统音量调节。'
+                        '无候选时音量下键唤出文件栏。关闭后恢复系统音量调节。'
                   : 'iOS 不支持音量键映射，请使用建议条上的上一条 / 下一条 / 补全按钮。',
             ),
             value: settings.volumeKeyCompletionEnabled,
-            onChanged:
-                Platform.isAndroid ? sp.setVolumeKeyCompletionEnabled : null,
+            onChanged: Platform.isAndroid
+                ? sp.setVolumeKeyCompletionEnabled
+                : null,
           ),
         ),
       ]),
@@ -523,10 +544,10 @@ class _SettingsScreenState extends State<SettingsScreen>
               value: settings.defaultGitHost,
               underline: const SizedBox.shrink(),
               items: GitHost.values
-                  .map((host) => DropdownMenuItem(
-                        value: host,
-                        child: Text(host.label),
-                      ))
+                  .map(
+                    (host) =>
+                        DropdownMenuItem(value: host, child: Text(host.label)),
+                  )
                   .toList(),
               onChanged: (host) {
                 if (host != null) sp.setDefaultGitHost(host);
@@ -542,6 +563,30 @@ class _SettingsScreenState extends State<SettingsScreen>
             subtitle: const Text('默认勾选是否创建远程仓库并推送模板文件'),
             value: settings.createRepoOnCreate,
             onChanged: sp.setCreateRepoOnCreate,
+          ),
+        ),
+        _Entry(
+          '构建产物自动下载 auto download artifact',
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('完成后自动下载构建产物'),
+            subtitle: const Text(
+              '云端构建成功后自动把 APK / AAB / zip 下载到项目 build/github 目录',
+            ),
+            value: settings.buildAutoDownload,
+            onChanged: sp.setBuildAutoDownload,
+          ),
+        ),
+        _Entry(
+          '构建产物服务端中转 server relay',
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('优先通过服务端中转产物'),
+            subtitle: const Text(
+              '登录用户默认由服务端先下载产物再下发到本地，缓解国内访问 GitHub 慢的问题；关闭后直接访问 GitHub 下载',
+            ),
+            value: settings.buildServerRelay,
+            onChanged: sp.setBuildServerRelay,
           ),
         ),
         _Entry(
@@ -593,7 +638,8 @@ class _SettingsScreenState extends State<SettingsScreen>
                   IconButton(
                     icon: const Icon(Icons.edit_outlined, size: 18),
                     tooltip: '编辑',
-                    onPressed: () => _editProfile(context, sp, account, profile),
+                    onPressed: () =>
+                        _editProfile(context, sp, account, profile),
                   ),
                   IconButton(
                     icon: const Icon(Icons.delete_outline, size: 18),
@@ -699,9 +745,7 @@ class _SettingsScreenState extends State<SettingsScreen>
                     final ok = await toggleSystemOverlay(value);
                     if (value && !ok) {
                       messenger.showSnackBar(
-                        const SnackBar(
-                          content: Text('未授予悬浮窗权限，无法开启系统悬浮球'),
-                        ),
+                        const SnackBar(content: Text('未授予悬浮窗权限，无法开启系统悬浮球')),
                       );
                       return;
                     }
@@ -843,10 +887,7 @@ class _SettingsScreenState extends State<SettingsScreen>
         ),
       ]),
       _SectionData('官方社群', [
-        _Entry(
-          '官方 QQ 群 qq group community',
-          const _QqGroupTile(),
-        ),
+        _Entry('官方 QQ 群 qq group community', const _QqGroupTile()),
       ]),
     ];
   }
@@ -1166,7 +1207,9 @@ class _SecurityCardState extends State<_SecurityCard> {
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialogState) => AlertDialog(
           title: Text(
-            requireOld ? t('settings.changePassword') : t('settings.setPassword'),
+            requireOld
+                ? t('settings.changePassword')
+                : t('settings.setPassword'),
           ),
           content: Column(
             mainAxisSize: MainAxisSize.min,
@@ -1180,7 +1223,9 @@ class _SecurityCardState extends State<_SecurityCard> {
               TextField(
                 controller: controller,
                 obscureText: true,
-                decoration: InputDecoration(labelText: t('settings.setPassword')),
+                decoration: InputDecoration(
+                  labelText: t('settings.setPassword'),
+                ),
               ),
               TextField(
                 controller: confirmController,
@@ -1216,8 +1261,9 @@ class _SecurityCardState extends State<_SecurityCard> {
                   return;
                 }
                 if (requireOld &&
-                    !await SecurityService.instance
-                        .verifyPassword(oldController.text)) {
+                    !await SecurityService.instance.verifyPassword(
+                      oldController.text,
+                    )) {
                   setDialogState(() => error = '当前密码错误');
                   return;
                 }
@@ -1263,7 +1309,9 @@ class _SecurityCardState extends State<_SecurityCard> {
           contentPadding: EdgeInsets.zero,
           title: Text(t('settings.setPassword')),
           subtitle: Text(
-            _hasPassword ? t('settings.passwordSet') : t('settings.passwordNotSet'),
+            _hasPassword
+                ? t('settings.passwordSet')
+                : t('settings.passwordNotSet'),
           ),
           trailing: TextButton(
             onPressed: () async {
@@ -1271,7 +1319,9 @@ class _SecurityCardState extends State<_SecurityCard> {
               if (ok) await _load();
             },
             child: Text(
-              _hasPassword ? t('settings.changePassword') : t('settings.setPassword'),
+              _hasPassword
+                  ? t('settings.changePassword')
+                  : t('settings.setPassword'),
             ),
           ),
         ),
@@ -1345,8 +1395,8 @@ class _SyncCard extends StatelessWidget {
           Text(
             signedIn
                 ? (account.lastSyncAt == null
-                    ? '尚未同步，点右侧按钮立即同步'
-                    : '上次同步：${_format(account.lastSyncAt!)}')
+                      ? '尚未同步，点右侧按钮立即同步'
+                      : '上次同步：${_format(account.lastSyncAt!)}')
                 : '账号与设置独立于 GitHub / Gitee，登录后可在多台设备间同步偏好设置。',
             style: TextStyle(
               fontSize: 11,
@@ -1538,8 +1588,9 @@ class _ProfileEditDialogState extends State<_ProfileEditDialog> {
               DropdownButtonFormField<String>(
                 // 切换服务商时重建，让默认模型随预置刷新
                 key: ValueKey('model_$_presetId'),
-                initialValue:
-                    modelOptions.contains(_model.text) ? _model.text : null,
+                initialValue: modelOptions.contains(_model.text)
+                    ? _model.text
+                    : null,
                 decoration: const InputDecoration(
                   labelText: '模型',
                   isDense: true,
@@ -1580,7 +1631,9 @@ class _ProfileEditDialogState extends State<_ProfileEditDialog> {
               LlmProfile(
                 id: widget.existing?.id ?? LlmProfile.newId(),
                 name: name,
-                apiBase: isCloud ? LlmPresets.apiBaseFor(preset!) : _apiBase.text.trim(),
+                apiBase: isCloud
+                    ? LlmPresets.apiBaseFor(preset!)
+                    : _apiBase.text.trim(),
                 apiKey: _apiKey.text.trim(),
                 model: model,
                 presetId: _presetId == 'custom' ? null : _presetId,
@@ -1640,8 +1693,9 @@ Future<void> _editHomeTexts(
   SettingsProvider sp,
   AppSettings settings,
 ) async {
-  final controller =
-      TextEditingController(text: settings.homeCustomTexts.join('\n'));
+  final controller = TextEditingController(
+    text: settings.homeCustomTexts.join('\n'),
+  );
   final confirmed = await showDialog<bool>(
     context: context,
     builder: (context) => AlertDialog(
@@ -1701,9 +1755,8 @@ class _QqGroupTileState extends State<_QqGroupTile> {
     if (group == null || group.isEmpty) return;
     await Clipboard.setData(ClipboardData(text: group));
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('QQ 群号 $group 已复制')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('QQ 群号 $group 已复制')));
     }
   }
 

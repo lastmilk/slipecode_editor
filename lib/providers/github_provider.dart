@@ -36,9 +36,11 @@ class GitHubProvider extends ChangeNotifier {
   bool get isConfigured => AppConfig.isConfigured;
   bool get isSignedIn => _status == GitHubAuthStatus.signedIn && _token != null;
 
+  /// 当前 OAuth access token（服务端构建监听需要用它访问 GitHub API）
+  String? get token => _token;
+
   /// 已登录时返回 API 客户端
-  GitHubApiService? get api =>
-      isSignedIn ? GitHubApiService(_token!) : null;
+  GitHubApiService? get api => isSignedIn ? GitHubApiService(_token!) : null;
 
   static const _repoMapPrefix = 'slipecode_repo::';
 
@@ -56,9 +58,9 @@ class GitHubProvider extends ChangeNotifier {
     notifyListeners();
     // 校验 token 并拉取用户信息（网络不可达时降级为未登录，但保留 token 以便下次重试）
     try {
-      _user = await api!
-          .getAuthenticatedUser()
-          .timeout(const Duration(seconds: 10));
+      _user = await api!.getAuthenticatedUser().timeout(
+        const Duration(seconds: 10),
+      );
     } catch (e) {
       debugPrint('GitHub token 校验失败：$e');
       final isNetworkError = e is TimeoutException || e is SocketException;
@@ -176,8 +178,8 @@ class GitHubProvider extends ChangeNotifier {
         if (exists == null) return candidate;
       } on HttpExceptionWithBody catch (e) {
         // 409/422 等无法确认是否存在的状态：不再继续探测，交由创建时重试
-        final ambiguous = e.message.contains('HTTP 409') ||
-            e.message.contains('HTTP 422');
+        final ambiguous =
+            e.message.contains('HTTP 409') || e.message.contains('HTTP 422');
         if (ambiguous) return candidate;
         rethrow;
       }
@@ -220,8 +222,8 @@ class GitHubProvider extends ChangeNotifier {
         break;
       } on HttpExceptionWithBody catch (e) {
         // 422/409：仓库名已被占用或创建中，换一个带时间后缀的名字重试
-        final retryable = e.message.contains('HTTP 422') ||
-            e.message.contains('HTTP 409');
+        final retryable =
+            e.message.contains('HTTP 422') || e.message.contains('HTTP 409');
         if (!retryable || attempt == 3) rethrow;
         attemptName =
             '${safeName}_${DateTime.now().millisecondsSinceEpoch % 10000}';
@@ -249,7 +251,10 @@ class GitHubProvider extends ChangeNotifier {
     // 按项目载荷推送对应的构建 workflow
     final payload = await PayloadRegistry.detect(projectPath);
     if (!await client.fileExists(
-        repo.fullName, payload.workflowPath, repo.defaultBranch)) {
+      repo.fullName,
+      payload.workflowPath,
+      repo.defaultBranch,
+    )) {
       onLog?.call('==> 推送 GitHub Actions 构建 workflow（${payload.name}）');
       await BuildService.instance.ensureWorkflow(
         client,

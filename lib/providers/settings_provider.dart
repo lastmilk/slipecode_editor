@@ -58,8 +58,9 @@ class SettingsProvider extends ChangeNotifier {
     final remote = AppSettings.fromJson(json);
     final mergedProfiles = remote.llmProfiles.map((profile) {
       if (profile.apiKey.isNotEmpty) return profile;
-      final local =
-          _settings.llmProfiles.where((item) => item.id == profile.id).firstOrNull;
+      final local = _settings.llmProfiles
+          .where((item) => item.id == profile.id)
+          .firstOrNull;
       return local == null ? profile : profile.copyWith(apiKey: local.apiKey);
     }).toList();
     _settings = remote.copyWith(
@@ -123,6 +124,16 @@ class SettingsProvider extends ChangeNotifier {
     await _save();
   }
 
+  Future<void> setBuildAutoDownload(bool value) async {
+    _settings = _settings.copyWith(buildAutoDownload: value);
+    await _save();
+  }
+
+  Future<void> setBuildServerRelay(bool value) async {
+    _settings = _settings.copyWith(buildServerRelay: value);
+    await _save();
+  }
+
   // ---------------------------------------------------------------------------
   // LLM / AI 助手
   // ---------------------------------------------------------------------------
@@ -157,24 +168,21 @@ class SettingsProvider extends ChangeNotifier {
     }
     _settings = _settings.copyWith(
       llmProfiles: list,
-      activeLlmId:
-          _settings.activeLlmId.isEmpty ? profile.id : _settings.activeLlmId,
+      activeLlmId: _settings.activeLlmId.isEmpty
+          ? profile.id
+          : _settings.activeLlmId,
     );
     await _save();
   }
 
   /// 删除模型配置；删除当前激活项时自动切换到第一个
   Future<void> removeLlmProfile(String id) async {
-    final list =
-        _settings.llmProfiles.where((item) => item.id != id).toList();
+    final list = _settings.llmProfiles.where((item) => item.id != id).toList();
     var activeId = _settings.activeLlmId;
     if (activeId == id) {
       activeId = list.isEmpty ? '' : list.first.id;
     }
-    _settings = _settings.copyWith(
-      llmProfiles: list,
-      activeLlmId: activeId,
-    );
+    _settings = _settings.copyWith(llmProfiles: list, activeLlmId: activeId);
     await _save();
   }
 
@@ -254,9 +262,7 @@ class SettingsProvider extends ChangeNotifier {
 
   Future<void> setHomeTitle(String value) async {
     final title = value.trim();
-    _settings = _settings.copyWith(
-      homeTitle: title.isEmpty ? 'SLIPE' : title,
-    );
+    _settings = _settings.copyWith(homeTitle: title.isEmpty ? 'SLIPE' : title);
     await _save();
   }
 
