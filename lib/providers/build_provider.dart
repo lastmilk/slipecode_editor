@@ -370,13 +370,14 @@ class BuildProvider extends ChangeNotifier {
     );
     _runUrl = run.htmlUrl;
     _runId = run.id;
-    _append(t('build.log.runFinished', {'conclusion': run.conclusion}));
+    _append(t('build.log.runFinished',
+        {'conclusion': run.conclusion ?? 'unknown'}));
     _append('    $runUrl');
 
     if (run.conclusion != 'success') {
       _fail(
         t('build.error.notSuccessfulGithub', {
-          'conclusion': run.conclusion,
+          'conclusion': run.conclusion ?? 'unknown',
         }),
       );
       return;
@@ -548,7 +549,7 @@ class BuildProvider extends ChangeNotifier {
             );
             if (_artifactPath != null) {
               _append(
-                t('build.log.artifact', {'path': _artifactPath}),
+                t('build.log.artifact', {'path': _artifactPath!}),
               );
             }
           }
