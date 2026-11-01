@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import '../l10n/app_localizations.dart';
 import '../payloads/project_payload.dart';
 import '../services/build_notification_service.dart';
 import '../services/build_service.dart';
@@ -191,62 +192,75 @@ class BuildProvider extends ChangeNotifier {
 
     // 合规：未同意《用户协议》与《隐私政策》→ 受限模式，云端构建不可用
     if (_settings?.settings.policyAcceptedVersion.isEmpty ?? false) {
-      _fail('请先在首屏同意《用户协议》与《隐私政策》后再使用云端构建');
+      _fail(t('build.error.policyFirst'));
       return;
     }
 
     final link = _gitSync.currentLink;
     if (link == null) {
       _status = BuildStatus.failed;
-      _error = '项目未关联远程仓库';
-      _append('==> 失败：$_error');
+      _error = t('build.error.noRepo');
+      _append(t('build.log.failed', {'error': _error}));
       _safeNotify();
       return;
     }
     final host = link.host;
     final types = availableTypes;
     if (types.isEmpty) {
-      _fail('当前项目载荷（${payload.name}）在 ${host.ciName} 上没有可用的构建类型');
+      _fail(t('build.error.noTypes', {
+        'payload': payload.name,
+        'ci': host.ciName,
+      }));
       return;
     }
     if (!types.contains(_type)) {
       _type = types.first;
     }
     if (host == GitHost.gitee && !payload.supportsGitee) {
-      _fail('${payload.name} 项目暂不支持 Gitee Go 构建，请使用 GitHub');
+      _fail(t('build.error.payloadNotGitee', {'payload': payload.name}));
       return;
     }
     if (host == GitHost.gitee && !_gitee.isSignedIn) {
-      _fail('尚未登录 Gitee');
+      _fail(t('build.error.notSignedInGitee'));
       return;
     }
     if (host == GitHost.github && !_github.isSignedIn) {
-      _fail('尚未登录 GitHub');
+      _fail(t('build.error.notSignedInGithub'));
       return;
     }
     if (host == GitHost.gitee && _type.isIos) {
-      _fail('Gitee Go 没有 macOS Runner，iOS 构建请使用 GitHub');
+      _fail(t('build.error.noMacRunner'));
       return;
     }
 
     _status = BuildStatus.running;
-    _currentTask = '云端构建 ${_type.label}';
+    _currentTask = t('build.task.cloudBuild', {'type': _type.label});
     _reset();
-    _append('==> 开始构建 ${_type.label}（${host.ciName}）');
+    _append(t('build.log.start', {'type': _type.label, 'ci': host.ciName}));
 
     // 构建期间启动前台服务 + 常驻通知，避免退到后台后进程被回收
-    await _startKeepAlive('正在准备云端构建');
+    await _startKeepAlive(t('build.task.preparing'));
 
     try {
       // 1. 同步本地未提交改动
-      _currentTask = '同步本地改动';
-      _append('==> 同步本地改动到 ${link.repo}');
+      _currentTask = t('build.task.syncing');
+      _append(t('build.log.syncTo', {'repo': link.repo}));
       if (_gitSync.pendingCount > 0) {
-        _append('    待同步文件：${_gitSync.pendingCount} 个');
+        _append(
+          t('build.log.pendingFiles', {
+            'count': '${_gitSync.pendingCount}',
+          }),
+        );
         final ok = await _gitSync.syncNow();
-        if (!ok) throw StateError('同步失败：${_gitSync.error ?? '未知错误'}');
+        if (!ok) {
+          throw StateError(
+            t('build.syncFailed', {
+              'error': _gitSync.error ?? t('build.unknown'),
+            }),
+          );
+        }
       } else {
-        _append('    无待同步改动');
+        _append(t('build.log.noPending'));
       }
 
       if (host == GitHost.github) {
@@ -257,7 +271,7 @@ class BuildProvider extends ChangeNotifier {
     } catch (e) {
       if ('$e' == '已取消') {
         _status = BuildStatus.cancelled;
-        _append('==> 已取消（云端运行仍会继续）');
+        _append(t('build.log.cancelled'));
       } else {
         _fail('$e');
       }
@@ -292,7 +306,7 @@ class BuildProvider extends ChangeNotifier {
     for (final job in _jobs) {
       if (job.isRunning) return job.name;
     }
-    return _currentTask.isEmpty ? '云端构建进行中' : _currentTask;
+    return _currentTask.isEmpty ? t('build.task.inProgress') : _currentTask;
   }
 
   /// 刷新 workflow 步骤并同步常驻通知文案
@@ -313,27 +327,27 @@ class BuildProvider extends ChangeNotifier {
   Future<void> _runGithubBuild(String repo, String projectDir) async {
     final api = _github.api!;
 
-    _currentTask = '检查构建 workflow';
-    _append('==> 检查 GitHub Actions workflow（${payload.name}）');
+    _currentTask = t('build.task.checkWorkflow');
+    _append(t('build.log.checkWorkflow', {'payload': payload.name}));
     await BuildService.instance.ensureWorkflow(
       api,
       repo,
       path: payload.workflowPath,
       content: payload.workflowContent,
     );
-    _append('    workflow 已就绪');
+    _append(t('build.log.workflowReady'));
 
-    _currentTask = '触发云端构建';
-    _append('==> 触发 workflow_dispatch（build_type=${_type.inputValue}）');
+    _currentTask = t('build.task.trigger');
+    _append(t('build.log.dispatch', {'type': _type.inputValue}));
     final triggeredAt = await BuildService.instance.dispatch(
       api,
       repo,
       _type,
       path: payload.workflowPath,
     );
-    _append('    已触发，等待运行开始...');
+    _append(t('build.log.dispatched'));
 
-    _currentTask = '云端构建中';
+    _currentTask = t('build.task.building');
     final run = await BuildService.instance.waitForCompletion(
       api,
       repo,
@@ -342,7 +356,12 @@ class BuildProvider extends ChangeNotifier {
       onUpdate: (run) {
         _runUrl = run.htmlUrl;
         _runId = run.id;
-        _append('==> 运行 #${run.runNumber} 状态：${run.status}');
+        _append(
+          t('build.log.runStatus', {
+            'number': '${run.runNumber}',
+            'status': run.status,
+          }),
+        );
         // 登录用户把监听注册到服务端（退出 IDE 后继续同步）
         unawaited(_registerServerWatch(repo, run));
         _safeNotify();
@@ -351,41 +370,45 @@ class BuildProvider extends ChangeNotifier {
     );
     _runUrl = run.htmlUrl;
     _runId = run.id;
-    _append('==> 运行结束：${run.conclusion}');
+    _append(t('build.log.runFinished', {'conclusion': run.conclusion}));
     _append('    $runUrl');
 
     if (run.conclusion != 'success') {
-      _fail('云端构建未成功（${run.conclusion}），请到 GitHub 查看日志');
+      _fail(
+        t('build.error.notSuccessfulGithub', {
+          'conclusion': run.conclusion,
+        }),
+      );
       return;
     }
 
     final settings = _settings?.settings;
     if (settings != null && !settings.buildAutoDownload) {
       _status = BuildStatus.success;
-      _append('==> 构建成功（已按偏好设置跳过自动下载产物）');
+      _append(t('build.log.successNoDownload'));
       return;
     }
 
-    _currentTask = '获取构建产物';
-    _append('==> 获取构建产物');
+    _currentTask = t('build.task.artifact');
+    _append(t('build.log.getArtifact'));
     final relay = settings?.buildServerRelay ?? true;
     if (relay && _account?.isSignedIn == true && _watchId.isNotEmpty) {
-      _append('    优先从服务端中转下载（缓解国内访问 GitHub 慢）');
+      _append(t('build.log.relayFirst'));
       final path = await _downloadArtifactFromServer(projectDir);
       if (path != null) {
         _artifactPath = path;
-        _append('==> 构建产物：$path');
+        _append(t('build.log.artifact', {'path': path}));
         _status = BuildStatus.success;
-        _append('==> 构建成功（耗时 ${_durationText()}）');
+        _append(t('build.log.successDuration', {'duration': _durationText()}));
         return;
       }
-      _append('    服务端产物暂不可用，回退为直接下载');
+      _append(t('build.log.relayFallback'));
     }
 
     final artifacts = await api.listArtifacts(repo, run.id);
     final usable = artifactsForType(artifacts: artifacts, type: _type);
     if (usable == null) {
-      _fail('构建成功但未找到可用产物');
+      _fail(t('build.error.noArtifact'));
       return;
     }
     final path = await BuildService.instance.downloadAndExtractArtifact(
@@ -396,13 +419,13 @@ class BuildProvider extends ChangeNotifier {
       _type,
     );
     if (path == null) {
-      _fail('产物包内未找到 ${_type.artifactExt} 文件');
+      _fail(t('build.error.artifactFileMissing', {'ext': _type.artifactExt}));
       return;
     }
     _artifactPath = path;
-    _append('==> 构建产物：$path');
+    _append(t('build.log.artifact', {'path': path}));
     _status = BuildStatus.success;
-    _append('==> 构建成功（耗时 ${_durationText()}）');
+    _append(t('build.log.successDuration', {'duration': _durationText()}));
   }
 
   /// 把本次运行注册到服务端（仅登录用户）
@@ -422,7 +445,7 @@ class BuildProvider extends ChangeNotifier {
     );
     if (watch != null && watch.id.isNotEmpty) {
       _watchId = watch.id;
-      _append('    已注册服务端构建监听（退出 IDE 后仍会同步）');
+      _append(t('build.log.watchRegistered'));
     }
   }
 
@@ -441,13 +464,13 @@ class BuildProvider extends ChangeNotifier {
       );
       if (watch != null && watch.artifactReady) break;
       if (watch != null && watch.error.isNotEmpty) {
-        _append('    服务端下载产物失败：${watch.error}');
+        _append(t('build.log.relayDownloadFailed', {'error': watch.error}));
         return null;
       }
       await Future.delayed(const Duration(seconds: 8));
     }
     if (watch == null || !watch.artifactReady) return null;
-    _append('    服务端已就绪（${watch.artifactName}），开始下发到本地');
+    _append(t('build.log.relayReady', {'name': watch.artifactName}));
     final bytes = await BuildWatchService.instance.downloadArtifact(
       accountToken: token,
       id: _watchId,
@@ -489,14 +512,14 @@ class BuildProvider extends ChangeNotifier {
     _startedAt ??= watch.jobs.isNotEmpty ? watch.jobs.first.startedAt : null;
     _finishedAt = null;
     _logs.clear();
-    _append('==> 从服务端恢复构建进度（运行 #${watch.runId}）');
+    _append(t('build.log.restoreFromServer', {'id': '${watch.runId}'}));
     _jobs = watch.jobs;
 
     if (!watch.isCompleted) {
       _status = BuildStatus.running;
-      _currentTask = '云端构建中（服务端监听）';
-      _append('    当前状态：${watch.status}');
-      _append('    关闭 IDE 后仍会由服务端持续同步');
+      _currentTask = t('build.task.buildingWatched');
+      _append(t('build.log.currentStatus', {'status': watch.status}));
+      _append(t('build.log.serverWatchHint'));
       _safeNotify();
       return;
     }
@@ -505,13 +528,13 @@ class BuildProvider extends ChangeNotifier {
     switch (conclusion) {
       case 'success':
         _status = BuildStatus.success;
-        _append('==> 构建成功');
+        _append(t('build.log.success'));
         final settings = _settings?.settings;
         if (watch.artifactReady &&
             (settings?.buildAutoDownload ?? true) &&
             (settings?.buildServerRelay ?? true) &&
             projectDir != null) {
-          _currentTask = '获取构建产物';
+          _currentTask = t('build.task.artifact');
           _safeNotify();
           final bytes = await BuildWatchService.instance.downloadArtifact(
             accountToken: account.token!,
@@ -524,7 +547,9 @@ class BuildProvider extends ChangeNotifier {
               _type,
             );
             if (_artifactPath != null) {
-              _append('==> 构建产物：$_artifactPath');
+              _append(
+                t('build.log.artifact', {'path': _artifactPath}),
+              );
             }
           }
           _currentTask = '';
@@ -532,12 +557,12 @@ class BuildProvider extends ChangeNotifier {
         break;
       case 'cancelled':
         _status = BuildStatus.cancelled;
-        _append('==> 构建已取消');
+        _append(t('build.log.buildCancelled'));
         break;
       default:
         _status = BuildStatus.failed;
-        _error = '云端构建未成功（$conclusion）';
-        _append('==> 失败：$_error');
+        _error = t('build.error.notSuccessful', {'conclusion': conclusion});
+        _append(t('build.log.failed', {'error': _error}));
     }
     _safeNotify();
   }
@@ -551,26 +576,26 @@ class BuildProvider extends ChangeNotifier {
 
     // 1. 确保仓库已开通 Gitee Go（未开通时 .workflow 不会被识别、push 不触发构建）
     //    POST /v5/repos/{owner}/{repo}/open，幂等可重复调用
-    _currentTask = '确认 Gitee Go 开通状态';
-    _append('==> 确认 Gitee Go 已开通');
+    _currentTask = t('build.task.confirmGiteeGo');
+    _append(t('build.log.confirmGiteeGo'));
     try {
       await api.openGiteeGo(repo);
-      _append('    Gitee Go 已就绪');
+      _append(t('build.log.giteeGoReady'));
     } catch (e) {
-      _append('    ⚠ Gitee Go 开通失败：$e');
-      _append('    可到仓库「云原生」页面手动开通后重试');
+      _append(t('build.log.giteeGoOpenFailed', {'error': '$e'}));
+      _append(t('build.log.giteeGoManualHint'));
     }
 
     // 2. 确保流水线配置存在（首次构建时自动注入 .workflow/slipe_build.yml）
-    _currentTask = '检查 Gitee Go 流水线';
-    _append('==> 检查 Gitee Go 流水线');
+    _currentTask = t('build.task.checkPipeline');
+    _append(t('build.log.checkPipeline'));
     final exists = await api.fileExists(
       repo,
       GiteeGoTemplates.workflowPath,
       'master',
     );
     if (!exists) {
-      _append('    推送 .workflow/slipe_build.yml（仅 Android）');
+      _append(t('build.log.pushWorkflow'));
       await api.pushFiles(
         repo,
         [
@@ -585,15 +610,15 @@ class BuildProvider extends ChangeNotifier {
         branch: 'master',
       );
     } else {
-      _append('    流水线已存在');
+      _append(t('build.log.pipelineExists'));
     }
 
     // 3. 推送触发提交。
     //    Gitee 不支持 API 触发构建，只能靠 push 事件；
     //    push 无文件改动时不会触发流水线，
     //    因此每次写入带时间戳的 trigger 文件，保证必定产生新提交。
-    _currentTask = '触发 Gitee Go';
-    _append('==> 推送触发提交（Gitee Go 由 push 自动触发）');
+    _currentTask = t('build.task.triggerGitee');
+    _append(t('build.log.pushTrigger'));
     await api.pushFiles(
       repo,
       [
@@ -610,10 +635,10 @@ class BuildProvider extends ChangeNotifier {
 
     _runUrl = GitHost.gitee.ciUrl(repo);
     _status = BuildStatus.success;
-    _append('==> Gitee Go 流水线已触发');
+    _append(t('build.log.pipelineTriggered'));
     _append('    $_runUrl');
-    _append('    注意：Gitee Go 无 macOS Runner，iOS 构建已禁用；');
-    _append('    且 Gitee 未提供运行状态/产物下载 API，请到 Gitee 查看结果。');
+    _append(t('build.log.giteeGoIosNote'));
+    _append(t('build.log.giteeGoApiNote'));
   }
 
   /// 从产物列表中挑选与构建类型匹配的产物
@@ -634,7 +659,7 @@ class BuildProvider extends ChangeNotifier {
     _error = message;
     _status = BuildStatus.failed;
     _finishedAt = DateTime.now();
-    _append('==> 失败：$message');
+    _append(t('build.log.failed', {'error': message}));
     _safeNotify();
   }
 
@@ -642,23 +667,26 @@ class BuildProvider extends ChangeNotifier {
     final d = duration;
     if (d == null) return '-';
     if (d.inMinutes > 0) {
-      return '${d.inMinutes} 分 ${d.inSeconds % 60} 秒';
+      return t('build.durationMinutes', {
+        'minutes': '${d.inMinutes}',
+        'seconds': '${d.inSeconds % 60}',
+      });
     }
-    return '${d.inSeconds} 秒';
+    return t('build.durationSeconds', {'seconds': '${d.inSeconds}'});
   }
 
   /// 取消当前构建（同时请求 GitHub 取消云端工作流）
   Future<void> cancel() async {
     if (!isRunning) return;
-    _append('==> 正在请求取消云端工作流...');
+    _append(t('build.log.cancelling'));
     final runId = _runId;
     final repo = _gitSync.currentLink?.repo;
     if (runId != null && repo != null && _github.isSignedIn) {
       try {
         await _github.api!.cancelRun(repo, runId);
-        _append('    已向 GitHub 发送取消请求');
+        _append(t('build.log.cancelSent'));
       } catch (e) {
-        _append('    取消请求失败：$e');
+        _append(t('build.log.cancelFailed', {'error': '$e'}));
       }
     }
     _cancelRequested = true;
@@ -669,7 +697,7 @@ class BuildProvider extends ChangeNotifier {
   Future<bool> installArtifact() async {
     if (_artifactPath == null) return false;
     if (!_artifactPath!.endsWith('.apk')) {
-      _error = '该产物无法直接安装（仅 APK 可安装）';
+      _error = t('build.error.notInstallable');
       _safeNotify();
       return false;
     }

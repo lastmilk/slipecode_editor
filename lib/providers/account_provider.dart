@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
+import '../l10n/app_localizations.dart';
 import '../services/account_service.dart';
 import '../services/avatar_service.dart';
 import '../services/project_sync_service.dart';
@@ -143,7 +144,7 @@ class AccountProvider extends ChangeNotifier {
     Future<(String, AccountUser)> Function() action,
   ) async {
     if (!isConfigured) {
-      _error = '未配置账号后端（ACCOUNT_BACKEND_BASE_URL）';
+      _error = t('account.error.backendNotConfigured');
       _safeNotify();
       return false;
     }
@@ -189,7 +190,7 @@ class AccountProvider extends ChangeNotifier {
         _error = null;
         _safeNotify();
       } catch (e) {
-        _error = '设置同步失败：$e';
+        _error = t('account.error.settingsSyncFailed', {'error': '$e'});
         _safeNotify();
       }
     });
@@ -198,7 +199,7 @@ class AccountProvider extends ChangeNotifier {
   /// 立即从云端拉取设置并应用
   Future<bool> syncNow() async {
     if (!isSignedIn) {
-      _error = '请先登录 SLIPE 账号';
+      _error = t('account.error.signInFirst');
       _safeNotify();
       return false;
     }
@@ -209,7 +210,7 @@ class AccountProvider extends ChangeNotifier {
       _safeNotify();
       return true;
     } catch (e) {
-      _error = '同步失败：$e';
+      _error = t('account.error.syncFailed', {'error': '$e'});
       _safeNotify();
       return false;
     }
@@ -238,7 +239,7 @@ class AccountProvider extends ChangeNotifier {
     try {
       await _pullSettings();
     } catch (e) {
-      _error = '设置同步失败：$e';
+      _error = t('account.error.settingsSyncFailed', {'error': '$e'});
       _safeNotify();
     }
     await syncProjectsNow();
@@ -261,7 +262,7 @@ class AccountProvider extends ChangeNotifier {
       _safeNotify();
       return true;
     } catch (e) {
-      _error = '项目同步失败：$e';
+      _error = t('account.error.projectsSyncFailed', {'error': '$e'});
       _safeNotify();
       return false;
     }
@@ -304,7 +305,7 @@ class AccountProvider extends ChangeNotifier {
       await AvatarService.uploadFile(token: _token!, path: localPath);
       return true;
     } catch (e) {
-      _error = '头像上传失败：$e';
+      _error = t('account.error.avatarUploadFailed', {'error': '$e'});
       _safeNotify();
       return false;
     }
@@ -323,7 +324,7 @@ class AccountProvider extends ChangeNotifier {
       await _settings.applyServerWallpaperPath(localPath, version);
       return true;
     } catch (e) {
-      _error = '壁纸上传失败：$e';
+      _error = t('account.error.wallpaperUploadFailed', {'error': '$e'});
       _safeNotify();
       return false;
     }

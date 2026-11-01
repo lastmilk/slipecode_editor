@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 
 import '../agent/agent_service.dart';
 import '../agent/mcp_tools.dart';
+import '../l10n/app_localizations.dart';
 import '../models/app_settings.dart';
 import '../providers/account_provider.dart';
 import '../providers/build_provider.dart';
@@ -223,13 +224,13 @@ class AiProvider extends ChangeNotifier {
     await _ensureHistoryLoaded();
     // 合规：未同意《用户协议》与《隐私政策》→ 受限模式，AI 助手不可用
     if (_settings.settings.policyAcceptedVersion.isEmpty) {
-      _error = '请先在首屏同意《用户协议》与《隐私政策》后再使用 AI 助手';
+      _error = t('ai.error.policyFirst');
       _status = AiStatus.error;
       _safeNotify();
       return;
     }
     if (!isConfigured) {
-      _error = '未配置 LLM，请在偏好设置中填写 API 地址、Key 和模型';
+      _error = t('ai.error.llmNotConfigured');
       _status = AiStatus.error;
       _safeNotify();
       return;
@@ -237,7 +238,7 @@ class AiProvider extends ChangeNotifier {
 
     final llm = _s.activeLlm;
     if (llm == null || !llm.isConfigured) {
-      _error = '未配置 LLM，请在偏好设置中填写 API 地址、Key 和模型';
+      _error = t('ai.error.llmNotConfigured');
       _status = AiStatus.error;
       _safeNotify();
       return;
@@ -304,7 +305,7 @@ class AiProvider extends ChangeNotifier {
   Future<void> sendWithCurrentFile(String instruction) async {
     final active = _editor.activeFile;
     if (active == null) {
-      _error = '当前没有打开的文件';
+      _error = t('ai.error.noFileOpen');
       _status = AiStatus.error;
       _safeNotify();
       return;
@@ -332,7 +333,7 @@ class AiProvider extends ChangeNotifier {
     if (_vibeBusy) return;
     final llm = _s.activeLlm;
     if (llm == null || !llm.isConfigured) {
-      _error = '未配置 LLM，请在「偏好设置 → AI 模型」中添加模型';
+      _error = t('ai.error.llmNotConfiguredVibe');
       _status = AiStatus.error;
       _safeNotify();
       return;
@@ -384,7 +385,7 @@ class AiProvider extends ChangeNotifier {
       _status = AiStatus.idle;
       _vibeThinking = result.content;
     } catch (e) {
-      _error = 'VibeCoding 失败：$e';
+      _error = t('ai.error.vibeFailed', {'error': '$e'});
       _status = AiStatus.error;
     } finally {
       _vibeBusy = false;

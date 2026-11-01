@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../config/app_config.dart';
+import '../l10n/app_localizations.dart';
 import '../payloads/project_payload.dart';
 import '../services/gitee_api_service.dart';
 import '../services/gitee_auth_service.dart';
@@ -74,7 +75,7 @@ class GiteeProvider extends ChangeNotifier {
   /// 发起 Gitee OAuth 登录（授权码由后端换取 token）
   Future<bool> signIn() async {
     if (!isConfigured) {
-      _error = '未配置 Gitee：请填写 GITEE_CLIENT_ID 与 ACCOUNT_BACKEND_BASE_URL';
+      _error = t('gitee.error.notConfigured');
       notifyListeners();
       return false;
     }
@@ -150,7 +151,7 @@ class GiteeProvider extends ChangeNotifier {
     bool private = true,
   }) async {
     final client = api;
-    if (client == null) throw StateError('尚未登录 Gitee');
+    if (client == null) throw StateError(t('gitee.error.notSignedIn'));
     final repo = await client.createRepo(
       repoName,
       private: private,
@@ -164,13 +165,15 @@ class GiteeProvider extends ChangeNotifier {
   Future<String> uniqueRepoName(String baseName) async {
     final client = api;
     final login = _user?.login;
-    if (client == null || login == null) throw StateError('尚未登录 Gitee');
+    if (client == null || login == null) {
+      throw StateError(t('gitee.error.notSignedIn'));
+    }
     for (var i = 0; i <= 20; i++) {
       final candidate = i == 0 ? baseName : '${baseName}_$i';
       final exists = await client.getRepo('$login/$candidate');
       if (exists == null) return candidate;
     }
-    throw StateError('同名仓库过多，请换一个仓库名');
+    throw StateError(t('gitee.error.tooManyDuplicates'));
   }
 
   /// 创建仓库并把整个项目（含 Gitee Go 流水线）首次推送到默认分支
@@ -181,19 +184,25 @@ class GiteeProvider extends ChangeNotifier {
     void Function(String line)? onLog,
   }) async {
     final client = api;
-    if (client == null) throw StateError('尚未登录 Gitee');
+    if (client == null) throw StateError(t('gitee.error.notSignedIn'));
 
     // Gitee 仓库名只允许字母/数字/_/-/.,中文名需先清洗，否则服务端 400
     final safeName = sanitizeRepoName(repoName);
     if (safeName != repoName) {
-      onLog?.call('    仓库名 "$repoName" 含非法字符，改用 $safeName');
+      onLog?.call(t('gitee.log.nameSanitized', {
+        'name': repoName,
+        'safeName': safeName,
+      }));
     }
     final resolvedName = await uniqueRepoName(safeName);
     if (resolvedName != safeName) {
-      onLog?.call('    仓库 $safeName 已存在，改用 $resolvedName');
+      onLog?.call(t('gitee.log.repoExists', {
+        'name': safeName,
+        'resolved': resolvedName,
+      }));
     }
 
-    onLog?.call('==> 创建 Gitee 仓库：$resolvedName');
+    onLog?.call(t('gitee.log.creatingRepo', {'name': resolvedName}));
     final repo = await createRepoForProject(
       projectPath,
       resolvedName,
@@ -204,22 +213,22 @@ class GiteeProvider extends ChangeNotifier {
     // 新仓库必须先开通 Gitee Go，.workflow 流水线才会被识别
     // POST /v5/repos/{owner}/{repo}/open（幂等，已开通同样返回成功）
     try {
-      onLog?.call('==> 开通 Gitee Go（云原生构建）');
+      onLog?.call(t('gitee.log.openingGiteeGo'));
       await client.openGiteeGo(repo.fullName);
-      onLog?.call('    Gitee Go 已开通');
+      onLog?.call(t('gitee.log.giteeGoOpened'));
     } catch (e) {
       // 开通失败不阻断建仓：仓库本身可用，稍后构建时还会重试开通
-      onLog?.call('    ⚠ Gitee Go 开通失败（构建时会重试）：$e');
+      onLog?.call(t('gitee.log.giteeGoOpenFailed', {'error': '$e'}));
     }
 
-    onLog?.call('==> 扫描项目文件');
+    onLog?.call(t('gitee.log.scanningFiles'));
     final files = await ProjectSnapshot.collect(
       projectPath,
-      onSkip: (path) => onLog?.call('    跳过：$path'),
+      onSkip: (path) => onLog?.call(t('gitee.log.skipped', {'path': path})),
     );
-    onLog?.call('    共 ${files.length} 个文件');
+    onLog?.call(t('gitee.log.fileCount', {'count': '${files.length}'}));
 
-    onLog?.call('==> 推送初始代码（Gitee Contents API，逐文件提交）');
+    onLog?.call(t('gitee.log.pushingInitial'));
     await client.pushFiles(
       repo.fullName,
       files,
@@ -227,7 +236,10 @@ class GiteeProvider extends ChangeNotifier {
       branch: repo.defaultBranch,
       onProgress: (done, total) {
         if (done == total || done % 10 == 0) {
-          onLog?.call('    已推送 $done/$total');
+          onLog?.call(t('gitee.log.pushProgress', {
+            'done': '$done',
+            'total': '$total',
+          }));
         }
       },
     );
@@ -240,7 +252,7 @@ class GiteeProvider extends ChangeNotifier {
           GiteeGoTemplates.workflowPath,
           repo.defaultBranch,
         )) {
-      onLog?.call('==> 推送 Gitee Go 构建流水线（仅 Android）');
+      onLog?.call(t('gitee.log.pushingPipeline'));
       await client.pushFiles(
         repo.fullName,
         [
@@ -254,9 +266,9 @@ class GiteeProvider extends ChangeNotifier {
         message: 'ci: add SLIPE Gitee Go pipeline',
         branch: repo.defaultBranch,
       );
-      onLog?.call('    提示：Gitee Go 不支持 macOS Runner，iOS 请使用 GitHub Actions');
+      onLog?.call(t('gitee.log.noMacRunnerHint'));
     }
-    onLog?.call('==> 完成');
+    onLog?.call(t('gitee.log.done'));
     return repo;
   }
 }

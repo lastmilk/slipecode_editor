@@ -2,6 +2,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../l10n/app_localizations.dart';
 import '../providers/container_provider.dart';
 import '../services/container_service.dart';
 import '../widgets/log_console.dart';
@@ -45,7 +46,7 @@ class _ContainerSetupScreenState extends State<ContainerSetupScreen> {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(ok ? successText : '操作失败，请查看日志'),
+        content: Text(ok ? successText : t('containerSetup.opFailed')),
         backgroundColor: ok ? Colors.green : Colors.red,
       ),
     );
@@ -58,11 +59,11 @@ class _ContainerSetupScreenState extends State<ContainerSetupScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('容器设置 (proot)'),
+        title: Text(t('containerSetup.title')),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
-            tooltip: '重新检测',
+            tooltip: t('containerSetup.recheck'),
             onPressed: provider.busy ? null : provider.refresh,
           ),
         ],
@@ -93,19 +94,16 @@ class _ContainerSetupScreenState extends State<ContainerSetupScreen> {
           // proot 二进制
           _SectionCard(
             isDark: isDark,
-            title: '1. proot 二进制',
-            description:
-                '需要静态编译的 proot 可执行文件（aarch64）。也可以将其命名为 '
-                'libproot.so 放入 android/app/src/main/jniLibs/arm64-v8a/ 后重新安装应用，'
-                '这样可避开 Android 10+ 对应用私有目录的执行限制。',
+            title: t('containerSetup.prootSection'),
+            description: t('containerSetup.prootSectionDesc'),
             children: [
               TextField(
                 controller: _prootUrlController,
                 enabled: !provider.busy,
-                decoration: const InputDecoration(
-                  labelText: 'proot 下载地址',
+                decoration: InputDecoration(
+                  labelText: t('containerSetup.prootUrlLabel'),
                   hintText: 'https://.../proot-aarch64',
-                  border: OutlineInputBorder(),
+                  border: const OutlineInputBorder(),
                   isDense: true,
                 ),
               ),
@@ -119,10 +117,11 @@ class _ContainerSetupScreenState extends State<ContainerSetupScreen> {
                           : () async {
                               final ok = await provider
                                   .installProotFromUrl(_prootUrlController.text);
-                              await _showResult(ok, 'proot 安装成功');
+                              await _showResult(
+                                  ok, t('containerSetup.prootInstalled'));
                             },
                       icon: const Icon(Icons.download),
-                      label: const Text('下载安装'),
+                      label: Text(t('containerSetup.downloadInstall')),
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -135,10 +134,11 @@ class _ContainerSetupScreenState extends State<ContainerSetupScreen> {
                               if (path == null) return;
                               final ok =
                                   await provider.installProotFromFile(path);
-                              await _showResult(ok, 'proot 导入成功');
+                              await _showResult(
+                                  ok, t('containerSetup.prootImported'));
                             },
                       icon: const Icon(Icons.file_open),
-                      label: const Text('导入本地文件'),
+                      label: Text(t('containerSetup.importLocal')),
                     ),
                   ),
                 ],
@@ -150,18 +150,16 @@ class _ContainerSetupScreenState extends State<ContainerSetupScreen> {
           // rootfs
           _SectionCard(
             isDark: isDark,
-            title: '2. rootfs 根文件系统',
-            description:
-                '推荐 Alpine minirootfs（约 3MB）。也可以导入本地 tar.gz 镜像。'
-                '解压使用系统 tar，Android 9+ 设备均可用。',
+            title: t('containerSetup.rootfsSection'),
+            description: t('containerSetup.rootfsSectionDesc'),
             children: [
               TextField(
                 controller: _rootfsUrlController,
                 enabled: !provider.busy,
                 maxLines: 2,
-                decoration: const InputDecoration(
-                  labelText: 'rootfs 下载地址',
-                  border: OutlineInputBorder(),
+                decoration: InputDecoration(
+                  labelText: t('containerSetup.rootfsUrlLabel'),
+                  border: const OutlineInputBorder(),
                   isDense: true,
                 ),
               ),
@@ -175,10 +173,11 @@ class _ContainerSetupScreenState extends State<ContainerSetupScreen> {
                           : () async {
                               final ok = await provider
                                   .installRootfsFromUrl(_rootfsUrlController.text);
-                              await _showResult(ok, 'rootfs 安装成功');
+                              await _showResult(
+                                  ok, t('containerSetup.rootfsInstalled'));
                             },
                       icon: const Icon(Icons.download),
-                      label: const Text('下载安装'),
+                      label: Text(t('containerSetup.downloadInstall')),
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -191,10 +190,11 @@ class _ContainerSetupScreenState extends State<ContainerSetupScreen> {
                               if (path == null) return;
                               final ok =
                                   await provider.installRootfsFromFile(path);
-                              await _showResult(ok, 'rootfs 导入成功');
+                              await _showResult(
+                                  ok, t('containerSetup.rootfsImported'));
                             },
                       icon: const Icon(Icons.file_open),
-                      label: const Text('导入 tar.gz'),
+                      label: Text(t('containerSetup.importTarGz')),
                     ),
                   ),
                 ],
@@ -206,7 +206,7 @@ class _ContainerSetupScreenState extends State<ContainerSetupScreen> {
           Row(
             children: [
               Text(
-                '执行日志',
+                t('containerSetup.logs'),
                 style: TextStyle(
                   fontWeight: FontWeight.w600,
                   fontSize: 14,
@@ -216,7 +216,7 @@ class _ContainerSetupScreenState extends State<ContainerSetupScreen> {
               const Spacer(),
               TextButton(
                 onPressed: provider.clearLogs,
-                child: const Text('清空'),
+                child: Text(t('containerSetup.clear')),
               ),
             ],
           ),
@@ -225,7 +225,7 @@ class _ContainerSetupScreenState extends State<ContainerSetupScreen> {
             height: 220,
             child: LogConsole(
               lines: provider.logs,
-              emptyText: '安装过程日志将显示在这里',
+              emptyText: t('containerSetup.logsEmpty'),
             ),
           ),
           const SizedBox(height: 16),
@@ -248,20 +248,17 @@ class _ContainerSetupScreenState extends State<ContainerSetupScreen> {
                     Icon(Icons.info_outline,
                         size: 16, color: Colors.amber[700]),
                     const SizedBox(width: 6),
-                    const Text(
-                      '构建工具链说明',
-                      style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                    Text(
+                      t('containerSetup.toolchainTitle'),
+                      style: const TextStyle(
+                          fontWeight: FontWeight.w600, fontSize: 13),
                     ),
                   ],
                 ),
                 const SizedBox(height: 6),
-                const Text(
-                  '容器安装完成后，可在「构建」页面依次初始化：\n'
-                  '• 基础依赖（bash/git/curl/openjdk17）\n'
-                  '• Flutter SDK（/opt/flutter）\n'
-                  '• Android SDK（/opt/android-sdk）\n'
-                  '随后即可在终端或构建页运行 flutter build。',
-                  style: TextStyle(fontSize: 12, height: 1.5),
+                Text(
+                  t('containerSetup.toolchainDesc'),
+                  style: const TextStyle(fontSize: 12, height: 1.5),
                 ),
               ],
             ),
@@ -303,8 +300,10 @@ class _StatusCard extends StatelessWidget {
               const SizedBox(width: 8),
               Text(
                 provider.checking
-                    ? '正在检测环境...'
-                    : (ready ? '容器已就绪' : '容器未就绪'),
+                    ? t('containerSetup.checking')
+                    : (ready
+                        ? t('containerSetup.ready')
+                        : t('containerSetup.notReady')),
                 style: TextStyle(
                   fontWeight: FontWeight.w600,
                   fontSize: 15,
@@ -326,17 +325,20 @@ class _StatusCard extends StatelessWidget {
           const SizedBox(height: 12),
           _InfoRow(
             label: 'proot',
-            value: provider.prootPath ?? '未找到',
+            value: provider.prootPath ?? t('containerSetup.notFound'),
             ok: provider.prootPath != null,
           ),
           const SizedBox(height: 6),
           _InfoRow(
             label: 'rootfs',
-            value: provider.rootfsInstalled ? provider.rootfsPath : '未安装',
+            value: provider.rootfsInstalled
+                ? provider.rootfsPath
+                : t('containerSetup.notInstalled'),
             ok: provider.rootfsInstalled,
           ),
           const SizedBox(height: 6),
-          _InfoRow(label: '环境目录', value: provider.envRootPath),
+          _InfoRow(
+              label: t('containerSetup.envDir'), value: provider.envRootPath),
           if (provider.error != null) ...[
             const SizedBox(height: 10),
             Text(

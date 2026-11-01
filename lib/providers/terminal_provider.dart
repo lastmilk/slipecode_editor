@@ -85,11 +85,11 @@ class TerminalProvider extends ChangeNotifier {
 
       if (_cwd.isEmpty) _cwd = _projectDir ?? Directory.current.path;
       _ready = true;
-      _append('[本地 shell 已就绪，cwd=$_cwd]');
+      _append(t('terminal.readyLog', {'cwd': _cwd}));
       return true;
     } catch (e) {
       _error = '$e';
-      _append('[终端启动失败] $e');
+      _append(t('terminal.startFailedLog', {'error': '$e'}));
       _ready = false;
       return false;
     } finally {
@@ -101,13 +101,13 @@ class TerminalProvider extends ChangeNotifier {
   /// 供 AI 工具调用：在项目目录执行命令并返回文本结果
   Future<String> executeForAi(String command) async {
     if (!await ensureStarted()) {
-      return '错误：${_error ?? '终端未就绪'}';
+      return t('terminal.aiNotReady', {'error': _error ?? t('terminal.unsupported')});
     }
     final result = await _execute(command);
     final output = StringBuffer();
     if (result.out.trim().isNotEmpty) output.writeln(result.out.trimRight());
     if (result.err.trim().isNotEmpty) output.writeln(result.err.trimRight());
-    output.writeln('退出码：${result.exitCode}');
+    output.writeln(t('terminal.exitCode', {'code': '${result.exitCode}'}));
     return output.toString();
   }
 
@@ -139,7 +139,7 @@ class TerminalProvider extends ChangeNotifier {
       }
     } catch (e) {
       _error = '$e';
-      _append('[执行失败] $e');
+      _append(t('terminal.execFailedLog', {'error': '$e'}));
     } finally {
       _running = false;
       _safeNotify();
@@ -202,7 +202,7 @@ class TerminalProvider extends ChangeNotifier {
     _error = null;
     _cwd = _projectDir ?? '';
     _lastExitCode = null;
-    _append('[已重置终端会话]');
+    _append(t('terminal.resetLog'));
     await ensureStarted();
   }
 

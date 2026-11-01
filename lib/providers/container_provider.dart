@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 
+import '../l10n/app_localizations.dart';
 import '../services/container_service.dart';
 
 /// proot 容器状态管理
@@ -49,7 +50,7 @@ class ContainerProvider extends ChangeNotifier {
       _rootfsInstalled = await _service.isRootfsInstalled();
       _ready = _prootPath != null && _rootfsInstalled;
     } catch (e) {
-      _error = '环境检查失败：$e';
+      _error = t('container.error.checkFailed', {'error': '$e'});
     } finally {
       _checking = false;
       notifyListeners();
@@ -74,11 +75,11 @@ class ContainerProvider extends ChangeNotifier {
   /// 下载安装 proot
   Future<bool> installProotFromUrl(String url) async {
     if (url.trim().isEmpty) {
-      _error = '请输入 proot 下载地址';
+      _error = t('container.error.urlRequired');
       notifyListeners();
       return false;
     }
-    _setBusy(true, status: '正在安装 proot...');
+    _setBusy(true, status: t('container.status.installingProot'));
     try {
       await _service.installProotFromUrl(
         url.trim(),
@@ -92,7 +93,7 @@ class ContainerProvider extends ChangeNotifier {
       return _prootPath != null;
     } catch (e) {
       _error = '$e';
-      _log('安装失败：$e');
+      _log(t('container.log.installFailed', {'error': '$e'}));
       return false;
     } finally {
       _setBusy(false);
@@ -101,14 +102,14 @@ class ContainerProvider extends ChangeNotifier {
 
   /// 从本地文件导入 proot
   Future<bool> installProotFromFile(String path) async {
-    _setBusy(true, status: '正在导入 proot...');
+    _setBusy(true, status: t('container.status.importingProot'));
     try {
       await _service.installProotFromFile(path, onLog: _log);
       await refresh();
       return _prootPath != null;
     } catch (e) {
       _error = '$e';
-      _log('导入失败：$e');
+      _log(t('container.log.importFailed', {'error': '$e'}));
       return false;
     } finally {
       _setBusy(false);
@@ -117,7 +118,7 @@ class ContainerProvider extends ChangeNotifier {
 
   /// 下载安装 rootfs
   Future<bool> installRootfsFromUrl(String url) async {
-    _setBusy(true, status: '正在安装 rootfs...');
+    _setBusy(true, status: t('container.status.installingRootfs'));
     try {
       await _service.installRootfsFromUrl(
         url.trim(),
@@ -131,7 +132,7 @@ class ContainerProvider extends ChangeNotifier {
       return _rootfsInstalled;
     } catch (e) {
       _error = '$e';
-      _log('安装失败：$e');
+      _log(t('container.log.installFailed', {'error': '$e'}));
       return false;
     } finally {
       _setBusy(false);
@@ -140,14 +141,14 @@ class ContainerProvider extends ChangeNotifier {
 
   /// 从本地 tar.gz 导入 rootfs
   Future<bool> installRootfsFromFile(String archivePath) async {
-    _setBusy(true, status: '正在导入 rootfs...');
+    _setBusy(true, status: t('container.status.importingRootfs'));
     try {
       await _service.installRootfsFromFile(archivePath, onLog: _log);
       await refresh();
       return _rootfsInstalled;
     } catch (e) {
       _error = '$e';
-      _log('导入失败：$e');
+      _log(t('container.log.importFailed', {'error': '$e'}));
       return false;
     } finally {
       _setBusy(false);

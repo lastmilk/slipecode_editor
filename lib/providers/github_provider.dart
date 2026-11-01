@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../config/app_config.dart';
+import '../l10n/app_localizations.dart';
 import '../payloads/project_payload.dart';
 import '../services/build_service.dart';
 import '../services/git_host.dart';
@@ -77,7 +78,7 @@ class GitHubProvider extends ChangeNotifier {
   /// 发起 OAuth 登录（后端用 client_secret 换取 token）
   Future<bool> signIn() async {
     if (!isConfigured) {
-      _error = '未配置 GITHUB_CLIENT_ID，请先在 .env 中填写后重启应用';
+      _error = t('github.error.notConfigured');
       notifyListeners();
       return false;
     }
@@ -156,7 +157,7 @@ class GitHubProvider extends ChangeNotifier {
     bool private = true,
   }) async {
     final client = api;
-    if (client == null) throw StateError('尚未登录 GitHub');
+    if (client == null) throw StateError(t('github.error.notSignedIn'));
     final repo = await client.createRepo(
       repoName,
       private: private,
@@ -170,7 +171,9 @@ class GitHubProvider extends ChangeNotifier {
   Future<String> uniqueRepoName(String baseName) async {
     final client = api;
     final login = _user?.login;
-    if (client == null || login == null) throw StateError('尚未登录 GitHub');
+    if (client == null || login == null) {
+      throw StateError(t('github.error.notSignedIn'));
+    }
     for (var i = 0; i <= 20; i++) {
       final candidate = i == 0 ? baseName : '${baseName}_$i';
       try {
@@ -184,7 +187,7 @@ class GitHubProvider extends ChangeNotifier {
         rethrow;
       }
     }
-    throw StateError('同名仓库过多，请换一个仓库名');
+    throw StateError(t('github.error.tooManyDuplicates'));
   }
 
   /// 创建仓库并把整个项目（含构建 workflow）首次推送到 main 分支
@@ -197,19 +200,25 @@ class GitHubProvider extends ChangeNotifier {
     void Function(String line)? onLog,
   }) async {
     final client = api;
-    if (client == null) throw StateError('尚未登录 GitHub');
+    if (client == null) throw StateError(t('github.error.notSignedIn'));
 
     // GitHub 仓库名只允许字母/数字/_/-/.，中文名需先清洗
     final safeName = sanitizeRepoName(repoName);
     if (safeName != repoName) {
-      onLog?.call('    仓库名 "$repoName" 含非法字符，改用 $safeName');
+      onLog?.call(t('github.log.nameSanitized', {
+        'name': repoName,
+        'safeName': safeName,
+      }));
     }
     final resolvedName = await uniqueRepoName(safeName);
     if (resolvedName != safeName) {
-      onLog?.call('    仓库 $safeName 已存在，改用 $resolvedName');
+      onLog?.call(t('github.log.repoExists', {
+        'name': safeName,
+        'resolved': resolvedName,
+      }));
     }
 
-    onLog?.call('==> 创建 GitHub 仓库：$resolvedName');
+    onLog?.call(t('github.log.creatingRepo', {'name': resolvedName}));
     GitHubRepo? repo;
     var attemptName = resolvedName;
     for (var attempt = 0; attempt < 4; attempt++) {
@@ -227,20 +236,20 @@ class GitHubProvider extends ChangeNotifier {
         if (!retryable || attempt == 3) rethrow;
         attemptName =
             '${safeName}_${DateTime.now().millisecondsSinceEpoch % 10000}';
-        onLog?.call('    仓库创建冲突，改用 $attemptName 重试');
+        onLog?.call(t('github.log.repoConflictRetry', {'name': attemptName}));
       }
     }
-    if (repo == null) throw StateError('仓库创建失败，请稍后重试');
+    if (repo == null) throw StateError(t('github.error.createFailed'));
     onLog?.call('    ${repo.htmlUrl}');
 
-    onLog?.call('==> 扫描项目文件');
+    onLog?.call(t('github.log.scanningFiles'));
     final files = await ProjectSnapshot.collect(
       projectPath,
-      onSkip: (path) => onLog?.call('    跳过：$path'),
+      onSkip: (path) => onLog?.call(t('github.log.skipped', {'path': path})),
     );
-    onLog?.call('    共 ${files.length} 个文件');
+    onLog?.call(t('github.log.fileCount', {'count': '${files.length}'}));
 
-    onLog?.call('==> 推送初始代码到 main 分支');
+    onLog?.call(t('github.log.pushingInitial'));
     await client.pushFiles(
       repo.fullName,
       files,
@@ -255,7 +264,7 @@ class GitHubProvider extends ChangeNotifier {
       payload.workflowPath,
       repo.defaultBranch,
     )) {
-      onLog?.call('==> 推送 GitHub Actions 构建 workflow（${payload.name}）');
+      onLog?.call(t('github.log.pushingWorkflow', {'payload': payload.name}));
       await BuildService.instance.ensureWorkflow(
         client,
         repo.fullName,
@@ -264,7 +273,7 @@ class GitHubProvider extends ChangeNotifier {
         content: payload.workflowContent,
       );
     }
-    onLog?.call('==> 完成');
+    onLog?.call(t('github.log.done'));
     return repo;
   }
 }
