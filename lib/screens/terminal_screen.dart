@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../l10n/app_localizations.dart';
 import '../providers/project_provider.dart';
@@ -23,9 +21,7 @@ Future<void> showTerminalSheet(BuildContext context) {
   );
 }
 
-/// 底部弹出式终端
-///
-/// 只要有 Termux 即可使用，无需 proot 容器。
+/// 底部弹出式终端（仅桌面端可用，使用系统 shell）
 class TerminalSheet extends StatefulWidget {
   const TerminalSheet({super.key});
 
@@ -43,7 +39,6 @@ class _TerminalSheetState extends State<TerminalSheet> {
     'pwd',
     'ls -la',
     'cd ..',
-    'termux-info',
     'git status',
   ];
 
@@ -107,18 +102,6 @@ class _TerminalSheetState extends State<TerminalSheet> {
         TextSelection.fromPosition(TextPosition(offset: text.length));
   }
 
-  Future<void> _openTermuxSite() async {
-    final uri = Uri.parse('https://f-droid.org/packages/com.termux/');
-    if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(t('terminal.openFailed', {'url': uri.toString()})),
-        ),
-      );
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final terminal = context.watch<TerminalProvider>();
@@ -145,8 +128,6 @@ class _TerminalSheetState extends State<TerminalSheet> {
             ),
             _buildHeader(terminal, isDark),
             const Divider(height: 1),
-            if (!terminal.isReady && terminal.supported)
-              _buildSetupBanner(terminal),
             if (!terminal.supported) _buildUnsupportedBanner(),
             Expanded(
               child: Padding(
@@ -303,142 +284,6 @@ class _TerminalSheetState extends State<TerminalSheet> {
             onPressed: terminal.clear,
           ),
         ],
-      ),
-    );
-  }
-
-  /// Termux 未就绪时的引导面板
-  ///
-  /// - 未安装 Termux：给下载入口
-  /// - 已安装但未授权 / allow-external-apps 未开启：给申请权限按钮
-  ///   与 4 条需要在 Termux 内执行的配置命令（点按复制）
-  Widget _buildSetupBanner(TerminalProvider terminal) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-      color: Colors.orange.withValues(alpha: 0.15),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Icon(Icons.warning_amber_rounded,
-                  size: 18, color: Colors.orange),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  terminal.needsTermux
-                      ? t('terminal.needsTermux')
-                      : (terminal.error ?? t('terminal.notReady')),
-                  style: const TextStyle(fontSize: 12),
-                ),
-              ),
-              TextButton(
-                onPressed: terminal.starting ? null : terminal.ensureStarted,
-                child: Text(t('common.retry')),
-              ),
-            ],
-          ),
-          if (terminal.needsTermux)
-            Align(
-              alignment: Alignment.centerRight,
-              child: TextButton(
-                onPressed: _openTermuxSite,
-                child: Text(t('terminal.install')),
-              ),
-            )
-          else if (terminal.detected) ...[
-            const SizedBox(height: 4),
-            Wrap(
-              spacing: 8,
-              runSpacing: 4,
-              children: [
-                if (!terminal.permissionGranted)
-                  FilledButton.tonalIcon(
-                    onPressed: terminal.requestTermuxPermission,
-                    icon: const Icon(Icons.security, size: 16),
-                    label: const Text(
-                      '申请 Termux 权限',
-                      style: TextStyle(fontSize: 12),
-                    ),
-                  ),
-                TextButton.icon(
-                  onPressed: terminal.openTermux,
-                  icon: const Icon(Icons.open_in_new, size: 16),
-                  label: const Text(
-                    '打开 Termux',
-                    style: TextStyle(fontSize: 12),
-                  ),
-                ),
-              ],
-            ),
-            if (!terminal.allowExternalAppsOk ||
-                !terminal.permissionGranted) ...[
-              const SizedBox(height: 6),
-              Text(
-                '请在 Termux 中依次执行以下命令（点按可复制）：',
-                style: TextStyle(
-                  fontSize: 11,
-                  color: Theme.of(context).brightness == Brightness.dark
-                      ? Colors.orange.shade200
-                      : Colors.orange.shade900,
-                ),
-              ),
-              const SizedBox(height: 4),
-              ...TerminalProvider.termuxSetupCommands.map(_buildCommandRow),
-            ],
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _buildCommandRow(String command) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return InkWell(
-      onTap: () async {
-        await Clipboard.setData(ClipboardData(text: command));
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('已复制命令'),
-            duration: Duration(seconds: 1),
-          ),
-        );
-      },
-      borderRadius: BorderRadius.circular(6),
-      child: Container(
-        width: double.infinity,
-        margin: const EdgeInsets.only(bottom: 4),
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-        decoration: BoxDecoration(
-          color: isDark ? const Color(0xFF1B1B1D) : Colors.white,
-          borderRadius: BorderRadius.circular(6),
-          border: Border.all(
-            color: isDark ? Colors.white12 : Colors.black12,
-          ),
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: Text(
-                command,
-                style: const TextStyle(
-                  fontFamily: 'monospace',
-                  fontSize: 11,
-                  height: 1.4,
-                ),
-              ),
-            ),
-            const SizedBox(width: 6),
-            Icon(
-              Icons.copy,
-              size: 14,
-              color: isDark ? Colors.white38 : Colors.black38,
-            ),
-          ],
-        ),
       ),
     );
   }

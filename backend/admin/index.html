@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>SlipCode 管理后台</title>
+  <title>SLIPE 管理后台</title>
   <link rel="icon" href="data:," />
   <link rel="stylesheet" href="/vendor/element-plus.css" />
   <link rel="stylesheet" href="/styles.css" />
@@ -18,7 +18,7 @@
         <div class="brand-block">
           <div class="brand-logo">S</div>
           <div>
-            <h1>SlipCode 管理后台</h1>
+            <h1>SLIPE 管理后台</h1>
             <p class="brand-sub">workadmin.slipe.cn</p>
           </div>
         </div>
@@ -49,7 +49,7 @@
         <div class="brand-block small">
           <div class="brand-logo">S</div>
           <div>
-            <h1>SlipCode</h1>
+            <h1>SLIPE</h1>
             <p class="brand-sub">WorkAdmin</p>
           </div>
         </div>
@@ -59,6 +59,7 @@
           <el-menu-item index="config">凭据配置</el-menu-item>
           <el-menu-item index="llm">LLM 模型</el-menu-item>
           <el-menu-item index="docs">使用文档</el-menu-item>
+          <el-menu-item index="policies">政策合规</el-menu-item>
         </el-menu>
         <div class="sidebar-footer">
           <span class="dot" :class="online ? 'ok' : 'bad'"></span>
@@ -385,6 +386,68 @@
                 </template>
               </el-table-column>
             </el-table>
+          </div>
+        </section>
+        <!-- 政策合规 -->
+        <section v-else-if="tab === 'policies'" class="panel">
+          <header class="panel-head">
+            <div>
+              <h2>政策合规</h2>
+              <p>用户协议与隐私政策，保存后立即对 App 端生效。</p>
+            </div>
+            <el-button :loading="loadingPolicies" @click="loadPolicies">刷新</el-button>
+          </header>
+
+          <div class="card" v-loading="loadingPolicies">
+            <div class="card-head">
+              <h3>用户服务协议</h3>
+              <span class="dim">v{{ policies.userAgreement.version }} · 更新于 {{ dateText(policies.userAgreement.updatedAt) }}</span>
+            </div>
+            <el-form label-width="80px" class="cfg-form">
+              <el-form-item label="标题">
+                <el-input v-model="policies.userAgreement.title" maxlength="80" />
+              </el-form-item>
+              <el-form-item label="版本">
+                <el-input v-model="policies.userAgreement.version" placeholder="留空则自动递增，如 1.0.0 → 1.0.1" style="max-width: 320px" />
+              </el-form-item>
+              <el-form-item label="正文">
+                <el-input
+                  v-model="policies.userAgreement.content"
+                  type="textarea"
+                  :rows="18"
+                  placeholder="支持 Markdown 语法"
+                />
+              </el-form-item>
+              <el-form-item>
+                <el-button type="primary" :loading="savingUa" @click="savePolicy('userAgreement')">保存并发布</el-button>
+              </el-form-item>
+            </el-form>
+          </div>
+
+          <div class="card" v-loading="loadingPolicies">
+            <div class="card-head">
+              <h3>隐私政策</h3>
+              <span class="dim">v{{ policies.privacyPolicy.version }} · 更新于 {{ dateText(policies.privacyPolicy.updatedAt) }}</span>
+            </div>
+            <el-form label-width="80px" class="cfg-form">
+              <el-form-item label="标题">
+                <el-input v-model="policies.privacyPolicy.title" maxlength="80" />
+              </el-form-item>
+              <el-form-item label="版本">
+                <el-input v-model="policies.privacyPolicy.version" placeholder="留空则自动递增，如 1.0.0 → 1.0.1" style="max-width: 320px" />
+              </el-form-item>
+              <el-form-item label="正文">
+                <el-input
+                  v-model="policies.privacyPolicy.content"
+                  type="textarea"
+                  :rows="18"
+                  placeholder="支持 Markdown 语法"
+                />
+              </el-form-item>
+              <el-form-item>
+                <el-button type="primary" :loading="savingPrivacy" @click="savePolicy('privacyPolicy')">保存并发布</el-button>
+              </el-form-item>
+            </el-form>
           </div>
         </section>
         <!-- CHUNK-4-END -->

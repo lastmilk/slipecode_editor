@@ -5,10 +5,10 @@
 // 'flutter create' template.
 
 // The application's name. By default this is also the title of the Flutter window.
-PRODUCT_NAME = slipecode_editor
+PRODUCT_NAME = slipe_editor
 
 // The application's bundle identifier
-PRODUCT_BUNDLE_IDENTIFIER = com.slipecode.slipecodeEditor
+PRODUCT_BUNDLE_IDENTIFIER = com.slipe.slipeEditor
 
 // The copyright displayed in application information
-PRODUCT_COPYRIGHT = Copyright © 2026 com.slipecode. All rights reserved.
+PRODUCT_COPYRIGHT = Copyright © 2026 com.slipe. All rights reserved.

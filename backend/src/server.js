@@ -1,4 +1,4 @@
-// SlipCode 账号后端（重构版）
+// SLIPE 账号后端（重构版）
 //
 // 零第三方依赖，Node.js >= 18。
 // 模块划分：
@@ -76,6 +76,11 @@ import {
   handleListDocs,
   handlePortalInfo,
 } from './routes/docs.js';
+import {
+  handleAdminGetPolicies,
+  handleAdminUpdatePolicies,
+  handleGetPolicies,
+} from './routes/policies.js';
 import { handleGetProjects, handlePutProjects } from './routes/projects.js';
 import {
   handleCreateBuildWatch,
@@ -93,7 +98,7 @@ const ADMIN_DIR = join(__dirname, '..', 'admin');
 
 const ROUTES = {
   'GET /api/health': async (req, res) =>
-    sendJson(res, 200, { ok: true, service: 'slipecode-api', time: Date.now() }),
+    sendJson(res, 200, { ok: true, service: 'slipe-api', time: Date.now() }),
 
   // 账号
   'POST /api/auth/register': handleRegister,
@@ -135,6 +140,9 @@ const ROUTES = {
   'GET /api/docs': handleListDocs,
   'GET /api/public/info': handlePortalInfo,
 
+  // 政策合规（公开只读）
+  'GET /api/policies': handleGetPolicies,
+
   // 云端构建监听（登录用户：服务端持续同步 + 产物中转）
   'POST /api/build/watch': handleCreateBuildWatch,
   'GET /api/build/watch': handleLatestBuildWatch,
@@ -150,6 +158,8 @@ const ROUTES = {
   'POST /api/admin/llm/models': handleAdminCreateModel,
   'GET /api/admin/docs': handleAdminListDocs,
   'POST /api/admin/docs': handleAdminCreateDoc,
+  'GET /api/admin/policies': handleAdminGetPolicies,
+  'PUT /api/admin/policies': handleAdminUpdatePolicies,
 };
 
 /** 带路径参数的路由（正则捕获，handler 第三个参数为正则 match） */
@@ -287,7 +297,7 @@ const server = createServer(async (req, res) => {
 
 await loadDb();
 server.listen(PORT, () => {
-  console.log(`SlipCode backend listening on http://localhost:${PORT}`);
+  console.log(`SLIPE backend listening on http://localhost:${PORT}`);
   console.log('  API      : https://api.slipe.cn');
   console.log('  WorkAdmin: https://workadmin.slipe.cn');
   if (!process.env.JWT_SECRET) {

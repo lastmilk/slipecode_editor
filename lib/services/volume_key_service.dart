@@ -15,7 +15,7 @@ class VolumeKeyService {
 
   static final VolumeKeyService instance = VolumeKeyService._();
 
-  static const _channel = MethodChannel('slipecode/keyevent');
+  static const _channel = MethodChannel('slipe/keyevent');
 
   /// Android KeyEvent.KEYCODE_VOLUME_UP / DOWN
   static const int keyVolumeUp = 24;

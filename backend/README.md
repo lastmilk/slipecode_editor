@@ -46,11 +46,11 @@ npm start
 | `CORS_ORIGIN` | 否 | 允许的跨域来源，默认 `*` |
 | `GITEE_CLIENT_ID` | Gitee 必填 | Gitee 应用的 Client ID |
 | `GITEE_CLIENT_SECRET` | Gitee 必填 | Gitee 应用的 Client Secret |
-| `GITEE_REDIRECT_URI` | 否 | Gitee 回调地址，默认 `slipecode://oauth/gitee/callback` |
+| `GITEE_REDIRECT_URI` | 否 | Gitee 回调地址，默认 `slipe://oauth/gitee/callback` |
 | `GITHUB_CLIENT_ID` | GitHub 必填 | GitHub OAuth App 的 Client ID |
 | `GITHUB_CLIENT_SECRET` | GitHub 必填 | GitHub OAuth App 的 Client Secret |
 | `GITHUB_REDIRECT_URI` | 否 | GitHub OAuth App 里登记的 callback URL，默认 `https://api.slipe.cn/api/oauth/github/callback` |
-| `GITHUB_DEEP_LINK` | 否 | 换 token 后 302 回 App 的深链，默认 `slipecode://oauth/callback` |
+| `GITHUB_DEEP_LINK` | 否 | 换 token 后 302 回 App 的深链，默认 `slipe://oauth/callback` |
 | `ADMIN_PASSWORD` | 否 | 管理员初始密码，默认 `slipe-admin-2026`；登录后请在管理页修改（修改后写入数据库哈希，环境变量不再生效） |
 | `ADMIN_TOKEN` | 否 | 可选静态管理令牌（兼容脚本调用），一般无需设置 |
 | `GEETEST_CAPTCHA_ID` | 生产必填 | 极验 GT4 Captcha ID（登录 / 注册二次校验） |
@@ -99,7 +99,7 @@ node src/server.js
 | `PUT` | `/api/settings` | 需登录，`{settings}` 保存偏好设置 |
 | `POST` | `/api/oauth/gitee/token` | `{code, redirect_uri}` → Gitee token（供 App 使用） |
 | `POST` | `/api/oauth/gitee/refresh` | `{refresh_token}` → 续期 Gitee token |
-| `GET` | `/api/oauth/github/callback` | GitHub 回调中转：后端用 client_secret 换 token，再 302 回 `slipecode://oauth/callback?ticket=...` |
+| `GET` | `/api/oauth/github/callback` | GitHub 回调中转：后端用 client_secret 换 token，再 302 回 `slipe://oauth/callback?ticket=...` |
 | `POST` | `/api/oauth/github/token` | `{ticket}`（推荐）或 `{code, redirect_uri}` → GitHub token（供 App 使用） |
 | `POST` | `/api/checkin` | 需登录，每日签到 +100 积分；当天重复签到返回「今日已签到」（`checkedInToday: true`） |
 | `GET` | `/api/credits` | 需登录，返回 `{credits, checkedInToday}` |

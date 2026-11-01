@@ -3,10 +3,12 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../l10n/app_localizations.dart';
 import '../providers/account_provider.dart';
 import '../services/captcha_service.dart';
+import 'policy_screen.dart';
 
-/// SlipCode 独立账号页面（注册 / 登录 / 退出）
+/// SLIPE 独立账号页面（注册 / 登录 / 退出）
 class AccountScreen extends StatefulWidget {
   const AccountScreen({super.key});
 
@@ -29,6 +31,9 @@ class _AccountScreenState extends State<AccountScreen> {
   Timer? _smsTimer;
   String? _localError;
 
+  /// 注册 / 登录前必须勾选同意《用户协议》与《隐私政策》
+  bool _policyAgreed = false;
+
   @override
   void dispose() {
     _smsTimer?.cancel();
@@ -42,6 +47,10 @@ class _AccountScreenState extends State<AccountScreen> {
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
+    if (!_policyAgreed) {
+      setState(() => _localError = t('policy.mustAgreeToLogin'));
+      return;
+    }
     setState(() {
       _submitting = true;
       _localError = null;
@@ -81,12 +90,16 @@ class _AccountScreenState extends State<AccountScreen> {
     if (!mounted) return;
     setState(() {
       _submitting = false;
-      if (!ok) _localError = account.error ?? '操作失败';
+      if (!ok) _localError = account.error ?? t('account.actionFailed');
     });
     if (ok) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(_registerMode ? '注册成功，已登录' : '登录成功'),
+          content: Text(
+            _registerMode
+                ? t('account.registerSuccess')
+                : t('account.loginSuccess'),
+          ),
           backgroundColor: Colors.green,
         ),
       );
@@ -98,7 +111,7 @@ class _AccountScreenState extends State<AccountScreen> {
   Future<void> _sendSms() async {
     final phone = _phoneController.text.trim();
     if (!RegExp(r'^1[3-9]\d{9}$').hasMatch(phone)) {
-      setState(() => _localError = '请输入正确的手机号');
+      setState(() => _localError = t('account.invalidPhone'));
       return;
     }
     setState(() {
@@ -110,7 +123,7 @@ class _AccountScreenState extends State<AccountScreen> {
     if (!mounted) return;
     setState(() => _sendingSms = false);
     if (!ok) {
-      setState(() => _localError = account.error ?? '验证码发送失败');
+      setState(() => _localError = account.error ?? t('account.smsSendFailed'));
       return;
     }
     if (dev && devCode != null) {
@@ -119,7 +132,11 @@ class _AccountScreenState extends State<AccountScreen> {
     _startCountdown();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(dev ? '开发模式：验证码已自动填入 $devCode' : '验证码已发送'),
+        content: Text(
+          dev
+              ? t('account.smsDevFilled', {'code': '$devCode'})
+              : t('account.smsSent'),
+        ),
         backgroundColor: Colors.green,
       ),
     );
@@ -147,7 +164,7 @@ class _AccountScreenState extends State<AccountScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('SlipCode 账号'),
+        title: Text(t('account.title')),
         elevation: 0,
       ),
       body: account.isSignedIn
@@ -215,14 +232,14 @@ class _AccountScreenState extends State<AccountScreen> {
           child: Column(
             children: [
               _row(
-                '设置同步',
+                t('account.settingsSync'),
                 account.lastSyncAt == null
-                    ? '尚未同步'
-                    : '已开启',
+                    ? t('account.notSyncedYet')
+                    : t('account.enabled'),
                 isDark,
               ),
               const Divider(height: 20),
-              _row('账号 ID', user?.id ?? '-', isDark),
+              _row(t('account.idLabel'), user?.id ?? '-', isDark),
               if (account.error != null) ...[
                 const Divider(height: 20),
                 Text(
@@ -245,13 +262,17 @@ class _AccountScreenState extends State<AccountScreen> {
               if (!mounted) return;
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
-                  content: Text(ok ? '设置已从云端同步' : (account.error ?? '同步失败')),
+                  content: Text(
+                    ok
+                        ? t('account.syncedFromCloud')
+                        : (account.error ?? t('account.syncFailed')),
+                  ),
                   backgroundColor: ok ? Colors.green : Colors.redAccent,
                 ),
               );
             },
             icon: const Icon(Icons.sync, size: 18),
-            label: const Text('立即同步设置'),
+            label: Text(t('account.syncNow')),
           ),
         ),
         const SizedBox(height: 10),
@@ -262,11 +283,11 @@ class _AccountScreenState extends State<AccountScreen> {
               await account.signOut();
               if (!mounted) return;
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('已退出 SlipCode 账号')),
+                SnackBar(content: Text(t('account.signedOut'))),
               );
             },
             icon: const Icon(Icons.logout, size: 18),
-            label: const Text('退出登录'),
+            label: Text(t('account.signOut')),
             style: OutlinedButton.styleFrom(foregroundColor: Colors.redAccent),
           ),
         ),
@@ -315,14 +336,16 @@ class _AccountScreenState extends State<AccountScreen> {
                 color: isDark ? Colors.white24 : Colors.black26,
               ),
               const SizedBox(height: 12),
-              const Text(
-                '尚未配置账号后端',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+              Text(
+                t('account.backendNotConfigured'),
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
               const SizedBox(height: 8),
               Text(
-                '请在 .env 中填写 ACCOUNT_BACKEND_BASE_URL\n'
-                '（backend/ 目录提供了可直接部署的后端实现）',
+                t('account.backendHint'),
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   fontSize: 12,
@@ -346,7 +369,9 @@ class _AccountScreenState extends State<AccountScreen> {
           const SizedBox(height: 8),
           Center(
             child: Text(
-              _registerMode ? '创建 SlipCode 账号' : '登录 SlipCode 账号',
+              _registerMode
+                  ? t('account.createTitle')
+                  : t('account.loginTitle'),
               style: const TextStyle(
                 fontSize: 20,
                 fontWeight: FontWeight.bold,
@@ -356,7 +381,7 @@ class _AccountScreenState extends State<AccountScreen> {
           const SizedBox(height: 4),
           Center(
             child: Text(
-              '独立账号体系，与 GitHub / Gitee 无关；注册需手机号短信验证',
+              t('account.subtitle'),
               textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: 11,
@@ -369,14 +394,16 @@ class _AccountScreenState extends State<AccountScreen> {
             TextFormField(
               controller: _nameController,
               enabled: !_submitting,
-              decoration: const InputDecoration(
-                labelText: '昵称',
-                prefixIcon: Icon(Icons.person_outline),
-                border: OutlineInputBorder(),
+              decoration: InputDecoration(
+                labelText: t('account.displayName'),
+                prefixIcon: const Icon(Icons.person_outline),
+                border: const OutlineInputBorder(),
               ),
               validator: (v) {
-                if (v == null || v.trim().isEmpty) return '请输入昵称';
-                if (v.trim().length > 24) return '昵称不能超过 24 个字符';
+                if (v == null || v.trim().isEmpty) {
+                  return t('account.nameRequired');
+                }
+                if (v.trim().length > 24) return t('account.nameTooLong');
                 return null;
               },
             ),
@@ -387,16 +414,16 @@ class _AccountScreenState extends State<AccountScreen> {
             enabled: !_submitting,
             keyboardType: TextInputType.emailAddress,
             autocorrect: false,
-            decoration: const InputDecoration(
-              labelText: '邮箱',
-              prefixIcon: Icon(Icons.mail_outline),
-              border: OutlineInputBorder(),
+            decoration: InputDecoration(
+              labelText: t('account.email'),
+              prefixIcon: const Icon(Icons.mail_outline),
+              border: const OutlineInputBorder(),
             ),
             validator: (v) {
               final value = v?.trim() ?? '';
-              if (value.isEmpty) return '请输入邮箱';
+              if (value.isEmpty) return t('account.emailRequired');
               if (!RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(value)) {
-                return '邮箱格式不正确';
+                return t('account.emailInvalid');
               }
               return null;
             },
@@ -406,17 +433,17 @@ class _AccountScreenState extends State<AccountScreen> {
               controller: _phoneController,
               enabled: !_submitting,
               keyboardType: TextInputType.phone,
-              decoration: const InputDecoration(
-                labelText: '手机号',
-                prefixIcon: Icon(Icons.phone_iphone),
-                border: OutlineInputBorder(),
+              decoration: InputDecoration(
+                labelText: t('account.phone'),
+                prefixIcon: const Icon(Icons.phone_iphone),
+                border: const OutlineInputBorder(),
               ),
               validator: (v) {
                 if (!_registerMode) return null;
                 final value = v?.trim() ?? '';
-                if (value.isEmpty) return '请输入手机号';
+                if (value.isEmpty) return t('account.phoneRequired');
                 if (!RegExp(r'^1[3-9]\d{9}$').hasMatch(value)) {
-                  return '手机号格式不正确';
+                  return t('account.phoneInvalid');
                 }
                 return null;
               },
@@ -429,14 +456,16 @@ class _AccountScreenState extends State<AccountScreen> {
                     controller: _smsController,
                     enabled: !_submitting,
                     keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(
-                      labelText: '短信验证码',
-                      prefixIcon: Icon(Icons.sms_outlined),
-                      border: OutlineInputBorder(),
+                    decoration: InputDecoration(
+                      labelText: t('account.smsCode'),
+                      prefixIcon: const Icon(Icons.sms_outlined),
+                      border: const OutlineInputBorder(),
                     ),
                     validator: (v) {
                       if (!_registerMode) return null;
-                      if (v == null || v.trim().isEmpty) return '请输入验证码';
+                      if (v == null || v.trim().isEmpty) {
+                        return t('account.smsRequired');
+                      }
                       return null;
                     },
                   ),
@@ -449,7 +478,9 @@ class _AccountScreenState extends State<AccountScreen> {
                         ? null
                         : _sendSms,
                     child: Text(
-                      _smsCountdown > 0 ? '${_smsCountdown}s' : '获取验证码',
+                      _smsCountdown > 0
+                          ? '${_smsCountdown}s'
+                          : t('account.getSmsCode'),
                       style: const TextStyle(fontSize: 12),
                     ),
                   ),
@@ -462,14 +493,14 @@ class _AccountScreenState extends State<AccountScreen> {
             controller: _passwordController,
             enabled: !_submitting,
             obscureText: true,
-            decoration: const InputDecoration(
-              labelText: '密码',
-              prefixIcon: Icon(Icons.lock_outline),
-              border: OutlineInputBorder(),
+            decoration: InputDecoration(
+              labelText: t('account.password'),
+              prefixIcon: const Icon(Icons.lock_outline),
+              border: const OutlineInputBorder(),
             ),
             validator: (v) {
-              if (v == null || v.isEmpty) return '请输入密码';
-              if (v.length < 8) return '密码至少 8 位';
+              if (v == null || v.isEmpty) return t('account.passwordRequired');
+              if (v.length < 8) return t('account.passwordTooShort');
               return null;
             },
             onFieldSubmitted: (_) => _submit(),
@@ -482,6 +513,73 @@ class _AccountScreenState extends State<AccountScreen> {
             ),
           ],
           const SizedBox(height: 20),
+
+          // 合规：注册 / 登录前必须勾选同意《用户协议》与《隐私政策》
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SizedBox(
+                width: 32,
+                child: Checkbox(
+                  value: _policyAgreed,
+                  onChanged: _submitting
+                      ? null
+                      : (v) => setState(() {
+                            _policyAgreed = v ?? false;
+                            if (_policyAgreed) _localError = null;
+                          }),
+                ),
+              ),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 12),
+                  child: Wrap(
+                    spacing: 0,
+                    runSpacing: 2,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      Text(
+                        '${t('policy.loginConsentPrefix')} ',
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                      InkWell(
+                        onTap: () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => const PolicyScreen(initialTab: 0),
+                          ),
+                        ),
+                        child: Text(
+                          t('policy.userAgreementLink'),
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Theme.of(context).colorScheme.primary,
+                            decoration: TextDecoration.underline,
+                          ),
+                        ),
+                      ),
+                      Text(t('policy.and'), style: const TextStyle(fontSize: 12)),
+                      InkWell(
+                        onTap: () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => const PolicyScreen(initialTab: 1),
+                          ),
+                        ),
+                        child: Text(
+                          t('policy.privacyPolicyLink'),
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Theme.of(context).colorScheme.primary,
+                            decoration: TextDecoration.underline,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
           SizedBox(
             height: 48,
             child: ElevatedButton(
@@ -499,7 +597,11 @@ class _AccountScreenState extends State<AccountScreen> {
                         color: Colors.white,
                       ),
                     )
-                  : Text(_registerMode ? '注册并登录' : '登录'),
+                  : Text(
+                      _registerMode
+                          ? t('account.registerAndLogin')
+                          : t('account.login'),
+                    ),
             ),
           ),
           const SizedBox(height: 10),
@@ -510,7 +612,11 @@ class _AccountScreenState extends State<AccountScreen> {
                       _registerMode = !_registerMode;
                       _localError = null;
                     }),
-            child: Text(_registerMode ? '已有账号？去登录' : '没有账号？注册一个'),
+            child: Text(
+              _registerMode
+                  ? t('account.hasAccountLogin')
+                  : t('account.noAccountRegister'),
+            ),
           ),
         ],
       ),

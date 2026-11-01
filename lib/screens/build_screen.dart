@@ -5,15 +5,14 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../l10n/app_localizations.dart';
 import '../providers/build_provider.dart';
 import '../providers/git_sync_provider.dart';
 import '../providers/gitee_provider.dart';
 import '../providers/github_provider.dart';
 import '../providers/project_provider.dart';
-import '../services/build_service.dart';
 import '../services/git_host.dart';
 import '../services/github_api_service.dart' show WorkflowJob, WorkflowStep;
-import '../services/termux_service.dart';
 import '../widgets/log_console.dart';
 
 /// 云端构建页面
@@ -34,24 +33,9 @@ class _BuildScreenState extends State<BuildScreen> {
   /// 当前项目使用的平台（默认 GitHub）
   GitHost _host = GitHost.github;
 
-  // ---------------------------------------------------------------------------
-  // 本地构建（Termux）
-  // ---------------------------------------------------------------------------
-
-  /// 构建模式：云端 / 本地
-  bool _localBuild = false;
-  bool _checkingTermux = false;
-  bool _termuxInstalled = false;
-  bool _termuxApiInstalled = false;
-  bool _termuxHasFlutter = false;
-  bool _localBuilding = false;
-  String? _localArtifactPath;
-  final List<String> _localLogs = [];
-
   @override
   void initState() {
     super.initState();
-    _checkTermux();
     // 从服务端恢复构建进度（退出 IDE 后由服务端持续监听）
     WidgetsBinding.instance.addPostFrameCallback((_) => _syncFromServer());
   }
@@ -63,101 +47,32 @@ class _BuildScreenState extends State<BuildScreen> {
     unawaited(build.syncFromServer(projectDir: projectPath));
   }
 
-  /// 检查 Termux 环境
-  Future<void> _checkTermux() async {
-    setState(() => _checkingTermux = true);
-    final svc = TermuxService.instance;
-    _termuxInstalled = await svc.isTermuxInstalled();
-    _termuxApiInstalled = await svc.isTermuxApiInstalled();
-    if (_termuxInstalled) {
-      _termuxHasFlutter = await svc.hasFlutter();
-    }
-    if (mounted) setState(() => _checkingTermux = false);
-  }
-
-  /// 本地构建（Termux）
-  Future<void> _startLocalBuild() async {
-    final projectPath = context.read<ProjectProvider>().projectPath;
-    if (projectPath == null) return;
-    final buildType = context.read<BuildProvider>().type.inputValue;
-
-    setState(() {
-      _localBuilding = true;
-      _localLogs.clear();
-      _localArtifactPath = null;
-    });
-
-    final svc = TermuxService.instance;
-    _localLog('==> 准备 Termux 本地构建环境...');
-
-    try {
-      // 1. 把项目复制到 Termux 可访问目录
-      _localLog('==> 复制项目到 Termux 环境...');
-      final termuxPath = await svc.prepareProject(projectPath);
-      if (termuxPath == null) {
-        throw '无法把项目复制到 Termux，请确认 Termux 已获取存储权限（termux-setup-storage）';
-      }
-      _localLog('    项目路径：$termuxPath');
-
-      // 2. 执行 Flutter 构建
-      _localLog('==> 执行 flutter build（$buildType）...');
-      final result = await svc.flutterBuild(
-        termuxPath,
-        buildType,
-        onLog: _localLog,
-      );
-
-      if (!result.isSuccess) {
-        throw '构建失败（exit ${result.exitCode}）';
-      }
-      _localLog('==> 构建成功');
-
-      // 3. 查找产物
-      _localLog('==> 查找构建产物...');
-      final artifact = await svc.findArtifact(termuxPath, buildType);
-      if (artifact == null) {
-        throw '未找到构建产物';
-      }
-      _localLog('    产物：$artifact');
-
-      // 4. 复制回应用目录
-      final localPath = await svc.copyArtifactToApp(artifact, projectPath);
-      if (localPath == null) {
-        throw '无法复制产物到应用目录';
-      }
-      _localArtifactPath = localPath;
-      _localLog('==> 产物已保存：$localPath');
-
-      // 5. 清理 Termux 临时项目
-      await svc.cleanup(termuxPath);
-    } catch (e) {
-      _localLog('==> 失败：$e');
-    } finally {
-      if (mounted) setState(() => _localBuilding = false);
-    }
-  }
-
-  void _localLog(String line) {
-    if (!mounted) return;
-    setState(() => _localLogs.add(line));
-  }
-
   Future<void> _connect() async {
     if (_host == GitHost.github) {
       final github = context.read<GitHubProvider>();
       final ok = await github.signIn();
       if (!mounted) return;
       if (!ok && github.error != null) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('连接失败：${github.error}')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              t('build.connectFailed', {'error': '${github.error}'}),
+            ),
+          ),
+        );
       }
     } else {
       final gitee = context.read<GiteeProvider>();
       final ok = await gitee.signIn();
       if (!mounted) return;
       if (!ok && gitee.error != null) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('连接失败：${gitee.error}')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              t('build.connectFailed', {'error': '${gitee.error}'}),
+            ),
+          ),
+        );
       }
     }
   }
@@ -184,15 +99,15 @@ class _BuildScreenState extends State<BuildScreen> {
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          title: Text('创建 ${host.label} 仓库'),
+          title: Text(t('build.createRepoTitle', {'host': host.label})),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               TextField(
                 controller: nameController,
-                decoration: const InputDecoration(
-                  labelText: '仓库名',
-                  border: OutlineInputBorder(),
+                decoration: InputDecoration(
+                  labelText: t('build.repoNameLabel'),
+                  border: const OutlineInputBorder(),
                   isDense: true,
                 ),
               ),
@@ -200,15 +115,15 @@ class _BuildScreenState extends State<BuildScreen> {
               SwitchListTile(
                 value: isPrivate,
                 onChanged: (v) => setDialogState(() => isPrivate = v),
-                title: const Text('私有仓库'),
+                title: Text(t('build.privateRepo')),
                 dense: true,
                 contentPadding: EdgeInsets.zero,
               ),
               const SizedBox(height: 4),
               Text(
                 host == GitHost.github
-                    ? '创建后将把当前项目代码推送到 main 分支，并注入 GitHub Actions workflow（含 iOS 构建）。'
-                    : '创建后将把当前项目代码推送到 master 分支，并注入 Gitee Go 流水线（仅 Android，iOS 不可用）。',
+                    ? t('build.repoHintGithub')
+                    : t('build.repoHintGitee'),
                 style: const TextStyle(fontSize: 12, color: Colors.grey),
               ),
             ],
@@ -216,11 +131,11 @@ class _BuildScreenState extends State<BuildScreen> {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context, false),
-              child: const Text('取消'),
+              child: Text(t('common.cancel')),
             ),
             FilledButton(
               onPressed: () => Navigator.pop(context, true),
-              child: const Text('创建并推送'),
+              child: Text(t('build.createAndPush')),
             ),
           ],
         ),
@@ -270,16 +185,21 @@ class _BuildScreenState extends State<BuildScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('✓ 仓库已创建：$fullName'),
+            content: Text(t('build.repoCreated', {'name': fullName})),
             backgroundColor: Colors.green,
           ),
         );
       }
     } catch (e) {
       if (mounted) {
-        setState(() => _repoSetupLogs.add('==> 失败：$e'));
+        setState(() {
+          _repoSetupLogs.add('==> ${t('build.failed', {'error': '$e'})}');
+        });
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('创建失败：$e'), backgroundColor: Colors.red),
+          SnackBar(
+            content: Text(t('build.createRepoFailed', {'error': '$e'})),
+            backgroundColor: Colors.red,
+          ),
         );
       }
     } finally {
@@ -292,7 +212,11 @@ class _BuildScreenState extends State<BuildScreen> {
     final ok = await provider.installArtifact();
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(ok ? '已调用系统安装器' : '无法安装，请检查产物或使用文件管理器安装')),
+      SnackBar(
+        content: Text(
+          ok ? t('build.installerLaunched') : t('build.installFailed'),
+        ),
+      ),
     );
   }
 
@@ -320,56 +244,31 @@ class _BuildScreenState extends State<BuildScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(_localBuild ? '本地构建' : '云端构建'),
+        title: Text(t('build.title')),
         actions: [
           IconButton(
             icon: const Icon(Icons.clear_all),
-            tooltip: '清空日志',
-            onPressed: _localBuild
-                ? () => setState(() => _localLogs.clear())
-                : build.clearLogs,
+            tooltip: t('build.clearLogs'),
+            onPressed: build.clearLogs,
           ),
         ],
       ),
       body: Column(
         children: [
-          // 构建模式切换：云端 / 本地（Termux）
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-            child: SegmentedButton<bool>(
-              segments: const [
-                ButtonSegment(
-                  value: false,
-                  label: Text('云端构建'),
-                  icon: Icon(Icons.cloud, size: 16),
-                ),
-                ButtonSegment(
-                  value: true,
-                  label: Text('本地构建'),
-                  icon: Icon(Icons.terminal, size: 16),
-                ),
-              ],
-              selected: {_localBuild},
-              onSelectionChanged: (v) => setState(() => _localBuild = v.first),
-            ),
-          ),
           Expanded(
             child: ListView(
               padding: const EdgeInsets.all(16),
-              children: _localBuild
-                  ? _buildLocalSection(isDark, projectPath)
-                  : _buildCloudSection(
-                      isDark,
-                      build,
-                      github,
-                      gitee,
-                      sync,
-                      link,
-                      signedIn,
-                      canBuild,
-                      projectPath,
-                    ),
+              children: _buildCloudSection(
+                isDark,
+                build,
+                github,
+                gitee,
+                sync,
+                link,
+                signedIn,
+                canBuild,
+                projectPath,
+              ),
             ),
           ),
 
@@ -379,8 +278,8 @@ class _BuildScreenState extends State<BuildScreen> {
             child: Padding(
               padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
               child: LogConsole(
-                lines: _localBuild ? _localLogs : build.logs,
-                emptyText: _localBuild ? '本地构建日志将显示在这里' : '构建日志将显示在这里',
+                lines: build.logs,
+                emptyText: t('build.logsEmpty'),
               ),
             ),
           ),
@@ -408,7 +307,7 @@ class _BuildScreenState extends State<BuildScreen> {
       // 平台选择（已关联仓库时锁定）
       if (link == null) ...[
         Text(
-          '构建平台',
+          t('build.platform'),
           style: TextStyle(
             fontSize: 13,
             fontWeight: FontWeight.w600,
@@ -453,10 +352,12 @@ class _BuildScreenState extends State<BuildScreen> {
         isDark: isDark,
         ok: projectPath != null && link != null,
         title: projectPath == null
-            ? '未打开项目'
-            : (link == null ? '项目未关联 ${_host.label} 仓库' : '已关联仓库'),
+            ? t('build.noProject')
+            : (link == null
+                  ? t('build.repoNotLinked', {'host': _host.label})
+                  : t('build.repoLinked')),
         subtitle: projectPath == null
-            ? '请先打开一个 Flutter 项目'
+            ? t('build.openProjectFirst')
             : (link?.repo ?? projectPath),
         trailing:
             (projectPath != null &&
@@ -465,7 +366,7 @@ class _BuildScreenState extends State<BuildScreen> {
                 !_repoSetupRunning)
             ? TextButton(
                 onPressed: _createRepoForProject,
-                child: const Text('创建仓库'),
+                child: Text(t('build.createRepo')),
               )
             : null,
       ),
@@ -500,12 +401,19 @@ class _BuildScreenState extends State<BuildScreen> {
           Expanded(
             child: Text(
               switch (sync.status) {
-                GitSyncStatus.idle => '代码已同步',
-                GitSyncStatus.pending => '有 ${sync.pendingCount} 个文件待同步（自动推送中）',
-                GitSyncStatus.syncing => '正在同步 ${sync.pendingCount} 个文件...',
-                GitSyncStatus.success =>
-                  '代码已自动同步到 ${link?.host.label ?? '远程仓库'}',
-                GitSyncStatus.error => '同步失败：${sync.error ?? ''}',
+                GitSyncStatus.idle => t('build.syncIdle'),
+                GitSyncStatus.pending => t('build.syncPending', {
+                  'count': '${sync.pendingCount}',
+                }),
+                GitSyncStatus.syncing => t('build.syncing', {
+                  'count': '${sync.pendingCount}',
+                }),
+                GitSyncStatus.success => t('build.syncDone', {
+                  'target': link?.host.label ?? t('build.remoteRepo'),
+                }),
+                GitSyncStatus.error => t('build.syncFailed', {
+                  'error': sync.error ?? '',
+                }),
               },
               style: TextStyle(
                 fontSize: 12,
@@ -516,7 +424,10 @@ class _BuildScreenState extends State<BuildScreen> {
             ),
           ),
           if (sync.pendingCount > 0)
-            TextButton(onPressed: sync.syncNow, child: const Text('立即同步')),
+            TextButton(
+              onPressed: sync.syncNow,
+              child: Text(t('build.syncNow')),
+            ),
         ],
       ),
       const SizedBox(height: 16),
@@ -525,7 +436,7 @@ class _BuildScreenState extends State<BuildScreen> {
       Row(
         children: [
           Text(
-            '构建类型',
+            t('build.type'),
             style: TextStyle(
               fontSize: 13,
               fontWeight: FontWeight.w600,
@@ -559,7 +470,7 @@ class _BuildScreenState extends State<BuildScreen> {
         Padding(
           padding: const EdgeInsets.only(top: 6),
           child: Text(
-            'Gitee Go 无 macOS Runner，iOS 构建已禁用；需要 iOS 产物请使用 GitHub',
+            t('build.iosDisabledHint'),
             style: TextStyle(
               fontSize: 10,
               color: isDark ? Colors.white38 : Colors.black45,
@@ -579,8 +490,10 @@ class _BuildScreenState extends State<BuildScreen> {
               icon: const Icon(Icons.cloud_upload),
               label: Text(
                 build.isRunning
-                    ? '构建中（${link?.host.ciName ?? '云端'}）...'
-                    : '开始云端构建',
+                    ? t('build.running', {
+                        'ci': link?.host.ciName ?? t('build.cloud'),
+                      })
+                    : t('build.start'),
               ),
               style: FilledButton.styleFrom(
                 padding: const EdgeInsets.symmetric(vertical: 14),
@@ -592,7 +505,7 @@ class _BuildScreenState extends State<BuildScreen> {
             OutlinedButton.icon(
               onPressed: build.cancel,
               icon: const Icon(Icons.stop),
-              label: const Text('取消'),
+              label: Text(t('common.cancel')),
             ),
           ],
         ],
@@ -607,7 +520,9 @@ class _BuildScreenState extends State<BuildScreen> {
               mode: LaunchMode.externalApplication,
             ),
             icon: const Icon(Icons.open_in_new, size: 16),
-            label: Text('在 ${link?.host.label ?? _host.label} 查看运行详情'),
+            label: Text(
+              t('build.viewRun', {'host': link?.host.label ?? _host.label}),
+            ),
           ),
         ),
       ],
@@ -633,8 +548,9 @@ class _BuildScreenState extends State<BuildScreen> {
           onInstall: _installArtifact,
           onCopy: () {
             Clipboard.setData(ClipboardData(text: build.artifactPath!));
-            ScaffoldMessenger.of(context)
-                .showSnackBar(const SnackBar(content: Text('路径已复制')));
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text(t('build.pathCopied'))),
+            );
           },
         ),
       ],
@@ -643,7 +559,7 @@ class _BuildScreenState extends State<BuildScreen> {
       Row(
         children: [
           Text(
-            build.currentTask.isEmpty ? '执行日志' : build.currentTask,
+            build.currentTask.isEmpty ? t('build.runLogs') : build.currentTask,
             style: TextStyle(
               fontSize: 13,
               fontWeight: FontWeight.w600,
@@ -657,162 +573,6 @@ class _BuildScreenState extends State<BuildScreen> {
               style: const TextStyle(fontSize: 11, color: Colors.grey),
             ),
         ],
-      ),
-    ];
-  }
-
-  // ---------------------------------------------------------------------------
-  // 本地构建（Termux）区块
-  // ---------------------------------------------------------------------------
-
-  List<Widget> _buildLocalSection(bool isDark, String? projectPath) {
-    return [
-      Text(
-        'Termux 环境',
-        style: TextStyle(
-          fontSize: 13,
-          fontWeight: FontWeight.w600,
-          color: isDark ? Colors.white70 : Colors.black87,
-        ),
-      ),
-      const SizedBox(height: 8),
-      if (_checkingTermux)
-        const Padding(
-          padding: EdgeInsets.all(12),
-          child: Center(child: CircularProgressIndicator()),
-        )
-      else ...[
-        _StatusTile(
-          isDark: isDark,
-          ok: _termuxInstalled,
-          title: _termuxInstalled ? 'Termux 已安装' : 'Termux 未安装',
-          subtitle: _termuxInstalled ? 'com.termux' : '请从 F-Droid 安装 Termux',
-        ),
-        const SizedBox(height: 8),
-        _StatusTile(
-          isDark: isDark,
-          ok: _termuxApiInstalled,
-          title: _termuxApiInstalled ? 'Termux:API 已安装' : 'Termux:API 未安装',
-          subtitle: _termuxApiInstalled
-              ? 'com.termux.api'
-              : '请从 F-Droid 安装 Termux:API 插件',
-        ),
-        const SizedBox(height: 8),
-        _StatusTile(
-          isDark: isDark,
-          ok: _termuxHasFlutter,
-          title: _termuxHasFlutter ? 'Flutter 已就绪' : 'Flutter 未安装',
-          subtitle: _termuxHasFlutter
-              ? '可在 Termux 中执行 flutter build'
-              : '在 Termux 中执行：pkg install flutter',
-        ),
-      ],
-      const SizedBox(height: 16),
-
-      // 构建类型
-      Row(
-        children: [
-          Text(
-            '构建类型',
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: isDark ? Colors.white70 : Colors.black87,
-            ),
-          ),
-        ],
-      ),
-      const SizedBox(height: 8),
-      Wrap(
-        spacing: 8,
-        runSpacing: 8,
-        children:
-            [
-              BuildType.apkRelease,
-              BuildType.apkDebug,
-              BuildType.appBundleRelease,
-            ].map((type) {
-              final build = context.read<BuildProvider>();
-              final selected = build.type == type;
-              return ChoiceChip(
-                label: Text(type.label),
-                selected: selected,
-                onSelected: _localBuilding ? null : (_) => build.setType(type),
-              );
-            }).toList(),
-      ),
-      const SizedBox(height: 16),
-
-      // 本地构建按钮
-      FilledButton.icon(
-        onPressed:
-            (_termuxInstalled &&
-                _termuxHasFlutter &&
-                projectPath != null &&
-                !_localBuilding)
-            ? _startLocalBuild
-            : null,
-        icon: _localBuilding
-            ? const SizedBox(
-                width: 16,
-                height: 16,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: Colors.white,
-                ),
-              )
-            : const Icon(Icons.build),
-        label: Text(_localBuilding ? '构建中...' : '开始本地构建'),
-        style: FilledButton.styleFrom(
-          padding: const EdgeInsets.symmetric(vertical: 14),
-          minimumSize: const Size.fromHeight(48),
-        ),
-      ),
-
-      if (!_termuxInstalled) ...[
-        const SizedBox(height: 12),
-        Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: Colors.orange.withValues(alpha: 0.1),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: const Text(
-            '本地构建需要在手机上安装 Termux 并配置 Flutter 环境。'
-            '安装后在 Termux 中执行 termux-setup-storage 获取存储权限，'
-            '再执行 pkg install flutter 安装 Flutter。',
-            style: TextStyle(fontSize: 11, height: 1.5),
-          ),
-        ),
-      ],
-
-      // 本地产物
-      if (_localArtifactPath != null) ...[
-        const SizedBox(height: 16),
-        _ArtifactCard(
-          path: _localArtifactPath!,
-          isDark: isDark,
-          platformLabel: 'Termux 本地',
-          onInstall: () async {
-            final ok = await BuildService.instance.installApk(
-              _localArtifactPath!,
-            );
-            if (!mounted) return;
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text(ok ? '已调用系统安装器' : '无法安装，请检查产物')),
-            );
-          },
-          onCopy: () {
-            Clipboard.setData(ClipboardData(text: _localArtifactPath!));
-            ScaffoldMessenger.of(context)
-                .showSnackBar(const SnackBar(content: Text('路径已复制')));
-          },
-        ),
-      ],
-      const SizedBox(height: 20),
-      const Text(
-        '执行日志',
-        style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
       ),
     ];
   }
@@ -833,11 +593,14 @@ class _WorkflowCard extends StatelessWidget {
 
   static String _durationText(WorkflowStep step) {
     final d = step.duration;
-    if (d == null) return '未知';
+    if (d == null) return t('build.unknown');
     if (d.inMinutes > 0) {
-      return '${d.inMinutes} 分 ${d.inSeconds % 60} 秒';
+      return t('build.durationMinutes', {
+        'minutes': '${d.inMinutes}',
+        'seconds': '${d.inSeconds % 60}',
+      });
     }
-    return '${d.inSeconds} 秒';
+    return t('build.durationSeconds', {'seconds': '${d.inSeconds}'});
   }
 
   static Widget _stepIcon(WorkflowStep step) {
@@ -876,10 +639,10 @@ class _WorkflowCard extends StatelessWidget {
   }
 
   static String _stepSubtitle(WorkflowStep step) {
-    if (step.isRunning) return '正在运行';
-    if (!step.isCompleted) return '未知';
+    if (step.isRunning) return t('build.stepRunning');
+    if (!step.isCompleted) return t('build.unknown');
     final d = step.duration;
-    if (d == null) return '已完成';
+    if (d == null) return t('build.stepCompleted');
     return _durationText(step);
   }
 
@@ -900,12 +663,12 @@ class _WorkflowCard extends StatelessWidget {
       child: Column(
         children: [
           if (jobs.isEmpty)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 28),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 28),
               child: Center(
                 child: Text(
-                  '正在等待运行开始…',
-                  style: TextStyle(fontSize: 13, color: Colors.grey),
+                  t('build.waitingRun'),
+                  style: const TextStyle(fontSize: 13, color: Colors.grey),
                 ),
               ),
             )
@@ -984,7 +747,7 @@ class _WorkflowCard extends StatelessWidget {
                     foregroundColor: Colors.white,
                   ),
                   icon: const Icon(Icons.close, size: 18),
-                  label: const Text('取消工作流'),
+                  label: Text(t('build.cancelWorkflow')),
                 ),
               ),
             ),
@@ -1043,10 +806,13 @@ class _HostAccountCard extends StatelessWidget {
               children: [
                 Text(
                   signedIn
-                      ? '已连接 ${host.label}：${login ?? ''}'
+                      ? t('build.connectedAs', {
+                          'host': host.label,
+                          'login': login ?? '',
+                        })
                       : (configured
-                            ? '未连接 ${host.label}'
-                            : '未配置 ${host.label}'),
+                            ? t('build.notConnected', {'host': host.label})
+                            : t('build.notConfigured', {'host': host.label})),
                   style: const TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
@@ -1057,12 +823,12 @@ class _HostAccountCard extends StatelessWidget {
                   configured
                       ? (signedIn
                             ? (host == GitHost.github
-                                  ? 'OAuth 授权（PKCE）已完成'
-                                  : 'OAuth 授权已完成（token 由账号后端换取）')
-                            : '通过 OAuth 授权后才能创建仓库与云端构建')
+                                  ? t('build.oauthPkceDone')
+                                  : t('build.oauthDone'))
+                            : t('build.oauthRequired'))
                       : (host == GitHost.github
-                            ? '请在 .env 中填写 GITHUB_CLIENT_ID 后重启应用'
-                            : 'Gitee 需要 GITEE_CLIENT_ID + 账号后端（后端换 token）'),
+                            ? t('build.needGithubClientId')
+                            : t('build.needGiteeConfig')),
                   style: TextStyle(
                     fontSize: 11,
                     color: isDark ? Colors.white54 : Colors.black45,
@@ -1076,7 +842,13 @@ class _HostAccountCard extends StatelessWidget {
               onPressed: signingIn
                   ? null
                   : (signedIn ? onDisconnect : onConnect),
-              child: Text(signingIn ? '授权中...' : (signedIn ? '断开' : '连接')),
+              child: Text(
+                signingIn
+                    ? t('build.authorizing')
+                    : (signedIn
+                          ? t('build.disconnect')
+                          : t('build.connect')),
+              ),
             ),
         ],
       ),
@@ -1180,7 +952,7 @@ class _ArtifactCard extends StatelessWidget {
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
-                  '构建产物（已从 $platformLabel 下载）',
+                  t('build.artifactTitle', {'platform': platformLabel}),
                   style: const TextStyle(
                     fontWeight: FontWeight.w600,
                     fontSize: 13,
@@ -1200,14 +972,14 @@ class _ArtifactCard extends StatelessWidget {
               OutlinedButton.icon(
                 onPressed: onCopy,
                 icon: const Icon(Icons.copy, size: 16),
-                label: const Text('复制路径'),
+                label: Text(t('build.copyPath')),
               ),
               const SizedBox(width: 8),
               if (path.endsWith('.apk'))
                 FilledButton.tonalIcon(
                   onPressed: onInstall,
                   icon: const Icon(Icons.install_mobile, size: 16),
-                  label: const Text('安装'),
+                  label: Text(t('build.install')),
                 ),
             ],
           ),

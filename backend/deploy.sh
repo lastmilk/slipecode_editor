@@ -1,5 +1,5 @@
 #!/bin/bash
-# SlipCode 账号后端部署脚本（宝塔面板 · CentOS）
+# SLIPE 账号后端部署脚本（宝塔面板 · CentOS）
 #
 # 使用前提：
 #   1. 已在宝塔「网站 → 反向代理」创建站点 api.slipe.cn，目标 http://127.0.0.1:8787
@@ -49,7 +49,7 @@ CORS_ORIGIN=*
 GITHUB_REDIRECT_URI=https://api.slipe.cn/api/oauth/github/callback
 GITEE_CLIENT_ID=
 GITEE_CLIENT_SECRET=
-GITEE_REDIRECT_URI=slipecode://oauth/gitee/callback
+GITEE_REDIRECT_URI=slipe://oauth/gitee/callback
 EOF
   chmod 600 "$APP/.env"
   echo "已生成 $APP/.env（含随机 JWT_SECRET）"
@@ -59,9 +59,9 @@ fi
 mkdir -p "${ROOT}/api/data"
 
 echo "==> 4/5 注册 systemd 服务"
-cat > /etc/systemd/system/slipecode-api.service <<EOF
+cat > /etc/systemd/system/slipe-api.service <<EOF
 [Unit]
-Description=SlipCode Account Backend
+Description=SLIPE Account Backend
 After=network-online.target
 
 [Service]
@@ -77,12 +77,12 @@ LimitNOFILE=65535
 WantedBy=multi-user.target
 EOF
 systemctl daemon-reload
-systemctl enable slipecode-api >/dev/null 2>&1
-systemctl restart slipecode-api
+systemctl enable slipe-api >/dev/null 2>&1
+systemctl restart slipe-api
 
 echo "==> 5/5 自检"
 sleep 2
-systemctl --no-pager --lines=5 status slipecode-api || true
+systemctl --no-pager --lines=5 status slipe-api || true
 echo -n "本地健康检查: "
 curl -sS --max-time 5 http://127.0.0.1:8787/api/health || echo "(失败)"
 echo

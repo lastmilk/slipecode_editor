@@ -13,7 +13,7 @@ class ProjectHistoryService {
 
   static final ProjectHistoryService instance = ProjectHistoryService._();
 
-  static const _key = 'slipecode_project_history';
+  static const _key = 'slipe_project_history';
   static const _maxEntries = 30;
 
   /// 读取历史记录（按最近编辑时间倒序）

@@ -154,12 +154,12 @@ class GitSyncProvider extends ChangeNotifier {
         GitHost.github => await _github.api!.pushFiles(
             link.repo,
             repoFiles,
-            message: 'chore: sync ${repoFiles.length} file(s) from SlipCode',
+            message: 'chore: sync ${repoFiles.length} file(s) from SLIPE',
           ),
         GitHost.gitee => await _gitee.api!.pushFiles(
             link.repo,
             repoFiles,
-            message: 'chore: sync ${repoFiles.length} file(s) from SlipCode',
+            message: 'chore: sync ${repoFiles.length} file(s) from SLIPE',
             branch: 'master',
           ),
       };

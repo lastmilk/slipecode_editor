@@ -8,11 +8,11 @@ class GitHubActionsTemplates {
   GitHubActionsTemplates._();
 
   /// 工作流文件在仓库中的路径
-  static const String workflowPath = '.github/workflows/slipecode_build.yml';
+  static const String workflowPath = '.github/workflows/slipe_build.yml';
 
   /// Flutter 构建工作流
   static const String flutterBuildWorkflow = r'''
-name: SlipCode Build
+name: SLIPE Build
 
 on:
   push:
@@ -46,13 +46,13 @@ jobs:
           cache: true
 
       # 本地创建的项目不含平台工程，构建前用 flutter create 补齐。
-      # org / 项目名从模板自带的 .slipecode.json 读取；缺失时退回默认值。
+      # org / 项目名从模板自带的 .slipe.json 读取；缺失时退回默认值。
       - name: Generate platform files
         run: |
           set -e
-          if [ -f .slipecode.json ]; then
-            ORG=$(jq -r '.org // "com.example"' .slipecode.json)
-            NAME=$(jq -r '.project_name // empty' .slipecode.json)
+          if [ -f .slipe.json ]; then
+            ORG=$(jq -r '.org // "com.example"' .slipe.json)
+            NAME=$(jq -r '.project_name // empty' .slipe.json)
             flutter create --org "$ORG" --platforms=android ${NAME:+--project-name "$NAME"} .
           else
             flutter create --platforms=android .
@@ -81,7 +81,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: slipecode-${{ inputs.build_type || 'apk-release' }}
+          name: slipe-${{ inputs.build_type || 'apk-release' }}
           path: |
             build/app/outputs/flutter-apk/*.apk
             build/app/outputs/bundle/**/*.aab
@@ -104,9 +104,9 @@ jobs:
       - name: Generate iOS platform files
         run: |
           set -e
-          if [ -f .slipecode.json ]; then
-            ORG=$(jq -r '.org // "com.example"' .slipecode.json)
-            NAME=$(jq -r '.project_name // empty' .slipecode.json)
+          if [ -f .slipe.json ]; then
+            ORG=$(jq -r '.org // "com.example"' .slipe.json)
+            NAME=$(jq -r '.project_name // empty' .slipe.json)
             flutter create --org "$ORG" --platforms=ios ${NAME:+--project-name "$NAME"} .
           else
             flutter create --platforms=ios .
@@ -125,13 +125,13 @@ jobs:
           mkdir -p build/ios-artifact
           ditto -c -k --sequesterRsrc --keepParent \
             build/ios/iphoneos/Runner.app \
-            build/ios-artifact/slipecode-ios-unsigned.zip
+            build/ios-artifact/slipe-ios-unsigned.zip
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: slipecode-ios-release
-          path: build/ios-artifact/slipecode-ios-unsigned.zip
+          name: slipe-ios-release
+          path: build/ios-artifact/slipe-ios-unsigned.zip
           if-no-files-found: error
 ''';
 }

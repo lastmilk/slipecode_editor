@@ -40,7 +40,7 @@ class GiteeProvider extends ChangeNotifier {
 
   GiteeApiService? get api => isSignedIn ? GiteeApiService(_token!) : null;
 
-  static const _repoMapPrefix = 'slipecode_gitee_repo::';
+  static const _repoMapPrefix = 'slipe_gitee_repo::';
 
   /// 启动时恢复登录状态
   Future<void> init() async {
@@ -154,7 +154,7 @@ class GiteeProvider extends ChangeNotifier {
     final repo = await client.createRepo(
       repoName,
       private: private,
-      description: 'Created by SlipCode',
+      description: 'Created by SLIPE',
     );
     await linkRepo(projectPath, repo.fullName);
     return repo;
@@ -201,6 +201,17 @@ class GiteeProvider extends ChangeNotifier {
     );
     onLog?.call('    ${repo.htmlUrl}');
 
+    // 新仓库必须先开通 Gitee Go，.workflow 流水线才会被识别
+    // POST /v5/repos/{owner}/{repo}/open（幂等，已开通同样返回成功）
+    try {
+      onLog?.call('==> 开通 Gitee Go（云原生构建）');
+      await client.openGiteeGo(repo.fullName);
+      onLog?.call('    Gitee Go 已开通');
+    } catch (e) {
+      // 开通失败不阻断建仓：仓库本身可用，稍后构建时还会重试开通
+      onLog?.call('    ⚠ Gitee Go 开通失败（构建时会重试）：$e');
+    }
+
     onLog?.call('==> 扫描项目文件');
     final files = await ProjectSnapshot.collect(
       projectPath,
@@ -212,7 +223,7 @@ class GiteeProvider extends ChangeNotifier {
     await client.pushFiles(
       repo.fullName,
       files,
-      message: 'chore: initial commit from SlipCode',
+      message: 'chore: initial commit from SLIPE',
       branch: repo.defaultBranch,
       onProgress: (done, total) {
         if (done == total || done % 10 == 0) {
@@ -240,7 +251,7 @@ class GiteeProvider extends ChangeNotifier {
             ),
           ),
         ],
-        message: 'ci: add SlipCode Gitee Go pipeline',
+        message: 'ci: add SLIPE Gitee Go pipeline',
         branch: repo.defaultBranch,
       );
       onLog?.call('    提示：Gitee Go 不支持 macOS Runner，iOS 请使用 GitHub Actions');

@@ -1,4 +1,4 @@
-/* SlipCode WorkAdmin —— Vue 3 + Element Plus 管理端 */
+/* SLIPE WorkAdmin —— Vue 3 + Element Plus 管理端 */
 
 const TOKEN_KEY = 'slipe_admin_token';
 
@@ -90,6 +90,14 @@ const app = Vue.createApp({
       docDialog: false,
       docForm: { id: '', title: '', content: '', published: true },
       savingDoc: false,
+
+      policies: {
+        userAgreement: { title: '', content: '', version: '', updatedAt: '' },
+        privacyPolicy: { title: '', content: '', version: '', updatedAt: '' },
+      },
+      loadingPolicies: false,
+      savingUa: false,
+      savingPrivacy: false,
 
       models: [],
       loadingModels: false,
@@ -225,6 +233,7 @@ const app = Vue.createApp({
       if (tab === 'config') this.loadConfig();
       if (tab === 'llm') this.loadModels();
       if (tab === 'docs') this.loadDocs();
+      if (tab === 'policies') this.loadPolicies();
     },
 
     async loadStats() {
@@ -549,6 +558,54 @@ const app = Vue.createApp({
         await this.loadDocs();
       } catch (err) {
         this.handleError(err);
+      }
+    },
+
+    async loadPolicies() {
+      this.loadingPolicies = true;
+      try {
+        const data = await request('/api/admin/policies');
+        const empty = { title: '', content: '', version: '', updatedAt: '' };
+        this.policies = {
+          userAgreement: (data.policies && data.policies.userAgreement) || empty,
+          privacyPolicy: (data.policies && data.policies.privacyPolicy) || empty,
+        };
+      } catch (err) {
+        this.handleError(err);
+      } finally {
+        this.loadingPolicies = false;
+      }
+    },
+
+    async savePolicy(type) {
+      const policy = this.policies[type];
+      if (!policy) return;
+      if (!policy.title.trim()) {
+        ElementPlus.ElMessage.warning('标题不能为空');
+        return;
+      }
+      if (!policy.content.trim()) {
+        ElementPlus.ElMessage.warning('正文不能为空');
+        return;
+      }
+      const loadingKey = type === 'userAgreement' ? 'savingUa' : 'savingPrivacy';
+      this[loadingKey] = true;
+      try {
+        const data = await request('/api/admin/policies', {
+          method: 'PUT',
+          body: {
+            type,
+            title: policy.title,
+            content: policy.content,
+            version: policy.version,
+          },
+        });
+        if (data.policy) this.policies[type] = data.policy;
+        ElementPlus.ElMessage.success('已保存并发布');
+      } catch (err) {
+        this.handleError(err);
+      } finally {
+        this[loadingKey] = false;
       }
     },
 

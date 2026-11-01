@@ -9,7 +9,7 @@ class OverlayService {
 
   static final OverlayService instance = OverlayService._();
 
-  static const _channel = MethodChannel('slipecode/overlay');
+  static const _channel = MethodChannel('slipe/overlay');
 
   /// 是否拥有「显示在其他应用上层」权限（iOS 恒为 false）
   Future<bool> checkPermission() async {

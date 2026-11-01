@@ -3,7 +3,6 @@ import 'dart:math';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 
 import '../l10n/app_localizations.dart';
@@ -63,7 +62,9 @@ class _HomeScreenState extends State<HomeScreen>
     ));
     _entranceController.forward();
 
-    _requestPermissions();
+    // 合规说明：开屏不申请任何文件存储权限。
+    // 项目默认存放在应用私有目录；用户可在「偏好设置 → 项目与Git」
+    // 中手动开启共享存储并自行选择项目存放位置。
     _loadHistory();
     _loadSaying();
   }
@@ -72,18 +73,6 @@ class _HomeScreenState extends State<HomeScreen>
   void dispose() {
     _entranceController.dispose();
     super.dispose();
-  }
-
-  Future<void> _requestPermissions() async {
-    // 仅 Android 需要存储权限；iOS 使用文档选择器，无需申请
-    if (!Platform.isAndroid) return;
-    if (await Permission.storage.status != PermissionStatus.granted) {
-      await Permission.storage.request();
-    }
-    if (await Permission.manageExternalStorage.status !=
-        PermissionStatus.granted) {
-      await Permission.manageExternalStorage.request();
-    }
   }
 
   Future<void> _loadHistory() async {

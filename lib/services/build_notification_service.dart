@@ -11,7 +11,7 @@ class BuildNotificationService {
 
   static final BuildNotificationService instance = BuildNotificationService._();
 
-  static const MethodChannel _channel = MethodChannel('slipecode/build_watch');
+  static const MethodChannel _channel = MethodChannel('slipe/build_watch');
 
   bool _running = false;
 

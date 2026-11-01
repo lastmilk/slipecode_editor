@@ -46,7 +46,7 @@ class ContainerService {
 
   static final ContainerService instance = ContainerService._();
 
-  static const MethodChannel _channel = MethodChannel('slipecode/container');
+  static const MethodChannel _channel = MethodChannel('slipe/container');
 
   /// 默认 Alpine rootfs 下载地址（aarch64）
   static const String defaultRootfsUrl =

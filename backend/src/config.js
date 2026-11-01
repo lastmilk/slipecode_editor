@@ -8,7 +8,7 @@ import { getDb } from './db.js';
 const env = process.env;
 
 export const PORT = Number(env.PORT || 8787);
-export const JWT_SECRET = env.JWT_SECRET || 'dev-only-change-me-slipecode-secret';
+export const JWT_SECRET = env.JWT_SECRET || 'dev-only-change-me-slipe-secret';
 export const TOKEN_TTL_SECONDS = 60 * 60 * 24 * 30; // 30 天
 /** 管理员会话有效期：8 小时 */
 export const ADMIN_TOKEN_TTL_SECONDS = 60 * 60 * 8;
@@ -113,7 +113,7 @@ export const GITHUB = {
   clientSecret: env.GITHUB_CLIENT_SECRET || '',
   redirectUri:
     env.GITHUB_REDIRECT_URI || 'https://api.slipe.cn/api/oauth/github/callback',
-  deepLink: env.GITHUB_DEEP_LINK || 'slipecode://oauth/callback',
+  deepLink: env.GITHUB_DEEP_LINK || 'slipe://oauth/callback',
   oauthBase: env.GITHUB_OAUTH_BASE || 'https://github.com/login/oauth',
 };
 

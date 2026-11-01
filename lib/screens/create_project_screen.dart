@@ -8,6 +8,7 @@ import '../providers/gitee_provider.dart';
 import '../providers/github_provider.dart';
 import '../providers/project_provider.dart';
 import '../providers/settings_provider.dart';
+import '../l10n/app_localizations.dart';
 import '../payloads/project_payload.dart';
 import '../services/git_host.dart';
 import '../services/project_create_service.dart';
@@ -49,8 +50,11 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
   @override
   void initState() {
     super.initState();
-    // 设置默认路径（Android 外部存储 / iOS 应用文档目录）
-    if (Platform.isAndroid) {
+    // 设置默认路径：默认使用应用私有目录（无需任何存储权限）。
+    // 仅当用户已在偏好设置中手动开启「共享存储」时，
+    // 才默认使用公共目录 /storage/emulated/0/Projects。
+    final settings = context.read<SettingsProvider>().settings;
+    if (Platform.isAndroid && settings.sharedStorageEnabled) {
       _pathController.text = '/storage/emulated/0/Projects';
     } else {
       getApplicationDocumentsDirectory().then((dir) {
@@ -60,7 +64,6 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
     }
 
     // 偏好设置中的默认 Git 平台与建仓开关
-    final settings = context.read<SettingsProvider>().settings;
     _host = settings.defaultGitHost;
     _createRepo = settings.createRepoOnCreate;
 
@@ -134,7 +137,7 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
             } else {
               if (mounted) {
                 setState(() => _outputLines.add(
-                      '[WARN] 未登录 GitHub，已跳过创建仓库',
+                      t('create.warnNotSignedInGithub'),
                     ));
               }
             }
@@ -151,19 +154,26 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
             } else {
               if (mounted) {
                 setState(() => _outputLines.add(
-                      '[WARN] 未登录 Gitee（或未配置后端），已跳过创建仓库',
+                      t('create.warnNotSignedInGitee'),
                     ));
               }
             }
           }
         } catch (e) {
           if (mounted) {
-            setState(
-              () => _outputLines.add('[ERROR] ${_host.label} 仓库创建失败: $e'),
-            );
+            final message = t('create.repoCreateFailed', {
+              'host': _host.label,
+              'error': '$e',
+            });
+            setState(() => _outputLines.add('[ERROR] $message'));
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
-                content: Text('项目已创建，但 ${_host.label} 仓库创建失败: $e'),
+                content: Text(
+                  t('create.projectCreatedButRepoFailed', {
+                    'host': _host.label,
+                    'error': '$e',
+                  }),
+                ),
                 backgroundColor: Colors.orange,
               ),
             );
@@ -174,8 +184,8 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
       if (mounted) {
         // 先显示完成，再跳转到编辑器
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('✓ 项目创建成功！'),
+          SnackBar(
+            content: Text(t('create.success')),
             backgroundColor: Colors.green,
           ),
         );
@@ -188,7 +198,7 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('创建失败: $e'),
+            content: Text(t('create.failed', {'error': '$e'})),
             backgroundColor: Colors.red,
           ),
         );
@@ -208,7 +218,7 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('创建新项目'),
+        title: Text(t('create.title')),
         elevation: 0,
       ),
       body: Form(
@@ -221,16 +231,18 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
               controller: _nameController,
               enabled: !_isCreating,
               decoration: InputDecoration(
-                labelText: '项目名称',
+                labelText: t('create.projectName'),
                 hintText: _payload.projectNameHint,
                 border: const OutlineInputBorder(),
                 prefixIcon: const Icon(Icons.badge),
               ),
               textInputAction: TextInputAction.next,
               validator: (value) {
-                if (value == null || value.isEmpty) return '请输入项目名称';
+                if (value == null || value.isEmpty) {
+                  return t('create.nameRequired');
+                }
                 if (!RegExp(r'^[a-z][a-z0-9_]*$').hasMatch(value)) {
-                  return '项目名称只能包含小写字母、数字和下划线';
+                  return t('create.nameInvalid');
                 }
                 return null;
               },
@@ -242,7 +254,7 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
               controller: _pathController,
               enabled: !_isCreating,
               decoration: InputDecoration(
-                labelText: '存放目录',
+                labelText: t('create.location'),
                 hintText: '/storage/emulated/0/Projects',
                 border: const OutlineInputBorder(),
                 prefixIcon: const Icon(Icons.folder),
@@ -253,10 +265,8 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                       : () async {
                           // 简单提示
                           ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text(
-                                '请手动输入目标目录路径',
-                              ),
+                            SnackBar(
+                              content: Text(t('create.manualPathHint')),
                             ),
                           );
                         },
@@ -264,7 +274,9 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
               ),
               textInputAction: TextInputAction.next,
               validator: (value) {
-                if (value == null || value.isEmpty) return '请输入存放目录';
+                if (value == null || value.isEmpty) {
+                  return t('create.locationRequired');
+                }
                 return null;
               },
             ),
@@ -274,11 +286,11 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
             TextFormField(
               controller: _orgController,
               enabled: !_isCreating,
-              decoration: const InputDecoration(
-                labelText: '组织 (Android 包名前缀)',
+              decoration: InputDecoration(
+                labelText: t('create.orgLabel'),
                 hintText: 'com.example',
-                border: OutlineInputBorder(),
-                prefixIcon: Icon(Icons.domain),
+                border: const OutlineInputBorder(),
+                prefixIcon: const Icon(Icons.domain),
               ),
               textInputAction: TextInputAction.next,
             ),
@@ -286,7 +298,7 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
 
             // 项目载荷（决定模板代码 / 语法高亮 / GitHub Actions）
             Text(
-              '项目类型（Payload）',
+              t('create.payloadType'),
               style: TextStyle(
                 fontSize: 14,
                 fontWeight: FontWeight.w500,
@@ -314,7 +326,7 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
             // Flutter 载荷的模板细分（应用 / 包 / 插件）
             if (_payload.isFlutter) ...[
               Text(
-                '模板类型',
+                t('create.templateType'),
                 style: TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.w500,
@@ -326,9 +338,13 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                 spacing: 8,
                 runSpacing: 8,
                 children: [
-                  _buildTemplateChip('app', '应用', isDark),
-                  _buildTemplateChip('package', '包', isDark),
-                  _buildTemplateChip('plugin', '插件', isDark),
+                  _buildTemplateChip('app', t('create.templateApp'), isDark),
+                  _buildTemplateChip(
+                    'package',
+                    t('create.templatePackage'),
+                    isDark,
+                  ),
+                  _buildTemplateChip('plugin', t('create.templatePlugin'), isDark),
                 ],
               ),
               const SizedBox(height: 20),
@@ -349,10 +365,10 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                   foregroundColor: Colors.white,
                 ),
                 child: _isCreating
-                    ? const Row(
+                    ? Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          SizedBox(
+                          const SizedBox(
                             width: 20,
                             height: 20,
                             child: CircularProgressIndicator(
@@ -360,11 +376,11 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                               color: Colors.white,
                             ),
                           ),
-                          SizedBox(width: 8),
-                          Text('正在创建...'),
+                          const SizedBox(width: 8),
+                          Text(t('create.creating')),
                         ],
                       )
-                    : const Text('创建项目'),
+                    : Text(t('create.submit')),
               ),
             ),
 
@@ -373,7 +389,7 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
             // 输出日志
             if (_outputLines.isNotEmpty) ...[
               Text(
-                '执行日志',
+                t('create.outputLogs'),
                 style: TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.w500,
@@ -436,8 +452,8 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
         children: [
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
-            title: const Text('创建远程仓库并推送'),
-            subtitle: const Text('创建后把模板文件推送到所选平台'),
+            title: Text(t('create.repoSwitchTitle')),
+            subtitle: Text(t('create.repoSwitchSubtitle')),
             value: _createRepo,
             onChanged: _isCreating
                 ? null
@@ -449,7 +465,7 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
               padding: const EdgeInsets.only(top: 8),
               child: Row(
                 children: [
-                  const Text('平台', style: TextStyle(fontSize: 13)),
+                  Text(t('create.platform'), style: const TextStyle(fontSize: 13)),
                   const SizedBox(width: 12),
                   ...GitHost.values.map(
                     (host) => Padding(
@@ -479,8 +495,8 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
               enabled: !_isCreating,
               onChanged: (_) => _repoNameEdited = true,
               decoration: InputDecoration(
-                labelText: '仓库名称',
-                hintText: '默认与项目名称相同',
+                labelText: t('create.repoNameLabel'),
+                hintText: t('create.repoNameHint'),
                 border: const OutlineInputBorder(),
                 isDense: true,
                 prefixIcon: const Icon(Icons.cloud_outlined),
@@ -491,9 +507,9 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                 final name = (value == null || value.trim().isEmpty)
                     ? _nameController.text.trim()
                     : value.trim();
-                if (name.isEmpty) return '请输入仓库名称';
+                if (name.isEmpty) return t('create.repoNameRequired');
                 if (!RegExp(r'^[A-Za-z0-9._-]+$').hasMatch(name)) {
-                  return '仓库名只能包含字母、数字、点、下划线和中划线';
+                  return t('create.repoNameInvalid');
                 }
                 return null;
               },
@@ -512,8 +528,8 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                   Expanded(
                     child: Text(
                       _host == GitHost.gitee
-                          ? '同名仓库已存在时会自动改为 _1、_2；Gitee Go 无 macOS Runner，iOS 构建不可用'
-                          : '同名仓库已存在时会自动改为 _1、_2；iOS 构建使用 macOS Runner',
+                          ? t('create.repoHintGitee')
+                          : t('create.repoHintGithub'),
                       style: TextStyle(
                         fontSize: 10,
                         height: 1.4,

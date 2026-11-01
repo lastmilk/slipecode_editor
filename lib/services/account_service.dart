@@ -7,7 +7,7 @@ import 'package:http/http.dart' as http;
 import '../config/app_config.dart';
 import 'backend_http.dart';
 
-/// SlipCode 账号用户
+/// SLIPE 账号用户
 class AccountUser {
   final String id;
   final String email;
@@ -73,7 +73,7 @@ class AccountService {
   static const _storage = FlutterSecureStorage(
     aOptions: AndroidOptions(encryptedSharedPreferences: true),
   );
-  static const _tokenKey = 'slipecode_account_token';
+  static const _tokenKey = 'slipe_account_token';
 
   /// 账号后端专用客户端：容忍该后端域名的证书主机名不匹配
   final http.Client _client = BackendHttp.client;

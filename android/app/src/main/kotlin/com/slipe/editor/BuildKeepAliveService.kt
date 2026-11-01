@@ -1,4 +1,4 @@
-package com.slipecode.slipecode_editor
+package com.slipe.editor
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
+import android.util.Log
 
 /// 云端构建保活服务
 ///
@@ -17,7 +18,8 @@ import android.os.IBinder
 class BuildKeepAliveService : Service() {
 
     companion object {
-        private const val CHANNEL_ID = "slipecode_build_watch"
+        private const val TAG = "BuildKeepAliveService"
+        private const val CHANNEL_ID = "slipe_build_watch"
         private const val NOTIFICATION_ID = 43
         private const val ACTION_START = "start"
         private const val ACTION_UPDATE = "update"
@@ -25,31 +27,43 @@ class BuildKeepAliveService : Service() {
         private const val EXTRA_TEXT = "text"
 
         fun start(context: Context, text: String) {
-            val intent = Intent(context, BuildKeepAliveService::class.java).apply {
-                action = ACTION_START
-                putExtra(EXTRA_TEXT, text)
-            }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
+            try {
+                val intent = Intent(context, BuildKeepAliveService::class.java).apply {
+                    action = ACTION_START
+                    putExtra(EXTRA_TEXT, text)
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(intent)
+                } else {
+                    context.startService(intent)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "start failed", e)
             }
         }
 
         fun update(context: Context, text: String) {
-            val intent = Intent(context, BuildKeepAliveService::class.java).apply {
-                action = ACTION_UPDATE
-                putExtra(EXTRA_TEXT, text)
+            try {
+                val intent = Intent(context, BuildKeepAliveService::class.java).apply {
+                    action = ACTION_UPDATE
+                    putExtra(EXTRA_TEXT, text)
+                }
+                // 服务已在运行时 update 不需要 startForegroundService，直接 startService 即可
+                context.startService(intent)
+            } catch (e: Exception) {
+                Log.e(TAG, "update failed", e)
             }
-            // 服务已在运行时 update 不需要 startForegroundService，直接 startService 即可
-            context.startService(intent)
         }
 
         fun stop(context: Context) {
-            val intent = Intent(context, BuildKeepAliveService::class.java).apply {
-                action = ACTION_STOP
+            try {
+                val intent = Intent(context, BuildKeepAliveService::class.java).apply {
+                    action = ACTION_STOP
+                }
+                context.startService(intent)
+            } catch (e: Exception) {
+                Log.e(TAG, "stop failed", e)
             }
-            context.startService(intent)
         }
     }
 
@@ -68,8 +82,14 @@ class BuildKeepAliveService : Service() {
         }
 
         val text = intent?.getStringExtra(EXTRA_TEXT) ?: "云端构建进行中"
-        startForeground(NOTIFICATION_ID, buildNotification(text))
-        return START_NOT_STICKY
+        return try {
+            startForeground(NOTIFICATION_ID, buildNotification(text))
+            START_NOT_STICKY
+        } catch (e: Exception) {
+            Log.e(TAG, "startForeground failed", e)
+            stopSelf()
+            START_NOT_STICKY
+        }
     }
 
     private fun buildNotification(text: String): Notification {
@@ -84,11 +104,6 @@ class BuildKeepAliveService : Service() {
             }
             getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
         }
-        val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
-        val pending = PendingIntent.getActivity(
-            this, 0, launchIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
         val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             Notification.Builder(this, CHANNEL_ID)
         } else {
@@ -96,15 +111,23 @@ class BuildKeepAliveService : Service() {
             Notification.Builder(this)
         }
         return builder
-            .setContentTitle("SlipCode 云端构建")
+            .setContentTitle("SLIPE 云端构建")
             .setContentText(text)
             .setSmallIcon(android.R.drawable.stat_sys_download)
-            .setContentIntent(pending)
+            .setContentIntent(buildLaunchPendingIntent())
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setShowWhen(false)
             .setProgress(0, 0, true)
             .setCategory(Notification.CATEGORY_PROGRESS)
             .build()
+    }
+
+    private fun buildLaunchPendingIntent(): PendingIntent? {
+        val launchIntent = packageManager.getLaunchIntentForPackage(packageName) ?: return null
+        return PendingIntent.getActivity(
+            this, 0, launchIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
     }
 }

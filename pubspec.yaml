@@ -1,5 +1,5 @@
-name: slipecode_editor
-description: "A new Flutter project."
+name: slipe_editor
+description: "SLIPE - a Flutter code editor with cloud builds."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -92,15 +92,15 @@ flutter:
     - assets/templates/app/analysis_options.yaml.tmpl
     - assets/templates/app/README.md.tmpl
     - assets/templates/app/gitignore.tmpl
-    - assets/templates/app/slipecode.json.tmpl
+    - assets/templates/app/slipe.json.tmpl
     - assets/templates/package/pubspec.yaml.tmpl
     - assets/templates/package/package.dart.tmpl
     - assets/templates/package/README.md.tmpl
-    - assets/templates/package/slipecode.json.tmpl
+    - assets/templates/package/slipe.json.tmpl
     - assets/templates/plugin/pubspec.yaml.tmpl
     - assets/templates/plugin/plugin.dart.tmpl
     - assets/templates/plugin/README.md.tmpl
-    - assets/templates/plugin/slipecode.json.tmpl
+    - assets/templates/plugin/slipe.json.tmpl
 
   # To add assets to your application, add an assets section, like this:
   # assets:

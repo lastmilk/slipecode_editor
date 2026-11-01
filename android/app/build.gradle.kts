@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace = "com.slipecode.slipecode_editor"
+    namespace = "com.slipe.editor"
     // 极验 GT4 AAR 的 aar-metadata 要求 minCompileSdk=37，因此固定为 37
     // （AGP 9.1 官方推荐上限为 36，已在 gradle.properties 中显式放开检查）
     compileSdk = 37
@@ -18,7 +18,7 @@ android {
 
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.slipecode.slipecode_editor"
+        applicationId = "com.slipe.editor"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion

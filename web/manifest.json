@@ -1,6 +1,6 @@
 {
-    "name": "slipecode_editor",
-    "short_name": "slipecode_editor",
+    "name": "slipe_editor",
+    "short_name": "slipe_editor",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

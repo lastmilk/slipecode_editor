@@ -15,7 +15,7 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>slipecode_editor</string>
+	<string>slipe_editor</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -24,17 +24,17 @@
 	<string>????</string>
 	<key>CFBundleVersion</key>
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
-	<!-- OAuth 深链回调：slipecode://oauth/callback（GitHub）与 slipecode://oauth/gitee/callback（Gitee） -->
+	<!-- OAuth 深链回调：slipe://oauth/callback（GitHub）与 slipe://oauth/gitee/callback（Gitee） -->
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
 			<key>CFBundleTypeRole</key>
 			<string>Editor</string>
 			<key>CFBundleURLName</key>
-			<string>app.slipecode.editor</string>
+			<string>app.slipe.editor</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>slipecode</string>
+				<string>slipe</string>
 			</array>
 		</dict>
 	</array>

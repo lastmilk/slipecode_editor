@@ -189,6 +189,12 @@ class BuildProvider extends ChangeNotifier {
   Future<void> startBuild({required String projectDir}) async {
     if (isRunning) return;
 
+    // 合规：未同意《用户协议》与《隐私政策》→ 受限模式，云端构建不可用
+    if (_settings?.settings.policyAcceptedVersion.isEmpty ?? false) {
+      _fail('请先在首屏同意《用户协议》与《隐私政策》后再使用云端构建');
+      return;
+    }
+
     final link = _gitSync.currentLink;
     if (link == null) {
       _status = BuildStatus.failed;
@@ -543,6 +549,19 @@ class BuildProvider extends ChangeNotifier {
   Future<void> _runGiteeBuild(String repo) async {
     final api = _gitee.api!;
 
+    // 1. 确保仓库已开通 Gitee Go（未开通时 .workflow 不会被识别、push 不触发构建）
+    //    POST /v5/repos/{owner}/{repo}/open，幂等可重复调用
+    _currentTask = '确认 Gitee Go 开通状态';
+    _append('==> 确认 Gitee Go 已开通');
+    try {
+      await api.openGiteeGo(repo);
+      _append('    Gitee Go 已就绪');
+    } catch (e) {
+      _append('    ⚠ Gitee Go 开通失败：$e');
+      _append('    可到仓库「云原生」页面手动开通后重试');
+    }
+
+    // 2. 确保流水线配置存在（首次构建时自动注入 .workflow/slipe_build.yml）
     _currentTask = '检查 Gitee Go 流水线';
     _append('==> 检查 Gitee Go 流水线');
     final exists = await api.fileExists(
@@ -551,7 +570,7 @@ class BuildProvider extends ChangeNotifier {
       'master',
     );
     if (!exists) {
-      _append('    推送 .workflow/slipecode_build.yml（仅 Android）');
+      _append('    推送 .workflow/slipe_build.yml（仅 Android）');
       await api.pushFiles(
         repo,
         [
@@ -562,26 +581,30 @@ class BuildProvider extends ChangeNotifier {
             ),
           ),
         ],
-        message: 'ci: add SlipCode Gitee Go pipeline',
+        message: 'ci: add SLIPE Gitee Go pipeline',
         branch: 'master',
       );
     } else {
       _append('    流水线已存在');
     }
 
+    // 3. 推送触发提交。
+    //    Gitee 不支持 API 触发构建，只能靠 push 事件；
+    //    push 无文件改动时不会触发流水线，
+    //    因此每次写入带时间戳的 trigger 文件，保证必定产生新提交。
     _currentTask = '触发 Gitee Go';
     _append('==> 推送触发提交（Gitee Go 由 push 自动触发）');
     await api.pushFiles(
       repo,
       [
         RepoFile(
-          '.workflow/.slipecode-trigger',
+          '.workflow/.slipe-trigger',
           Uint8List.fromList(
             utf8.encode('triggered at ${DateTime.now().toIso8601String()}\n'),
           ),
         ),
       ],
-      message: 'ci: trigger SlipCode build',
+      message: 'ci: trigger SLIPE build',
       branch: 'master',
     );
 
@@ -600,7 +623,7 @@ class BuildProvider extends ChangeNotifier {
   }) {
     final usable = artifacts.where((a) => !a.expired).toList();
     if (usable.isEmpty) return null;
-    final expected = 'slipecode-${type.inputValue}';
+    final expected = 'slipe-${type.inputValue}';
     return usable.firstWhere(
       (a) => a.name == expected,
       orElse: () => usable.first,

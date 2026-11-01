@@ -89,13 +89,13 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "com.slipecode" "\0"
-            VALUE "FileDescription", "slipecode_editor" "\0"
+            VALUE "CompanyName", "com.slipe" "\0"
+            VALUE "FileDescription", "slipe_editor" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "slipecode_editor" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 com.slipecode. All rights reserved." "\0"
-            VALUE "OriginalFilename", "slipecode_editor.exe" "\0"
-            VALUE "ProductName", "slipecode_editor" "\0"
+            VALUE "InternalName", "slipe_editor" "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 com.slipe. All rights reserved." "\0"
+            VALUE "OriginalFilename", "slipe_editor.exe" "\0"
+            VALUE "ProductName", "slipe_editor" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

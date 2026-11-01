@@ -42,7 +42,7 @@ class GitHubProvider extends ChangeNotifier {
   /// 已登录时返回 API 客户端
   GitHubApiService? get api => isSignedIn ? GitHubApiService(_token!) : null;
 
-  static const _repoMapPrefix = 'slipecode_repo::';
+  static const _repoMapPrefix = 'slipe_repo::';
 
   /// 启动时恢复登录状态
   Future<void> init() async {

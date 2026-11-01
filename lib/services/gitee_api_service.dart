@@ -163,6 +163,25 @@ class GiteeApiService {
     return GiteeRepo.fromJson(_decodeMap(res, 'GET /repos/$fullName'));
   }
 
+  /// 为仓库开通 Gitee Go（云原生构建）
+  ///
+  /// POST /v5/repos/{owner}/{repo}/open（formData: access_token）
+  /// 文档：https://gitee.com/api/v5/swagger#/postV5ReposOwnerRepoOpen
+  ///
+  /// 新仓库必须先开通 Gitee Go，`.workflow/*.yml` 才会被识别并触发构建。
+  /// 幂等：已开通的仓库再次调用同样返回成功。
+  Future<bool> openGiteeGo(String fullName) async {
+    final req = http.MultipartRequest(
+      'POST',
+      Uri.parse('${AppConfig.giteeApiBase}/repos/$fullName/open'),
+    )..fields['access_token'] = _token;
+    final streamed = await _client.send(req).timeout(_timeout);
+    final res = await http.Response.fromStream(streamed);
+    // 201 Created 表示开通成功；已开通时返回 200/204
+    if (res.statusCode >= 200 && res.statusCode < 300) return true;
+    _throw('开通 Gitee Go（$fullName）', res);
+  }
+
   /// 判断仓库中是否存在某个文件
   Future<bool> fileExists(String fullName, String path, String branch) async {
     final res = await _client.get(

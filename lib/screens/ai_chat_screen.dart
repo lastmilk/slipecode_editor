@@ -5,6 +5,7 @@ import 'package:markdown/markdown.dart' as md;
 import 'package:provider/provider.dart';
 
 import '../agent/mcp_tools.dart';
+import '../l10n/app_localizations.dart';
 import '../providers/ai_provider.dart';
 import '../providers/editor_provider.dart';
 import '../providers/settings_provider.dart';
@@ -102,20 +103,23 @@ class _AiChatScreenState extends State<AiChatScreen> {
                 size: 20,
               ),
               const SizedBox(width: 8),
-              const Expanded(
+              Expanded(
                 child: Text(
-                  'AI 助手',
-                  style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
+                  t('ai.title'),
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 16,
+                  ),
                 ),
               ),
               IconButton(
                 icon: const Icon(Icons.clear_all, size: 18),
-                tooltip: '清空对话',
+                tooltip: t('ai.clearChat'),
                 onPressed: ai.clear,
               ),
               IconButton(
                 icon: const Icon(Icons.settings, size: 18),
-                tooltip: '配置 LLM',
+                tooltip: t('ai.configureLlm'),
                 onPressed: () => Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const SettingsScreen()),
                 ),
@@ -136,7 +140,7 @@ class _AiChatScreenState extends State<AiChatScreen> {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    '未配置 LLM。点击右上角设置添加模型（支持 OpenAI / DeepSeek / 通义等）。',
+                    t('ai.llmNotConfigured'),
                     style: TextStyle(
                       fontSize: 12,
                       color: isDark
@@ -165,7 +169,7 @@ class _AiChatScreenState extends State<AiChatScreen> {
                         ),
                         const SizedBox(height: 12),
                         Text(
-                          '有什么可以帮你的？\nAgent 可以直接读写项目文件、创建 Dart 类并触发云端构建。',
+                          t('ai.welcome'),
                           textAlign: TextAlign.center,
                           style: TextStyle(
                             fontSize: 13,
@@ -186,7 +190,7 @@ class _AiChatScreenState extends State<AiChatScreen> {
                       // 流式输出气泡
                       return _MessageBubble(
                         content: ai.streamingText.isEmpty
-                            ? '思考中…'
+                            ? t('ai.thinking')
                             : ai.streamingText,
                         isUser: false,
                         isDark: isDark,
@@ -251,7 +255,9 @@ class _AiChatScreenState extends State<AiChatScreen> {
                   maxLines: null,
                   keyboardType: TextInputType.multiline,
                   decoration: InputDecoration(
-                    hintText: ai.isThinking ? 'AI 正在思考...' : '输入消息...',
+                    hintText: ai.isThinking
+                        ? t('ai.thinkingHint')
+                        : t('ai.inputHint'),
                     isDense: true,
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8),
@@ -456,7 +462,7 @@ class _CodeBlock extends StatelessWidget {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  '代码',
+                  t('ai.code'),
                   style: TextStyle(
                     fontSize: 10,
                     color: isDark ? Colors.white38 : Colors.black38,
@@ -472,14 +478,14 @@ class _CodeBlock extends StatelessWidget {
                   await Clipboard.setData(ClipboardData(text: text));
                   if (!context.mounted) return;
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('已复制代码'),
-                      duration: Duration(seconds: 1),
+                    SnackBar(
+                      content: Text(t('ai.codeCopied')),
+                      duration: const Duration(seconds: 1),
                     ),
                   );
                 },
                 icon: const Icon(Icons.copy, size: 13),
-                label: const Text('复制', style: TextStyle(fontSize: 11)),
+                label: Text(t('ai.copy'), style: const TextStyle(fontSize: 11)),
               ),
             ],
           ),
@@ -529,7 +535,7 @@ class _PendingChangesBanner extends StatelessWidget {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  'AI 已修改 $count 个文件，尚未确认（未确认前不会推送到仓库）',
+                  t('ai.pendingChanges', {'count': '$count'}),
                   style: TextStyle(
                     fontSize: 11,
                     color: isDark
@@ -540,11 +546,14 @@ class _PendingChangesBanner extends StatelessWidget {
               ),
               TextButton(
                 onPressed: () => _showList(context),
-                child: const Text('查看', style: TextStyle(fontSize: 12)),
+                child: Text(t('ai.view'), style: const TextStyle(fontSize: 12)),
               ),
               TextButton(
                 onPressed: () => _revertAll(context),
-                child: const Text('撤回全部', style: TextStyle(fontSize: 12)),
+                child: Text(
+                  t('ai.revertAll'),
+                  style: const TextStyle(fontSize: 12),
+                ),
               ),
             ],
           ),
@@ -564,7 +573,7 @@ class _PendingChangesBanner extends StatelessWidget {
     await showDialog<void>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('AI 修改待确认'),
+        title: Text(t('ai.pendingTitle')),
         content: SizedBox(
           width: 560,
           child: ListenableBuilder(
@@ -572,7 +581,7 @@ class _PendingChangesBanner extends StatelessWidget {
             builder: (context, _) {
               final pending = journal.pending;
               if (pending.isEmpty) {
-                return const Text('没有待确认的修改');
+                return Text(t('ai.noPending'));
               }
               return ConstrainedBox(
                 constraints: const BoxConstraints(maxHeight: 360),
@@ -606,7 +615,10 @@ class _PendingChangesBanner extends StatelessWidget {
                                 }
                               }
                             : null,
-                        child: const Text('撤回', style: TextStyle(fontSize: 12)),
+                        child: Text(
+                          t('ai.revert'),
+                          style: const TextStyle(fontSize: 12),
+                        ),
                       ),
                     );
                   },
@@ -623,14 +635,14 @@ class _PendingChangesBanner extends StatelessWidget {
                 await dialogContext.read<EditorProvider>().reloadAll();
               }
             },
-            child: const Text('全部撤回'),
+            child: Text(t('ai.revertAllDialog')),
           ),
           FilledButton(
             onPressed: () {
               journal.approveAll();
               Navigator.of(dialogContext).pop();
             },
-            child: const Text('全部保留'),
+            child: Text(t('ai.keepAll')),
           ),
         ],
       ),
@@ -726,7 +738,7 @@ class _ToolCallCardState extends State<_ToolCallCard> {
                   ),
                   if (step.running)
                     Text(
-                      '执行中',
+                      t('ai.executing'),
                       style: TextStyle(fontSize: 10, color: color),
                     )
                   else
@@ -754,7 +766,7 @@ class _ToolCallCardState extends State<_ToolCallCard> {
               ),
               child: SingleChildScrollView(
                 child: SelectableText(
-                  result.isEmpty ? '（无返回内容）' : result,
+                  result.isEmpty ? t('ai.noResult') : result,
                   style: TextStyle(
                     fontFamily: 'monospace',
                     fontSize: 11,

@@ -1,4 +1,4 @@
-package com.slipecode.slipecode_editor
+package com.slipe.editor
 
 import android.app.Activity
 import android.content.res.Configuration
@@ -27,7 +27,7 @@ import org.json.JSONObject
 class GeeTestChannel(private val activity: Activity) {
 
     companion object {
-        const val CHANNEL = "slipecode/geetest"
+        const val CHANNEL = "slipe/geetest"
 
         /** 等待用户完成验证的最长时间，超时按失败回调，避免 Flutter 侧永久挂起 */
         private const val VERIFY_TIMEOUT_MS = 60_000L

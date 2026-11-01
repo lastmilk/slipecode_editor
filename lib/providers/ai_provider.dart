@@ -40,7 +40,7 @@ class AiProvider extends ChangeNotifier {
       project: _project,
       editor: _editor,
       build: build,
-      // 仅检测到 Termux 时向 Agent 暴露终端工具
+      // 仅桌面端（本地 shell 可用）时向 Agent 暴露终端工具
       terminal: terminal,
     );
     _agent = AgentService(_project, _toolbox);
@@ -221,6 +221,13 @@ class AiProvider extends ChangeNotifier {
   Future<void> sendMessage(String text) async {
     if (text.trim().isEmpty) return;
     await _ensureHistoryLoaded();
+    // 合规：未同意《用户协议》与《隐私政策》→ 受限模式，AI 助手不可用
+    if (_settings.settings.policyAcceptedVersion.isEmpty) {
+      _error = '请先在首屏同意《用户协议》与《隐私政策》后再使用 AI 助手';
+      _status = AiStatus.error;
+      _safeNotify();
+      return;
+    }
     if (!isConfigured) {
       _error = '未配置 LLM，请在偏好设置中填写 API 地址、Key 和模型';
       _status = AiStatus.error;

@@ -67,7 +67,7 @@ async function github(watch, path, { raw = false } = {}) {
       Authorization: `Bearer ${watch.token}`,
       Accept: 'application/vnd.github+json',
       'X-GitHub-Api-Version': '2022-11-28',
-      'User-Agent': 'slipecode-build-watch',
+      'User-Agent': 'slipe-build-watch',
     },
     signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
   });
@@ -115,14 +115,14 @@ async function relayArtifact(watch) {
     watch.error = '构建成功但未找到可用产物';
     return;
   }
-  const expected = `slipecode-${watch.buildType}`;
+  const expected = `slipe-${watch.buildType}`;
   const artifact = usable.find((item) => item.name === expected) || usable[0];
 
   const first = await fetch(`${GITHUB_API}/repos/${watch.repo}/actions/artifacts/${artifact.id}/zip`, {
     headers: {
       Authorization: `Bearer ${watch.token}`,
       Accept: 'application/vnd.github+json',
-      'User-Agent': 'slipecode-build-watch',
+      'User-Agent': 'slipe-build-watch',
     },
     redirect: 'manual',
     signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),

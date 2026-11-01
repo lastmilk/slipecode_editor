@@ -11,7 +11,7 @@
 
 ## 仓库现状
 
-- 工作目录：`c:\Users\Administrator\Documents\slipecode`（基本为空，仅含 .gitignore）
+- 工作目录：`c:\Users\Administrator\Documents\slipe`（基本为空，仅含 .gitignore）
 - Flutter SDK：`C:\flutter`，版本 3.47.8 / Dart 3.13.7
 - 目标平台：Android API 21+
 
@@ -29,7 +29,7 @@
 ## 项目结构
 
 ```
-slipecode/
+slipe/
 ├── lib/
 │   ├── main.dart                      # 入口
 │   ├── app.dart                       # MaterialApp 配置
@@ -62,7 +62,7 @@ slipecode/
 ## 实现步骤（按依赖顺序）
 
 ### 步骤 1：初始化 Flutter 项目
-- 创建 Flutter 项目骨架（在 slipecode 目录内执行 flutter create）
+- 创建 Flutter 项目骨架（在 slipe 目录内执行 flutter create）
 - 配置 `pubspec.yaml` 依赖：
   - `code_text_field: ^2.10.0`
   - `highlight: ^0.7.0`

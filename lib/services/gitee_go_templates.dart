@@ -7,13 +7,13 @@ class GiteeGoTemplates {
   GiteeGoTemplates._();
 
   /// 流水线文件在仓库中的路径
-  static const String workflowPath = '.workflow/slipecode_build.yml';
+  static const String workflowPath = '.workflow/slipe_build.yml';
 
   /// Gitee Go 构建流水线（Android APK）
   static const String flutterBuildPipeline = r'''
 version: '1.0'
-name: slipecode-build
-displayName: SlipCode Build (Android)
+name: slipe-build
+displayName: SLIPE Build (Android)
 triggers:
   push:
     branches:
@@ -60,8 +60,8 @@ stages:
           sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0" >/dev/null
 
           flutter config --android-sdk "$ANDROID_HOME" --no-analytics >/dev/null || true
-          ORG=$(jq -r '.org // "com.example"' .slipecode.json 2>/dev/null || echo com.example)
-          NAME=$(jq -r '.project_name // empty' .slipecode.json 2>/dev/null || true)
+          ORG=$(jq -r '.org // "com.example"' .slipe.json 2>/dev/null || echo com.example)
+          NAME=$(jq -r '.project_name // empty' .slipe.json 2>/dev/null || true)
           flutter create --org "$ORG" --platforms=android ${NAME:+--project-name "$NAME"} .
           flutter pub get
           flutter build apk --release

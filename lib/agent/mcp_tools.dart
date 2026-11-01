@@ -79,7 +79,7 @@ class McpToolbox {
   final EditorProvider editor;
   final BuildProvider build;
 
-  /// 终端能力（仅检测到 Termux 时由 Agent 使用）
+  /// 终端能力（仅桌面端本地 shell 可用时由 Agent 使用）
   final TerminalProvider? terminal;
 
   final FileService _fs = FileService();
@@ -89,7 +89,7 @@ class McpToolbox {
 
   /// 供 LLM 使用的工具定义
   ///
-  /// 终端工具仅在检测到 Termux（或桌面 shell）时暴露给模型。
+  /// 终端工具仅在桌面端（本地 shell 可用）时暴露给模型。
   List<Map<String, dynamic>> get definitions => tools
       .where((tool) => tool.name != 'run_terminal_command' || _terminalReady)
       .map((tool) => tool.toDefinition())
@@ -400,7 +400,7 @@ class McpToolbox {
     ),
     McpTool(
       name: 'run_terminal_command',
-      description: '在当前项目目录执行 shell 命令（Android 通过 Termux 执行），'
+      description: '在当前项目目录执行 shell 命令（仅桌面端可用），'
           '返回标准输出、错误输出与退出码。适合运行测试、格式化、git 等命令。',
       parameters: _object(
         {'command': _string('要执行的完整 shell 命令')},
@@ -409,7 +409,7 @@ class McpToolbox {
       execute: (args) async {
         final terminal = this.terminal;
         if (terminal == null || !terminal.available) {
-          return '错误：终端不可用（未检测到 Termux）';
+          return '错误：终端不可用（本地终端仅桌面端可用，移动端请使用云端构建）';
         }
         final command = args['command'] as String? ?? '';
         if (command.trim().isEmpty) return '错误：command 不能为空';

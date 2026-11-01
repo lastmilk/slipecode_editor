@@ -45,7 +45,7 @@ class PayloadBuildType {
 abstract class ProjectPayload {
   const ProjectPayload();
 
-  /// 唯一标识（写入 .slipecode.json 的 payload 字段）
+  /// 唯一标识（写入 .slipe.json 的 payload 字段）
   String get id;
 
   /// 展示名称
@@ -131,10 +131,10 @@ class PayloadRegistry {
     return fallback;
   }
 
-  /// 读取项目内的 `.slipecode.json` 并按标记识别载荷
+  /// 读取项目内的 `.slipe.json` 并按标记识别载荷
   static Future<ProjectPayload> detect(String projectDir) async {
     try {
-      final marker = File(p.join(projectDir, '.slipecode.json'));
+      final marker = File(p.join(projectDir, '.slipe.json'));
       if (await marker.exists()) {
         final data = jsonDecode(await marker.readAsString());
         if (data is Map && data['payload'] is String) {

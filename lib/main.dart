@@ -21,6 +21,7 @@ import 'screens/home_screen.dart';
 import 'services/app_globals.dart';
 import 'widgets/app_background.dart';
 import 'widgets/app_lock_gate.dart';
+import 'widgets/policy_gate.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -79,7 +80,7 @@ Future<void> main() async {
   );
 
   runApp(
-    SlipCodeApp(
+    SLIPEApp(
       settingsProvider: settingsProvider,
       accountProvider: accountProvider,
       githubProvider: githubProvider,
@@ -121,8 +122,8 @@ Future<void> _initAuthInBackground(
   ]);
 }
 
-class SlipCodeApp extends StatelessWidget {
-  const SlipCodeApp({
+class SLIPEApp extends StatelessWidget {
+  const SLIPEApp({
     super.key,
     required this.settingsProvider,
     required this.accountProvider,
@@ -189,7 +190,11 @@ class SlipCodeApp extends StatelessWidget {
             navigatorKey: appNavigatorKey,
             // 动态壁纸感知路由切换：被页面遮挡时暂停，返回时恢复
             navigatorObservers: [AppBackground.routeObserver],
-            home: const AppLockGate(child: HomeScreen()),
+            // 政策门禁：未同意《用户协议》与《隐私政策》时弹窗确认，
+            // 不同意则进入受限模式（应用锁之上、主页之下）
+            home: AppLockGate(
+              child: PolicyGate(child: HomeScreen()),
+            ),
           );
         },
       ),

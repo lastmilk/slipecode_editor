@@ -533,6 +533,36 @@ class _SettingsScreenState extends State<SettingsScreen>
 
   List<_SectionData> _gitSections(SettingsProvider sp, AppSettings settings) {
     return [
+      _SectionData('存储', [
+        _Entry(
+          '共享存储 shared storage manage external',
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('共享存储（自选项目位置）'),
+            subtitle: Text(
+              Platform.isAndroid
+                  ? '默认关闭：项目保存在应用私有目录，卸载时一并清除。'
+                        '开启后将申请「所有文件」访问权限，可在公共存储（如 '
+                        '/storage/emulated/0/Projects）自选项目存放位置。'
+                  : '仅 Android 需要此设置；当前平台项目默认保存在文档目录。',
+            ),
+            value: settings.sharedStorageEnabled,
+            onChanged: Platform.isAndroid
+                ? (value) async {
+                    final ok = await sp.setSharedStorageEnabled(value);
+                    if (!ok && mounted) {
+                      // 权限被拒：提示并保持关闭
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('未授予「所有文件」访问权限，已保持私有目录模式'),
+                        ),
+                      );
+                    }
+                  }
+                : null,
+          ),
+        ),
+      ]),
       _SectionData('Git 平台', [
         _Entry(
           '默认 Git 平台 github gitee',

@@ -72,7 +72,7 @@ String sanitizeRepoName(String raw) {
   name = name.replaceAll(RegExp(r'-{2,}'), '-');
   name = name.replaceFirst(RegExp(r'^[.\-_]+'), '');
   name = name.replaceAll(RegExp(r'[.\-_]+$'), '');
-  if (name.isEmpty) name = 'slipecode-project';
+  if (name.isEmpty) name = 'slipe-project';
   // Gitee 限制 100 字符以内，留一点余量
   if (name.length > 80) name = name.substring(0, 80);
   return name;

@@ -37,7 +37,7 @@ class AppConfig {
   /// App 自身监听的深链，后端换到 token 后 302 到这里
   static String get oauthDeepLink => _env(
         'GITHUB_DEEP_LINK',
-        'slipecode://oauth/callback',
+        'slipe://oauth/callback',
       );
 
   /// 授权范围
@@ -61,7 +61,7 @@ class AppConfig {
   /// Gitee OAuth 回调深链
   static String get giteeRedirectUri => _env(
         'GITEE_OAUTH_REDIRECT_URI',
-        'slipecode://oauth/gitee/callback',
+        'slipe://oauth/gitee/callback',
       );
 
   /// Gitee 授权范围（projects 用于仓库读写）

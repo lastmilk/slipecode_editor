@@ -68,8 +68,6 @@ class _EditorScreenState extends State<EditorScreen>
           projectProvider.fileTree == null) {
         projectProvider.refreshFileTree();
       }
-      // 检测 Termux：仅在存在时展示终端入口 / 开启 AI 终端工具
-      context.read<TerminalProvider>().detectTermux();
     });
     _settingsProvider = context.read<SettingsProvider>();
     _settingsProvider!.addListener(_syncVolumeKeyListener);
@@ -635,7 +633,7 @@ class _EditorScreenState extends State<EditorScreen>
               t('editor.title'),
         ),
         actions: [
-          // 仅在检测到 Termux（桌面为本地 shell）时显示终端入口
+          // 仅桌面端（本地 shell）时显示终端入口
           if (terminal.available)
             IconButton(
               icon: const Icon(Icons.terminal),

@@ -1,4 +1,4 @@
-# slipecode_editor
+# slipe_editor
 
 A new Flutter project.
 

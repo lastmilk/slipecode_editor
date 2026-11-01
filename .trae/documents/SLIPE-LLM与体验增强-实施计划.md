@@ -28,7 +28,7 @@
 
 **LLM 配置**
 - 单配置三字段：`lib/models/app_settings.dart:29-35`（`llmApiBase/llmApiKey/llmModel`），默认 `gpt-4o-mini`（:96-98）。
-- 存储：SharedPreferences 单 key `slipecode_app_settings`，整份 JSON（`lib/providers/settings_provider.dart:15,197-200`）。
+- 存储：SharedPreferences 单 key `slipe_app_settings`，整份 JSON（`lib/providers/settings_provider.dart:15,197-200`）。
 - 云同步：`main.dart:35-38` 绑定 `AccountProvider.pushSettingsIfLoggedIn`（`account_provider.dart:136-150`，1.5s 防抖 PUT `/api/settings`），**当前连 `llmApiKey` 一起上传**，与设置页“仅存本地”文案矛盾（`settings_screen.dart:321-324`）。
 - 后端已有 `GET /api/llm/models`、`POST /api/llm/chat`（`backend/src/server.js:593-686,821-822`），客户端未使用。
 
@@ -46,8 +46,8 @@
 - `editor_tabs.dart:35` 关闭标签直接 `closeFile`。
 
 **上次编辑 / 持久化**
-- `ProjectHistoryService`（`lib/services/project_history_service.dart`）：key `slipecode_project_history`，最多 30 条，仅 `{name,path,createdAt}`；`ProjectProvider.refreshFileTree`(:57-59) 写入。
-- 仓库映射仅本地 SharedPreferences：`slipecode_repo::<path>`（`github_provider.dart:42,117-141`）、`slipecode_gitee_repo::`（`gitee_provider.dart:42`），**不上云**。
+- `ProjectHistoryService`（`lib/services/project_history_service.dart`）：key `slipe_project_history`，最多 30 条，仅 `{name,path,createdAt}`；`ProjectProvider.refreshFileTree`(:57-59) 写入。
+- 仓库映射仅本地 SharedPreferences：`slipe_repo::<path>`（`github_provider.dart:42,117-141`）、`slipe_gitee_repo::`（`gitee_provider.dart:42`），**不上云**。
 
 **GitHub 409**
 - `createRepo` 使用 `auto_init: false`（`github_api_service.dart:232-244`）→ 空仓库所有 git 接口都可能返回 409；`pushFiles` 仅在 `GET git/ref` 处容忍 404/409（:296-298），`POST/PATCH refs`（:340-350）未容错；`getRepo`(247-252)、`fileExists`(255-263) 未加超时。
@@ -64,7 +64,7 @@
 
 **极验 SDK**
 - `gt4-android-sec.zip/SDK/geetest_captcha_android_v1.8.14_20260804.aar`（示例用 `implementation(files(sdkDir...aar))`）；API 为 `GTCaptcha4Client.getClient(ctx).init(captchaId, cfg)` + `addOnSuccessListener { status, response }`，`response` 为 JSON 字符串。
-- 现有 Android 壳：`android/app/build.gradle.kts`（minSdk=flutter 默认、Java 17）、`MainActivity.kt` 已注册 MethodChannel（`slipecode/container`、`slipecode/volume` 等）。
+- 现有 Android 壳：`android/app/build.gradle.kts`（minSdk=flutter 默认、Java 17）、`MainActivity.kt` 已注册 MethodChannel（`slipe/container`、`slipe/volume` 等）。
 
 ---
 
@@ -178,8 +178,8 @@ class NetworkPolicy {
 **C1. Android 极验接入**
 1. 复制 `gt4-android-sec.zip` 内 `SDK/geetest_captcha_android_v1.8.14_20260804.aar` → `android/app/libs/geetest_captcha_android.aar`。
 2. `android/app/build.gradle.kts` `dependencies` 追加 `implementation(files("libs/geetest_captcha_android.aar"))`；`packaging.jniLibs.useLegacyPackaging` 保持现状。
-3. 新建 `android/app/src/main/kotlin/com/slipecode/slipecode_editor/GeeTestPlugin.kt`：
-   - `MethodChannel("slipecode/geetest")`，方法 `verify`（`captchaId` 参数）。
+3. 新建 `android/app/src/main/kotlin/com/slipe/slipe_editor/GeeTestPlugin.kt`：
+   - `MethodChannel("slipe/geetest")`，方法 `verify`（`captchaId` 参数）。
    - `GTCaptcha4Client.getClient(activity).init(captchaId, GTCaptcha4Config.Builder().setTimeOut(10000).build())`；
    - `addOnSuccessListener { status, response -> if (status) result.success(jsonToMap(response)) else result.error("CAPTCHA_FAILED", ...) }`、`addOnFailureListener { result.error("CAPTCHA_ERROR", it.message, null) }`；
    - `onDetachedFromActivity` 时 `client.destroy()`（若 SDK 无 `destroy` 则仅置空引用）。
@@ -368,7 +368,7 @@ class NetworkPolicy {
   - 自动滚动在流式期间保持到底部。
 
 **H5. 对话记录云同步**
-- `lib/services/chat_history_service.dart`（新建）：本地 key `slipecode_chat_history`，存 `[{role,content,ts}]`，上限 200 条；`load/save/clear`。
+- `lib/services/chat_history_service.dart`（新建）：本地 key `slipe_chat_history`，存 `[{role,content,ts}]`，上限 200 条；`load/save/clear`。
 - `server.js`：`db.chatHistory[userId]`；`GET /api/chat/history`、`PUT /api/chat/history`（≤256KB、≤200 条）。
 - `ai_provider`：初始化时 `load()`；每次完成一轮后 `save()`；`chatCloudSync && canSyncNow` 时 2s 防抖 `pushChatHistory`（`AccountProvider` 提供方法）。
 - 登录后 `_syncAfterLogin`：`chatCloudSync` 开启才拉取并合并（按 `ts` 去重，云端优先补缺）。
@@ -434,7 +434,7 @@ DB 结构扩展：`users[].phone/avatarUrl/wallpaper`、`db.projects`、`db.chat
 - `lib/services/wallpaper_sync_service.dart`
 - `lib/widgets/image_crop_dialog.dart`
 - `android/app/libs/geetest_captcha_android.aar`（从 zip 复制）
-- `android/app/src/main/kotlin/com/slipecode/slipecode_editor/GeeTestPlugin.kt`
+- `android/app/src/main/kotlin/com/slipe/slipe_editor/GeeTestPlugin.kt`
 
 **修改（Dart）**
 - `lib/models/app_settings.dart`、`lib/models/project.dart`
@@ -445,7 +445,7 @@ DB 结构扩展：`users[].phone/avatarUrl/wallpaper`、`db.projects`、`db.chat
 - `lib/config/app_config.dart`、`lib/main.dart`、`pubspec.yaml`、`.env.example`
 
 **修改（Android/后端）**
-- `android/app/build.gradle.kts`、`android/app/src/main/kotlin/com/slipecode/slipecode_editor/MainActivity.kt`
+- `android/app/build.gradle.kts`、`android/app/src/main/kotlin/com/slipe/slipe_editor/MainActivity.kt`
 - `backend/src/server.js`、`backend/README.md`
 
 ---

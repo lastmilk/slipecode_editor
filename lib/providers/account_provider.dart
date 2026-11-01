@@ -13,7 +13,7 @@ import 'settings_provider.dart';
 
 enum AccountStatus { signedOut, signingIn, signedIn }
 
-/// SlipCode 独立账号状态管理
+/// SLIPE 独立账号状态管理
 ///
 /// 登录后自动从后端拉取偏好设置；本地修改设置时防抖推送到后端，
 /// 实现不同设备间的设置同步。
@@ -198,7 +198,7 @@ class AccountProvider extends ChangeNotifier {
   /// 立即从云端拉取设置并应用
   Future<bool> syncNow() async {
     if (!isSignedIn) {
-      _error = '请先登录 SlipCode 账号';
+      _error = '请先登录 SLIPE 账号';
       _safeNotify();
       return false;
     }

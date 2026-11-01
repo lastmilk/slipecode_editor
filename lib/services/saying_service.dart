@@ -13,7 +13,7 @@ class SayingService {
 
   static final SayingService instance = SayingService._();
 
-  static const _cacheKey = 'slipecode_saying_cache';
+  static const _cacheKey = 'slipe_saying_cache';
   static const _maxCached = 20;
   static const _apiUrl = 'https://uapis.cn/api/v1/saying';
 

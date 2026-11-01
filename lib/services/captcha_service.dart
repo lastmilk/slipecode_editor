@@ -44,7 +44,7 @@ class CaptchaException implements Exception {
 class CaptchaService {
   CaptchaService._();
 
-  static const MethodChannel _channel = MethodChannel('slipecode/geetest');
+  static const MethodChannel _channel = MethodChannel('slipe/geetest');
 
   /// 当前平台是否支持原生极验
   static bool get isPlatformSupported => !kIsWeb && Platform.isAndroid;

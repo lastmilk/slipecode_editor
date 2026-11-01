@@ -48,7 +48,7 @@ class TaroPayload extends ProjectPayload {
 
   @override
   String get workflowContent => r'''
-name: SlipCode Build
+name: SLIPE Build
 
 on:
   push:
@@ -84,7 +84,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: slipecode-${{ inputs.build_type || 'release' }}
+          name: slipe-${{ inputs.build_type || 'release' }}
           path: dist
           if-no-files-found: error
 ''';
@@ -102,7 +102,7 @@ jobs:
         PayloadFile.inline('src/pages/index/index.scss', _indexScss),
         PayloadFile.inline('README.md', _readme),
         PayloadFile.inline('.gitignore', _gitignore),
-        PayloadFile.inline('.slipecode.json', _marker),
+        PayloadFile.inline('.slipe.json', _marker),
       ];
 
   static const String _packageJson = '''{
@@ -286,7 +286,7 @@ dist/
   static const String _marker = '''{
   "project_name": "{{PROJECT_NAME}}",
   "payload": "taro",
-  "created_by": "slipecode"
+  "created_by": "slipe"
 }
 ''';
 }

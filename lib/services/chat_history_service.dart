@@ -10,7 +10,7 @@ class ChatHistoryService {
 
   static final ChatHistoryService instance = ChatHistoryService._();
 
-  static const _key = 'slipecode_chat_history';
+  static const _key = 'slipe_chat_history';
   static const _maxEntries = 200;
 
   Future<List<Map<String, dynamic>>> load() async {

@@ -62,7 +62,7 @@ class BuildService {
 
   static final BuildService instance = BuildService._();
 
-  static const MethodChannel _channel = MethodChannel('slipecode/container');
+  static const MethodChannel _channel = MethodChannel('slipe/container');
 
   static const String workflowFile = GitHubActionsTemplates.workflowPath;
 
@@ -81,7 +81,7 @@ class BuildService {
     await api.pushFiles(
       repoFullName,
       [RepoFile(path, Uint8List.fromList(utf8.encode(content)))],
-      message: 'ci: add SlipCode build workflow',
+      message: 'ci: add SLIPE build workflow',
       branch: branch,
     );
   }
@@ -199,7 +199,7 @@ class BuildService {
       final suffix = type.isIos
           ? 'ios-unsigned'
           : '${type.inputValue}-artifacts';
-      final outPath = p.join(outDir.path, 'slipecode-$suffix.zip');
+      final outPath = p.join(outDir.path, 'slipe-$suffix.zip');
       await File(outPath).writeAsBytes(zipBytes, flush: true);
       return outPath;
     }

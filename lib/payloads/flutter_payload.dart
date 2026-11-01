@@ -88,8 +88,8 @@ class FlutterPayload extends ProjectPayload {
           ),
           PayloadFile.asset('.gitignore', 'assets/templates/app/gitignore.tmpl'),
           PayloadFile.asset(
-            '.slipecode.json',
-            'assets/templates/package/slipecode.json.tmpl',
+            '.slipe.json',
+            'assets/templates/package/slipe.json.tmpl',
           ),
         ];
       case 'plugin':
@@ -112,8 +112,8 @@ class FlutterPayload extends ProjectPayload {
           ),
           PayloadFile.asset('.gitignore', 'assets/templates/app/gitignore.tmpl'),
           PayloadFile.asset(
-            '.slipecode.json',
-            'assets/templates/plugin/slipecode.json.tmpl',
+            '.slipe.json',
+            'assets/templates/plugin/slipe.json.tmpl',
           ),
         ];
       default:
@@ -130,8 +130,8 @@ class FlutterPayload extends ProjectPayload {
           PayloadFile.asset('README.md', 'assets/templates/app/README.md.tmpl'),
           PayloadFile.asset('.gitignore', 'assets/templates/app/gitignore.tmpl'),
           PayloadFile.asset(
-            '.slipecode.json',
-            'assets/templates/app/slipecode.json.tmpl',
+            '.slipe.json',
+            'assets/templates/app/slipe.json.tmpl',
           ),
         ];
     }
