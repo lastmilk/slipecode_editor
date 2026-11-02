@@ -91,6 +91,13 @@ const app = Vue.createApp({
       docForm: { id: '', title: '', content: '', published: true },
       savingDoc: false,
 
+      release: null,
+      loadingRelease: false,
+      releaseDialog: false,
+      releaseForm: { version: '', notes: '' },
+      uploading: false,
+      uploadPercent: 0,
+
       policies: {
         userAgreement: { title: '', content: '', version: '', updatedAt: '' },
         privacyPolicy: { title: '', content: '', version: '', updatedAt: '' },
@@ -233,6 +240,7 @@ const app = Vue.createApp({
       if (tab === 'config') this.loadConfig();
       if (tab === 'llm') this.loadModels();
       if (tab === 'docs') this.loadDocs();
+      if (tab === 'releases') this.loadRelease();
       if (tab === 'policies') this.loadPolicies();
     },
 
@@ -556,6 +564,108 @@ const app = Vue.createApp({
         await request(`/api/admin/docs/${encodeURIComponent(row.id)}`, { method: 'DELETE' });
         ElementPlus.ElMessage.success('已删除');
         await this.loadDocs();
+      } catch (err) {
+        this.handleError(err);
+      }
+    },
+
+    async loadRelease() {
+      this.loadingRelease = true;
+      try {
+        const data = await request('/api/admin/releases');
+        this.release = data.release || null;
+      } catch (err) {
+        this.handleError(err);
+      } finally {
+        this.loadingRelease = false;
+      }
+    },
+
+    openReleaseDialog() {
+      this.releaseForm = {
+        version: this.release ? this.release.version : '',
+        notes: '',
+      };
+      this.uploadPercent = 0;
+      this.releaseDialog = true;
+      this.$nextTick(() => {
+        if (this.$refs.apkInput) this.$refs.apkInput.value = '';
+      });
+    },
+
+    uploadRelease() {
+      const version = this.releaseForm.version.trim();
+      if (!version) {
+        ElementPlus.ElMessage.warning('请填写版本号');
+        return;
+      }
+      const input = this.$refs.apkInput;
+      const file = input && input.files && input.files[0];
+      if (!file) {
+        ElementPlus.ElMessage.warning('请选择 APK 文件');
+        return;
+      }
+      if (file.size > 300 * 1024 * 1024) {
+        ElementPlus.ElMessage.warning('安装包超过 300MB 上限');
+        return;
+      }
+      this.uploading = true;
+      this.uploadPercent = 0;
+      const params = new URLSearchParams({
+        version,
+        notes: this.releaseForm.notes.trim(),
+      });
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', `/api/admin/releases?${params.toString()}`);
+      xhr.setRequestHeader('Authorization', `Bearer ${readToken()}`);
+      xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable) {
+          this.uploadPercent = Math.min(99, Math.round((event.loaded / event.total) * 100));
+        }
+      };
+      xhr.onload = () => {
+        this.uploading = false;
+        let data = {};
+        try {
+          data = JSON.parse(xhr.responseText || '{}');
+        } catch {
+          data = {};
+        }
+        if (xhr.status >= 200 && xhr.status < 300) {
+          this.uploadPercent = 100;
+          this.release = data.release || null;
+          this.releaseDialog = false;
+          ElementPlus.ElMessage.success(`v${version} 已发布，官网下载即时生效`);
+          this.loadRelease();
+        } else if (xhr.status === 401) {
+          this.logout(true);
+          ElementPlus.ElMessage.warning('登录已过期，请重新登录');
+        } else {
+          ElementPlus.ElMessage.error(data.error || `上传失败（${xhr.status}）`);
+        }
+      };
+      xhr.onerror = () => {
+        this.uploading = false;
+        ElementPlus.ElMessage.error('网络错误，上传失败');
+      };
+      xhr.send(file);
+    },
+
+    async removeRelease() {
+      try {
+        await ElementPlus.ElMessageBox.confirm(
+          '下架后官网将显示「即将发布」，确定下架当前安装包？',
+          '下架确认',
+          { type: 'warning', confirmButtonText: '下架', cancelButtonText: '取消' },
+        );
+      } catch {
+        return;
+      }
+      try {
+        await request('/api/admin/releases', { method: 'DELETE' });
+        this.release = null;
+        ElementPlus.ElMessage.success('已下架');
       } catch (err) {
         this.handleError(err);
       }

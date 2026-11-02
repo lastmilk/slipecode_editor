@@ -150,6 +150,8 @@ const DEFAULT_DB = {
   chatHistory: {},
   // 管理员发布的使用文档（Markdown）
   docs: [],
+  // 官网下载的最新安装包元数据（文件存 DATA_DIR/releases/）
+  release: null,
   // 运行期配置（优先级高于环境变量，便于在管理端热更新）
   config: {
     geetest: {},
@@ -199,6 +201,8 @@ export async function loadDb() {
           ? parsed.chatHistory
           : {},
       docs: Array.isArray(parsed.docs) ? parsed.docs : [],
+      release:
+        parsed.release && typeof parsed.release === 'object' ? parsed.release : null,
       config: mergeConfig(parsed.config),
       stats: mergeStats(parsed.stats),
     };

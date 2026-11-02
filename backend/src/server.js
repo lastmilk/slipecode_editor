@@ -83,6 +83,13 @@ import {
 } from './routes/policies.js';
 import { handleGetProjects, handlePutProjects } from './routes/projects.js';
 import {
+  handleAdminDeleteRelease,
+  handleAdminGetRelease,
+  handleAdminUploadRelease,
+  handleDownloadRelease,
+  handleGetLatestRelease,
+} from './routes/releases.js';
+import {
   handleCreateBuildWatch,
   handleDownloadBuildArtifact,
   handleGetBuildWatch,
@@ -91,6 +98,7 @@ import {
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ADMIN_DIR = join(__dirname, '..', 'admin');
+const WEBSITE_DIR = join(__dirname, '..', 'website');
 
 // ---------------------------------------------------------------------------
 // 路由表
@@ -147,6 +155,11 @@ const ROUTES = {
   'POST /api/build/watch': handleCreateBuildWatch,
   'GET /api/build/watch': handleLatestBuildWatch,
 
+  // 官网安装包（公开）
+  'GET /api/releases/latest': handleGetLatestRelease,
+  'GET /api/releases/download': handleDownloadRelease,
+  'HEAD /api/releases/download': handleDownloadRelease,
+
   // 管理端 API
   'POST /api/admin/login': handleAdminLogin,
   'GET /api/admin/session': handleAdminSession,
@@ -160,6 +173,9 @@ const ROUTES = {
   'POST /api/admin/docs': handleAdminCreateDoc,
   'GET /api/admin/policies': handleAdminGetPolicies,
   'PUT /api/admin/policies': handleAdminUpdatePolicies,
+  'GET /api/admin/releases': handleAdminGetRelease,
+  'POST /api/admin/releases': handleAdminUploadRelease,
+  'DELETE /api/admin/releases': handleAdminDeleteRelease,
 };
 
 /** 带路径参数的路由（正则捕获，handler 第三个参数为正则 match） */
@@ -229,6 +245,14 @@ function isAdminHost(req) {
   return host.startsWith('workadmin.') || host.includes('workadmin');
 }
 
+/** 官网域名（slipe.cn / www.slipe.cn）：页面请求落到官网静态目录 */
+function isWebsiteHost(req) {
+  const host = String(req.headers.host || '')
+    .toLowerCase()
+    .replace(/:\d+$/, '');
+  return host === 'slipe.cn' || host === 'www.slipe.cn';
+}
+
 // ---------------------------------------------------------------------------
 // 服务器
 // ---------------------------------------------------------------------------
@@ -265,7 +289,20 @@ const server = createServer(async (req, res) => {
       return;
     }
 
-    // 2) 管理页面
+    // 2) 官网（slipe.cn / www.slipe.cn）
+    if (isWebsiteHost(req) && (req.method === 'GET' || req.method === 'HEAD')) {
+      const isAsset = /\.(js|mjs|css|map|png|jpg|jpeg|svg|webp|ico|woff|woff2|ttf)$/i.test(path);
+      if (isAsset) {
+        const ok = await serveStatic(req, res, WEBSITE_DIR, path.slice(1));
+        if (ok) return;
+      } else {
+        if (await serveStatic(req, res, WEBSITE_DIR, 'index.html')) return;
+      }
+      sendJson(res, 404, { error: '页面不存在' });
+      return;
+    }
+
+    // 3) 管理页面
     //    资源（含 /vendor、/styles.css、/app.js）无论哪个域名都从 admin 目录读取；
     //    页面入口：workadmin.* 任意路径、其它域名的 / 与 /admin。
     if (req.method === 'GET' || req.method === 'HEAD') {

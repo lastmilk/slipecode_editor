@@ -59,6 +59,7 @@
           <el-menu-item index="config">凭据配置</el-menu-item>
           <el-menu-item index="llm">LLM 模型</el-menu-item>
           <el-menu-item index="docs">使用文档</el-menu-item>
+          <el-menu-item index="releases">安装包</el-menu-item>
           <el-menu-item index="policies">政策合规</el-menu-item>
         </el-menu>
         <div class="sidebar-footer">
@@ -387,6 +388,68 @@
               </el-table-column>
             </el-table>
           </div>
+        </section>
+        <!-- 安装包 -->
+        <section v-else-if="tab === 'releases'" class="panel">
+          <header class="panel-head">
+            <div>
+              <h2>安装包发布</h2>
+              <p>上传最新 Android APK，官网（slipe.cn）下载页实时生效。</p>
+            </div>
+            <el-button :loading="loadingRelease" @click="loadRelease">刷新</el-button>
+          </header>
+
+          <div class="card" v-if="release">
+            <el-descriptions :column="2" border>
+              <el-descriptions-item label="当前版本">v{{ release.version }}</el-descriptions-item>
+              <el-descriptions-item label="文件大小">{{ (release.size / 1024 / 1024).toFixed(1) }} MB</el-descriptions-item>
+              <el-descriptions-item label="发布时间">{{ dateText(release.updatedAt) }}</el-descriptions-item>
+              <el-descriptions-item label="累计下载">{{ fmt(release.downloads) }} 次</el-descriptions-item>
+              <el-descriptions-item label="SHA-256" :span="2">
+                <code style="word-break: break-all">{{ release.sha256 || '-' }}</code>
+              </el-descriptions-item>
+              <el-descriptions-item label="更新说明" :span="2">
+                <span style="white-space: pre-wrap">{{ release.notes || '（无）' }}</span>
+              </el-descriptions-item>
+              <el-descriptions-item label="文件状态" :span="2">
+                <el-tag :type="release.fileExists ? 'success' : 'danger'" size="small">
+                  {{ release.fileExists ? '文件正常' : '文件缺失，请重新上传' }}
+                </el-tag>
+              </el-descriptions-item>
+            </el-descriptions>
+            <div style="margin-top: 16px; display: flex; gap: 12px">
+              <el-button type="primary" @click="openReleaseDialog">上传新版本</el-button>
+              <el-button type="danger" plain @click="removeRelease">下架安装包</el-button>
+            </div>
+          </div>
+          <div class="card" v-else>
+            <el-empty description="尚未发布安装包">
+              <el-button type="primary" @click="openReleaseDialog">上传首个版本</el-button>
+            </el-empty>
+          </div>
+
+          <el-dialog v-model="releaseDialog" title="上传安装包" width="480px" :close-on-click-modal="!uploading">
+            <el-form label-width="80px">
+              <el-form-item label="版本号" required>
+                <el-input v-model="releaseForm.version" placeholder="例如 1.2.0" :disabled="uploading" />
+              </el-form-item>
+              <el-form-item label="更新说明">
+                <el-input v-model="releaseForm.notes" type="textarea" :rows="4" placeholder="本次更新的内容（可选，官网展示）" :disabled="uploading" />
+              </el-form-item>
+              <el-form-item label="APK 文件" required>
+                <input ref="apkInput" type="file" accept=".apk,application/vnd.android.package-archive" :disabled="uploading" />
+              </el-form-item>
+              <el-form-item v-if="uploading || uploadPercent > 0" label="进度">
+                <el-progress :percentage="uploadPercent" style="width: 100%" />
+              </el-form-item>
+            </el-form>
+            <template #footer>
+              <el-button @click="releaseDialog = false" :disabled="uploading">取消</el-button>
+              <el-button type="primary" :loading="uploading" @click="uploadRelease">
+                {{ uploading ? '上传中' : '开始上传' }}
+              </el-button>
+            </template>
+          </el-dialog>
         </section>
         <!-- 政策合规 -->
         <section v-else-if="tab === 'policies'" class="panel">
