@@ -31,17 +31,32 @@ jobs:
           channel: stable
           cache: true
 
-      # 本地创建的项目不含平台工程，构建前用 flutter create 补齐。
-      # org / 项目名从模板自带的 .slipe.json 读取；缺失时退回默认值。
+      # 极验 GT4 AAR 要求 compileSdk=37；GitHub ubuntu-latest 预装的 SDK 可能
+      # 不含 android-37.0，需手动安装并创建 android-37 软链（AGP 按纯数字查找）
+      - name: Install Android 37 platform
+        run: |
+          set -e
+          SDK="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          if [ ! -d "$SDK/platforms/android-37" ]; then
+            yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" \
+              "platforms;android-37.0" >/dev/null
+            ln -s android-37.0 "$SDK/platforms/android-37"
+          fi
+
+      # 仅当平台目录缺失时才用 flutter create 补齐；
+      # 若仓库已提交完整的 android/ 目录则直接复用，否则会覆盖自定义的
+      # AndroidManifest / MainActivity / 前台服务与 JGit 依赖。
       - name: Generate platform files
         run: |
           set -e
-          if [ -f .slipe.json ]; then
-            ORG=$(jq -r '.org // "com.example"' .slipe.json)
-            NAME=$(jq -r '.project_name // empty' .slipe.json)
-            flutter create --org "$ORG" --platforms=android ${NAME:+--project-name "$NAME"} .
-          else
-            flutter create --platforms=android .
+          if [ ! -d android ]; then
+            if [ -f .slipe.json ]; then
+              ORG=$(jq -r '.org // "com.example"' .slipe.json)
+              NAME=$(jq -r '.project_name // empty' .slipe.json)
+              flutter create --org "$ORG" --platforms=android ${NAME:+--project-name "$NAME"} .
+            else
+              flutter create --platforms=android .
+            fi
           fi
 
       - name: Pub get
@@ -90,12 +105,14 @@ jobs:
       - name: Generate iOS platform files
         run: |
           set -e
-          if [ -f .slipe.json ]; then
-            ORG=$(jq -r '.org // "com.example"' .slipe.json)
-            NAME=$(jq -r '.project_name // empty' .slipe.json)
-            flutter create --org "$ORG" --platforms=ios ${NAME:+--project-name "$NAME"} .
-          else
-            flutter create --platforms=ios .
+          if [ ! -d ios ]; then
+            if [ -f .slipe.json ]; then
+              ORG=$(jq -r '.org // "com.example"' .slipe.json)
+              NAME=$(jq -r '.project_name // empty' .slipe.json)
+              flutter create --org "$ORG" --platforms=ios ${NAME:+--project-name "$NAME"} .
+            else
+              flutter create --platforms=ios .
+            fi
           fi
 
       - name: Pub get

@@ -37,7 +37,7 @@ class AppConfig {
   /// App 自身监听的深链，后端换到 token 后 302 到这里
   static String get oauthDeepLink => _env(
         'GITHUB_DEEP_LINK',
-        'slipe://oauth/callback',
+        'slipe://gitoauth2',
       );
 
   /// 授权范围

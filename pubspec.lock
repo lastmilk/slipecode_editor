@@ -161,6 +161,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "0.7.15"
+  equatable:
+    dependency: transitive
+    description:
+      name: equatable
+      sha256: "3bce007a596ff8b3119c45d68aaef631272537c03d30e5d4534dd24bf4c5eaa2"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.1.0"
   fake_async:
     dependency: transitive
     description:
@@ -301,6 +309,22 @@ packages:
     description: flutter
     source: sdk
     version: "0.0.0"
+  git2dart:
+    dependency: "direct main"
+    description:
+      name: git2dart
+      sha256: bc4cec5b9c00048e52f269b14a0f89b4fb1a486aa538217a032cb9729ba26fa7
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.5.6"
+  git2dart_binaries:
+    dependency: transitive
+    description:
+      name: git2dart_binaries
+      sha256: ff0440138a62830982d3298abbaf1acefec5178dba46d337fe8567d19a4b7015
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.14.1"
   highlight:
     dependency: "direct main"
     description:

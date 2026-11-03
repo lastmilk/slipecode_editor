@@ -40,12 +40,20 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
-            <!-- GitHub OAuth(PKCE) 回调深链：slipe://oauth/callback -->
+            <!-- OAuth 回调深链 -->
+            <!-- Gitee：slipe://oauth/gitee/callback -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW"/>
                 <category android:name="android.intent.category.DEFAULT"/>
                 <category android:name="android.intent.category.BROWSABLE"/>
                 <data android:scheme="slipe" android:host="oauth"/>
+            </intent-filter>
+            <!-- GitHub：slipe://gitoauth2（与 GitHub OAuth 应用登记的回调一致） -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="slipe" android:host="gitoauth2"/>
             </intent-filter>
         </activity>
         <!-- Don't delete the meta-data below.

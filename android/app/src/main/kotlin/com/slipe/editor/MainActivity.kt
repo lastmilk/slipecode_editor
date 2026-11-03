@@ -33,7 +33,7 @@ class MainActivity : FlutterFragmentActivity() {
     }
 
     /// 悬浮球面板「开始执行」后以 SINGLE_TOP 拉起已运行的 App，在这里把请求转给 Flutter
-    override fun onNewIntent(intent: Intent?) {
+    override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
         captureAiRequest(intent)
