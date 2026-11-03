@@ -19,6 +19,9 @@ import 'providers/settings_provider.dart';
 import 'providers/terminal_provider.dart';
 import 'screens/home_screen.dart';
 import 'services/app_globals.dart';
+import 'services/overlay_service.dart';
+import 'services/project_history_service.dart';
+import 'widgets/ai_quick_chat.dart';
 import 'widgets/app_background.dart';
 import 'widgets/app_lock_gate.dart';
 import 'widgets/policy_gate.dart';
@@ -37,12 +40,8 @@ Future<void> main() async {
   final githubProvider = GitHubProvider();
   final giteeProvider = GiteeProvider();
 
-  // 账号体系：登录后可同步偏好设置 / 项目列表 / 头像 / 壁纸
+  // 账号体系：登录后可同步偏好设置 / 头像 / 壁纸
   final accountProvider = AccountProvider(settingsProvider);
-  accountProvider.attachSyncProviders(
-    github: githubProvider,
-    gitee: giteeProvider,
-  );
   settingsProvider.attachRemoteSync(accountProvider.pushSettingsIfLoggedIn);
 
   // 其余 Provider 依赖上面三者，直接实例化后注入
@@ -99,6 +98,23 @@ Future<void> main() async {
   unawaited(
     _initAuthInBackground(githubProvider, giteeProvider, accountProvider),
   );
+
+  // 系统悬浮球：点击后直接弹出轻量 AI 对话窗（不进入主界面）
+  unawaited(
+    OverlayService.instance.init(
+      onOpenAiChat: (request) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          AiQuickChatSheet.showFromGlobal(
+            prompt: request.prompt,
+            projectPath: request.projectPath,
+          );
+        });
+      },
+    ),
+  );
+
+  // 把项目列表同步给系统悬浮球面板（项目选择用）
+  unawaited(ProjectHistoryService.instance.publishOverlayProjects());
 }
 
 /// 后台恢复各平台登录态，带超时与异常兜底（降级为未登录）

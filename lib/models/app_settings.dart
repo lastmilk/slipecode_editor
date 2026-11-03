@@ -54,13 +54,6 @@ class AppSettings {
   /// 登录用户构建产物先由服务端中转下载（缓解国内访问 GitHub 的网络问题）
   final bool buildServerRelay;
 
-  /// 是否开启共享存储（Android）。
-  ///
-  /// 合规要求：默认关闭，项目存放在应用私有目录；
-  /// 用户在设置中手动开启后才会申请「所有文件」访问权限，
-  /// 并可自行选择项目存放位置。
-  final bool sharedStorageEnabled;
-
   /// 已同意的《用户协议》与《隐私政策》版本号（空表示未同意 → 受限模式）
   final String policyAcceptedVersion;
 
@@ -170,7 +163,6 @@ class AppSettings {
     this.createRepoOnCreate = true,
     this.buildAutoDownload = true,
     this.buildServerRelay = true,
-    this.sharedStorageEnabled = false,
     this.policyAcceptedVersion = '',
     this.policyAcceptedAt = '',
     this.llmApiBase = '',
@@ -221,7 +213,6 @@ class AppSettings {
     bool? createRepoOnCreate,
     bool? buildAutoDownload,
     bool? buildServerRelay,
-    bool? sharedStorageEnabled,
     String? policyAcceptedVersion,
     String? policyAcceptedAt,
     String? llmApiBase,
@@ -257,8 +248,6 @@ class AppSettings {
       createRepoOnCreate: createRepoOnCreate ?? this.createRepoOnCreate,
       buildAutoDownload: buildAutoDownload ?? this.buildAutoDownload,
       buildServerRelay: buildServerRelay ?? this.buildServerRelay,
-      sharedStorageEnabled:
-          sharedStorageEnabled ?? this.sharedStorageEnabled,
       policyAcceptedVersion:
           policyAcceptedVersion ?? this.policyAcceptedVersion,
       policyAcceptedAt: policyAcceptedAt ?? this.policyAcceptedAt,
@@ -308,7 +297,6 @@ class AppSettings {
       'createRepoOnCreate': createRepoOnCreate,
       'buildAutoDownload': buildAutoDownload,
       'buildServerRelay': buildServerRelay,
-      'sharedStorageEnabled': sharedStorageEnabled,
       'policyAcceptedVersion': policyAcceptedVersion,
       'policyAcceptedAt': policyAcceptedAt,
       // 旧字段继续输出，便于旧版本读取；Key 是否输出由 includeSecrets 决定
@@ -399,8 +387,6 @@ class AppSettings {
           json['buildAutoDownload'] as bool? ?? defaults.buildAutoDownload,
       buildServerRelay:
           json['buildServerRelay'] as bool? ?? defaults.buildServerRelay,
-      sharedStorageEnabled:
-          json['sharedStorageEnabled'] as bool? ?? defaults.sharedStorageEnabled,
       policyAcceptedVersion:
           json['policyAcceptedVersion'] as String? ??
           defaults.policyAcceptedVersion,

@@ -55,13 +55,18 @@ class GitHubProvider extends ChangeNotifier {
       return;
     }
     _token = token;
-    _status = GitHubAuthStatus.signedIn;
+    // 先不标记为已登录：校验拿到真实用户后再切换状态，
+    // 避免 UI 在拿到用户前显示上个平台/旧账号信息。
+    _status = GitHubAuthStatus.unknown;
     notifyListeners();
     // 校验 token 并拉取用户信息（网络不可达时降级为未登录，但保留 token 以便下次重试）
     try {
-      _user = await api!.getAuthenticatedUser().timeout(
+      final user = await GitHubApiService(token).getAuthenticatedUser().timeout(
         const Duration(seconds: 10),
       );
+      _assertGitHubAccount(user);
+      _user = user;
+      _status = GitHubAuthStatus.signedIn;
     } catch (e) {
       debugPrint('GitHub token 校验失败：$e');
       final isNetworkError = e is TimeoutException || e is SocketException;
@@ -71,6 +76,7 @@ class GitHubProvider extends ChangeNotifier {
         _token = null;
       }
       _status = GitHubAuthStatus.signedOut;
+      _user = null;
     }
     notifyListeners();
   }
@@ -84,12 +90,19 @@ class GitHubProvider extends ChangeNotifier {
     }
     _status = GitHubAuthStatus.signingIn;
     _error = null;
+    // 清掉上一次的用户信息，避免登录失败时仍然显示旧账号
+    _user = null;
     notifyListeners();
     try {
       final result = await GitHubAuthService.instance.signIn();
       _token = result.accessToken;
       // api getter 依赖 signedIn 状态，必须直接构造，否则 api! 会空指针崩溃
-      _user = await GitHubApiService(result.accessToken).getAuthenticatedUser();
+      final user = await GitHubApiService(result.accessToken)
+          .getAuthenticatedUser()
+          .timeout(const Duration(seconds: 15));
+      // OAuth 配置/后端串台保护：返回的不是 GitHub 账号时拒绝登录
+      _assertGitHubAccount(user);
+      _user = user;
       _status = GitHubAuthStatus.signedIn;
       notifyListeners();
       return true;
@@ -98,6 +111,16 @@ class GitHubProvider extends ChangeNotifier {
       _status = GitHubAuthStatus.signedOut;
       notifyListeners();
       return false;
+    }
+  }
+
+  /// 校验授权结果确实是 GitHub 账号
+  void _assertGitHubAccount(GitHubUser user) {
+    if (user.login.trim().isEmpty ||
+        !user.htmlUrl.trim().toLowerCase().contains('github.com')) {
+      throw StateError(
+        'GitHub 授权返回的不是 GitHub 账号（${user.login}），请检查 OAuth 配置',
+      );
     }
   }
 

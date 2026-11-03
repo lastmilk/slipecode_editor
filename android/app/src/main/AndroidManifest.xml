@@ -1,10 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET"/>
-    <!-- 存储权限仅在用户于设置中手动开启「共享存储」时才发起申请，
-         应用默认把项目保存在应用私有目录（无需任何存储权限） -->
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
-    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28"/>
-    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"/>
+    <!-- 不再申请任何文件存储权限：项目保存在应用私有目录，
+         外部项目通过系统文件选择器（SAF）导入 -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
     <!-- AI 系统悬浮球：显示在其他应用上层 + 前台服务 -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>

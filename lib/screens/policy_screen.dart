@@ -139,11 +139,12 @@ class _PolicyView extends StatelessWidget {
           ),
         ),
         const Divider(height: 24),
-        Markdown(
+        // 注意：这里必须用不会自带滚动容器的 MarkdownBody。
+        // Markdown 内部是 shrinkWrap 的 ListView，即使内容超出也会吞掉
+        // 垂直拖拽手势，导致外层列表滑不动。
+        MarkdownBody(
           data: doc.content,
-          padding: EdgeInsets.zero,
           selectable: true,
-          shrinkWrap: true,
         ),
       ],
     );

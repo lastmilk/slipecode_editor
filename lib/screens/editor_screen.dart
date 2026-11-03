@@ -19,6 +19,7 @@ import '../services/dart_class_template.dart';
 import '../services/file_service.dart';
 import '../services/volume_key_service.dart';
 import '../widgets/ai_floating_ball.dart';
+import '../widgets/ai_quick_chat.dart';
 import '../widgets/app_background.dart';
 import '../widgets/code_editor.dart';
 import '../widgets/editor_tabs.dart';
@@ -729,9 +730,9 @@ class _EditorScreenState extends State<EditorScreen>
               _buildEdgeSwipe(Alignment.centerRight, isRight: true),
             ],
 
-            // AI 悬浮球
+            // AI 悬浮球：点击弹出轻量对话窗口（不跳转页面）
             if (settings.aiFloatingBallEnabled)
-              AiFloatingBall(onTap: _openAgentPanel),
+              AiFloatingBall(onTap: () => AiQuickChatSheet.show(context)),
           ],
         ),
         ),

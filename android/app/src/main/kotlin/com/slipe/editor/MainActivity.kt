@@ -2,6 +2,7 @@ package com.slipe.editor
 
 import android.content.Intent
 import android.os.Build
+import android.os.Bundle
 import android.util.Log
 import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -14,9 +15,47 @@ class MainActivity : FlutterFragmentActivity() {
     private val keyEventChannelName = "slipe/keyevent"
     private val overlayChannelName = "slipe/overlay"
     private val buildWatchChannelName = "slipe/build_watch"
+    private val gitChannelName = "slipe/git"
+
+    /// 点击系统悬浮球后待处理的「打开 AI 对话」请求（冷启动时由 Dart 主动消费）
+    private var pendingOpenAiChat = false
+    private var pendingAiPrompt: String? = null
+    private var pendingAiProject: String? = null
+    private var overlayChannel: MethodChannel? = null
 
     /// Flutter 侧注册的音量键监听器；为 null 表示未监听（按键走系统默认）
     private var volumeKeyListener: ((Int) -> Boolean)? = null
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        // 先记录冷启动携带的 AI 请求，避免 Flutter 引擎初始化后先消费造成丢参
+        captureAiRequest(intent)
+        super.onCreate(savedInstanceState)
+    }
+
+    /// 悬浮球面板「开始执行」后以 SINGLE_TOP 拉起已运行的 App，在这里把请求转给 Flutter
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        captureAiRequest(intent)
+        if (pendingOpenAiChat) {
+            overlayChannel?.invokeMethod(
+                "openAiChat",
+                mapOf("prompt" to pendingAiPrompt, "project" to pendingAiProject)
+            )
+            // 已实时转交 Flutter，清空标记，避免 Dart 端再次消费造成重复打开
+            pendingOpenAiChat = false
+            pendingAiPrompt = null
+            pendingAiProject = null
+        }
+    }
+
+    private fun captureAiRequest(intent: Intent?) {
+        if (intent == null) return
+        if (!intent.getBooleanExtra(AiOverlayService.EXTRA_OPEN_AI_CHAT, false)) return
+        pendingOpenAiChat = true
+        pendingAiPrompt = intent.getStringExtra(AiOverlayService.EXTRA_AI_PROMPT)
+        pendingAiProject = intent.getStringExtra(AiOverlayService.EXTRA_AI_PROJECT)
+    }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -110,8 +149,8 @@ class MainActivity : FlutterFragmentActivity() {
             }
 
         // 系统悬浮窗通道：AI 悬浮球可在 App 退到后台后仍然显示
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, overlayChannelName)
-            .setMethodCallHandler { call, result ->
+        overlayChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, overlayChannelName)
+        overlayChannel!!.setMethodCallHandler { call, result ->
                 when (call.method) {
                     "checkPermission" -> {
                         result.success(
@@ -156,6 +195,56 @@ class MainActivity : FlutterFragmentActivity() {
                     }
                     "isOverlayShowing" -> {
                         result.success(AiOverlayService.isShowing)
+                    }
+                    "consumeOpenAiChat" -> {
+                        // 冷启动：悬浮球提交的需求在 Flutter 就绪后消费一次
+                        result.success(
+                            mapOf(
+                                "open" to pendingOpenAiChat,
+                                "prompt" to pendingAiPrompt,
+                                "project" to pendingAiProject
+                            )
+                        )
+                        pendingOpenAiChat = false
+                        pendingAiPrompt = null
+                        pendingAiProject = null
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+
+        // 本地 Git 拉取通道：Android 端使用 JGit 执行 clone / pull
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, gitChannelName)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "cloneOrPull" -> {
+                        val url = call.argument<String>("url")
+                        val destPath = call.argument<String>("destPath")
+                        val branch = call.argument<String>("branch") ?: "main"
+                        val username = call.argument<String>("username") ?: "oauth2"
+                        val token = call.argument<String>("token") ?: ""
+                        if (url == null || url.isBlank() ||
+                            destPath == null || destPath.isBlank()
+                        ) {
+                            result.error("bad_args", "url 或 destPath 为空", null)
+                        } else {
+                            GitClient.cloneOrPull(
+                                url = url,
+                                destPath = destPath,
+                                branch = branch,
+                                username = username,
+                                token = token,
+                                callback = { payload, error ->
+                                    runOnUiThread {
+                                        if (error != null) {
+                                            result.error("git_failed", error, null)
+                                        } else {
+                                            result.success(payload)
+                                        }
+                                    }
+                                }
+                            )
+                        }
                     }
                     else -> result.notImplemented()
                 }

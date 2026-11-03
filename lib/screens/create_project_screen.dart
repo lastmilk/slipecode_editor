@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
@@ -50,18 +48,14 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
   @override
   void initState() {
     super.initState();
-    // 设置默认路径：默认使用应用私有目录（无需任何存储权限）。
-    // 仅当用户已在偏好设置中手动开启「共享存储」时，
-    // 才默认使用公共目录 /storage/emulated/0/Projects。
+    // 项目默认保存在应用私有目录（无需任何存储权限）。
+    // 新版本已移除「共享存储」功能：如需使用已有项目，
+    // 请从首页通过系统文件选择器导入。
     final settings = context.read<SettingsProvider>().settings;
-    if (Platform.isAndroid && settings.sharedStorageEnabled) {
-      _pathController.text = '/storage/emulated/0/Projects';
-    } else {
-      getApplicationDocumentsDirectory().then((dir) {
-        if (!mounted || _pathController.text.isNotEmpty) return;
-        setState(() => _pathController.text = p.join(dir.path, 'Projects'));
-      });
-    }
+    getApplicationDocumentsDirectory().then((dir) {
+      if (!mounted || _pathController.text.isNotEmpty) return;
+      setState(() => _pathController.text = p.join(dir.path, 'Projects'));
+    });
 
     // 偏好设置中的默认 Git 平台与建仓开关
     _host = settings.defaultGitHost;

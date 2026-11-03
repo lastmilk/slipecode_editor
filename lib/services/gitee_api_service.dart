@@ -139,6 +139,45 @@ class GiteeApiService {
     return GiteeUser.fromJson(json);
   }
 
+  /// 列出通过 SLIPE 创建的 Gitee 仓库（按创建描述识别）
+  ///
+  /// 只返回当前授权用户自己名下的仓库，避免把协作仓库也算进来。
+  Future<List<GiteeRepo>> listSlipeRepos() async {
+    const marker = 'created by slipe';
+    final repos = <GiteeRepo>[];
+    for (var page = 1; page <= 5; page++) {
+      final res = await _client
+          .get(_u('/user/repos', {
+            'page': '$page',
+            'per_page': '100',
+            'sort': 'updated',
+            'direction': 'desc',
+            'affiliation': 'owner',
+          }))
+          .timeout(const Duration(seconds: 20));
+      _check(res, 'GET /user/repos');
+      final decoded = jsonDecode(res.body);
+      if (decoded is! List) {
+        throw HttpExceptionWithBody(
+          'GET /user/repos 返回了非列表数据（${decoded.runtimeType}）',
+          res.body,
+        );
+      }
+      if (decoded.isEmpty) break;
+      for (final item in decoded) {
+        if (item is! Map) continue;
+        final map = Map<String, dynamic>.from(item);
+        final description =
+            (map['description'] as String? ?? '').toLowerCase();
+        if (description.contains(marker)) {
+          repos.add(GiteeRepo.fromJson(map));
+        }
+      }
+      if (decoded.length < 100) break;
+    }
+    return repos;
+  }
+
   /// 创建仓库（在当前授权用户名下）
   Future<GiteeRepo> createRepo(
     String name, {

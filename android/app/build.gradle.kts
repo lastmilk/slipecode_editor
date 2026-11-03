@@ -21,7 +21,9 @@ android {
         applicationId = "com.slipe.editor"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion
+        // JGit 依赖 java.nio.file（Android 8.0 / API 26 起提供），
+        // 因此最低版本固定为 26（与 Android 7 及以下不兼容）
+        minSdk = 26
         targetSdk = flutter.targetSdkVersion
         // Uses the version code from pubspec.yaml. When using split APKs, 1000 * ABI_VERSION
         // is added automatically by Flutter. (https://developer.android.com/studio/build/configure-apk-splits#configure-APK-versions)
@@ -60,6 +62,8 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.7.1")
     // 极验验证码 SDK（GT4，来自 gt4-android-sec.zip）
     implementation(files("libs/geetest_captcha_android.aar"))
+    // JGit：本地仓库 clone / pull（iOS 端使用 libgit2）
+    implementation("org.eclipse.jgit:org.eclipse.jgit:5.13.3.202401111512-r")
 }
 
 flutter {
