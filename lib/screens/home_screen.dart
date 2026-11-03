@@ -21,6 +21,7 @@ import 'create_project_screen.dart';
 import 'editor_screen.dart';
 import 'settings_screen.dart';
 import 'docs_screen.dart';
+import 'repo_sync_screen.dart';
 
 /// 应用主页
 ///
@@ -63,8 +64,7 @@ class _HomeScreenState extends State<HomeScreen>
     _entranceController.forward();
 
     // 合规说明：开屏不申请任何文件存储权限。
-    // 项目默认存放在应用私有目录；用户可在「偏好设置 → 项目与Git」
-    // 中手动开启共享存储并自行选择项目存放位置。
+    // 项目默认存放在应用私有目录，外部项目通过系统文件选择器导入。
     _loadHistory();
     _loadSaying();
   }
@@ -299,6 +299,19 @@ class _HomeScreenState extends State<HomeScreen>
                 Row(
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
+                    IconButton(
+                      tooltip: '同步仓库',
+                      icon: const Icon(Icons.cloud_sync_outlined),
+                      onPressed: () async {
+                        await Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => const RepoSyncScreen(),
+                          ),
+                        );
+                        // 返回首页时刷新，展示刚拉取到本地的项目
+                        _loadHistory();
+                      },
+                    ),
                     IconButton(
                       tooltip: '使用文档',
                       icon: const Icon(Icons.menu_book_outlined),

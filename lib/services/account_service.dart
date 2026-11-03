@@ -239,38 +239,6 @@ class AccountService {
   }
 
   // ---------------------------------------------------------------------------
-  // 项目列表 / 仓库映射云同步
-  // ---------------------------------------------------------------------------
-
-  Future<List<Map<String, dynamic>>> fetchProjects(String token) async {
-    _ensureConfigured();
-    final res = await _client
-        .get(_u('/api/projects'), headers: _headers(token))
-        .timeout(const Duration(seconds: 20));
-    final data = await _decode(res, '获取项目列表失败');
-    final list = data['projects'];
-    if (list is List) {
-      return list.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
-    }
-    return const [];
-  }
-
-  Future<void> pushProjects(
-    String token,
-    List<Map<String, dynamic>> projects,
-  ) async {
-    _ensureConfigured();
-    final res = await _client
-        .put(
-          _u('/api/projects'),
-          headers: _headers(token),
-          body: jsonEncode({'projects': projects}),
-        )
-        .timeout(const Duration(seconds: 20));
-    await _decode(res, '同步项目列表失败');
-  }
-
-  // ---------------------------------------------------------------------------
   // AI 对话记录云同步
   // ---------------------------------------------------------------------------
 

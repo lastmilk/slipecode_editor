@@ -1,9 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../l10n/app_localizations.dart';
@@ -134,23 +132,6 @@ class SettingsProvider extends ChangeNotifier {
   Future<void> setBuildServerRelay(bool value) async {
     _settings = _settings.copyWith(buildServerRelay: value);
     await _save();
-  }
-
-  /// 开启/关闭共享存储（Android）。
-  ///
-  /// 开启时会申请「所有文件」访问权限（MANAGE_EXTERNAL_STORAGE）；
-  /// 用户拒绝或关闭时恢复私有目录模式。返回是否成功开启。
-  Future<bool> setSharedStorageEnabled(bool value) async {
-    if (value && Platform.isAndroid) {
-      var status = await Permission.manageExternalStorage.status;
-      if (status != PermissionStatus.granted) {
-        status = await Permission.manageExternalStorage.request();
-      }
-      if (status != PermissionStatus.granted) return false;
-    }
-    _settings = _settings.copyWith(sharedStorageEnabled: value);
-    await _save();
-    return true;
   }
 
   /// 记录用户同意《用户协议》与《隐私政策》

@@ -6,10 +6,7 @@ import 'package:flutter/foundation.dart';
 import '../l10n/app_localizations.dart';
 import '../services/account_service.dart';
 import '../services/avatar_service.dart';
-import '../services/project_sync_service.dart';
 import '../services/wallpaper_sync_service.dart';
-import 'gitee_provider.dart';
-import 'github_provider.dart';
 import 'settings_provider.dart';
 
 enum AccountStatus { signedOut, signingIn, signedIn }
@@ -22,18 +19,6 @@ class AccountProvider extends ChangeNotifier {
   AccountProvider(this._settings);
 
   final SettingsProvider _settings;
-
-  /// Git 平台 Provider（用于项目/仓库映射同步），由 main 注入
-  GitHubProvider? _github;
-  GiteeProvider? _gitee;
-
-  void attachSyncProviders({
-    GitHubProvider? github,
-    GiteeProvider? gitee,
-  }) {
-    _github = github;
-    _gitee = gitee;
-  }
 
   AccountStatus _status = AccountStatus.signedOut;
   AccountUser? _user;
@@ -158,7 +143,7 @@ class AccountProvider extends ChangeNotifier {
       _user = user;
       _status = AccountStatus.signedIn;
       _safeNotify();
-      // 登录后：设置 → 项目/仓库 → 头像 → 壁纸
+      // 登录后：设置 → 头像 → 壁纸（本地项目目录不再自动同步）
       await _syncAfterLogin();
       return true;
     } catch (e) {
@@ -234,7 +219,10 @@ class AccountProvider extends ChangeNotifier {
     _safeNotify();
   }
 
-  /// 登录后的完整同步：设置 → 项目/仓库映射 → 头像 → 壁纸
+  /// 登录后的完整同步：设置 → 头像 → 壁纸
+  ///
+  /// 注意：不再同步本机项目目录列表。需要拉取云端仓库时，
+  /// 由用户手动进入首页右上角的「同步仓库」页面选择仓库并拉取。
   Future<void> _syncAfterLogin() async {
     try {
       await _pullSettings();
@@ -242,30 +230,8 @@ class AccountProvider extends ChangeNotifier {
       _error = t('account.error.settingsSyncFailed', {'error': '$e'});
       _safeNotify();
     }
-    await syncProjectsNow();
     await _syncAvatar();
     await _syncWallpaper();
-  }
-
-  /// 立即同步项目列表与仓库映射（设置页「立即同步」也会调用）
-  Future<bool> syncProjectsNow() async {
-    if (!isSignedIn) return false;
-    try {
-      await ProjectSyncService.instance.sync(
-        token: _token!,
-        settings: _settings.settings,
-        github: _github,
-        gitee: _gitee,
-      );
-      _lastSyncAt = DateTime.now();
-      _error = null;
-      _safeNotify();
-      return true;
-    } catch (e) {
-      _error = t('account.error.projectsSyncFailed', {'error': '$e'});
-      _safeNotify();
-      return false;
-    }
   }
 
   /// 下载账号头像为本地头像

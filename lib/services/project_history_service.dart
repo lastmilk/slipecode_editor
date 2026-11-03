@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -15,6 +16,9 @@ class ProjectHistoryService {
 
   static const _key = 'slipe_project_history';
   static const _maxEntries = 30;
+
+  /// 供 Android 系统悬浮球面板读取的项目列表（JSON）
+  static const overlayProjectsKey = 'slipe_overlay_projects';
 
   /// 读取历史记录（按最近编辑时间倒序）
   Future<List<Project>> list() async {
@@ -75,38 +79,6 @@ class ProjectHistoryService {
     await _save(prefs, items);
   }
 
-  /// 合并云端项目列表（本地优先，云端补缺；不存在的路径标记 missing）
-  Future<List<Project>> mergeCloud(
-    List<Project> cloud, {
-    bool Function(String path)? existsOnDevice,
-  }) async {
-    final prefs = await SharedPreferences.getInstance();
-    final local = await list();
-    final merged = <String, Project>{
-      for (final item in local) item.path: item,
-    };
-    for (final remote in cloud) {
-      final current = merged[remote.path];
-      if (current == null) {
-        final exists = existsOnDevice?.call(remote.path) ?? true;
-        merged[remote.path] = remote.copyWith(missing: !exists);
-      } else {
-        merged[remote.path] = current.copyWith(
-          repoFullName: remote.repoFullName ?? current.repoFullName,
-          host: remote.host ?? current.host,
-          lastEditedAt: remote.lastEditedAt ?? current.lastEditedAt,
-        );
-      }
-    }
-    final items = merged.values.toList()
-      ..sort((a, b) => b.activityAt.compareTo(a.activityAt));
-    if (items.length > _maxEntries) {
-      items.removeRange(_maxEntries, items.length);
-    }
-    await _save(prefs, items);
-    return items;
-  }
-
   /// 删除一条记录
   Future<void> remove(String path) async {
     final prefs = await SharedPreferences.getInstance();
@@ -115,11 +87,25 @@ class ProjectHistoryService {
     await _save(prefs, items);
   }
 
+  /// 把项目列表写入 SharedPreferences，供 Android 系统悬浮球面板选择项目
+  Future<void> publishOverlayProjects() async {
+    final prefs = await SharedPreferences.getInstance();
+    final items = await list();
+    final overlay = <Map<String, String>>[
+      for (final project in items)
+        if (Directory(project.path).existsSync())
+          {'name': project.name, 'path': project.path},
+    ];
+    await prefs.setString(overlayProjectsKey, jsonEncode(overlay));
+  }
+
   Future<void> _save(SharedPreferences prefs, List<Project> items) async {
     await prefs.setString(
       _key,
       jsonEncode(items.map((e) => e.toMap()).toList()),
     );
+    // 同步给系统悬浮球的轻量面板
+    await publishOverlayProjects();
   }
 
   static String _nameFromPath(String path) {

@@ -533,36 +533,6 @@ class _SettingsScreenState extends State<SettingsScreen>
 
   List<_SectionData> _gitSections(SettingsProvider sp, AppSettings settings) {
     return [
-      _SectionData('存储', [
-        _Entry(
-          '共享存储 shared storage manage external',
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('共享存储（自选项目位置）'),
-            subtitle: Text(
-              Platform.isAndroid
-                  ? '默认关闭：项目保存在应用私有目录，卸载时一并清除。'
-                        '开启后将申请「所有文件」访问权限，可在公共存储（如 '
-                        '/storage/emulated/0/Projects）自选项目存放位置。'
-                  : '仅 Android 需要此设置；当前平台项目默认保存在文档目录。',
-            ),
-            value: settings.sharedStorageEnabled,
-            onChanged: Platform.isAndroid
-                ? (value) async {
-                    final ok = await sp.setSharedStorageEnabled(value);
-                    if (!ok && mounted) {
-                      // 权限被拒：提示并保持关闭
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('未授予「所有文件」访问权限，已保持私有目录模式'),
-                        ),
-                      );
-                    }
-                  }
-                : null,
-          ),
-        ),
-      ]),
       _SectionData('Git 平台', [
         _Entry(
           '默认 Git 平台 github gitee',
@@ -753,7 +723,7 @@ class _SettingsScreenState extends State<SettingsScreen>
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
             title: const Text('应用内悬浮球'),
-            subtitle: const Text('在 IDE 右下角显示 AI 悬浮球，点击呼出 Agent 面板'),
+            subtitle: const Text('在 IDE 右下角显示 AI 悬浮球，点击弹出轻量 AI 对话窗'),
             value: settings.aiFloatingBallEnabled,
             onChanged: sp.setAiFloatingBallEnabled,
           ),
@@ -765,7 +735,8 @@ class _SettingsScreenState extends State<SettingsScreen>
             title: const Text('系统悬浮球'),
             subtitle: Text(
               Platform.isAndroid
-                  ? 'App 退到后台后仍显示悬浮球（需授予悬浮窗权限）'
+                  ? 'App 退到后台后仍显示悬浮球（需授予悬浮窗权限）；'
+                      '点击后可直接选择项目并输入需求，AI 自动执行'
                   : 'iOS 不支持系统悬浮窗，仅可使用应用内悬浮球',
             ),
             value: settings.systemOverlayEnabled,
@@ -873,7 +844,7 @@ class _SettingsScreenState extends State<SettingsScreen>
           ListTile(
             contentPadding: EdgeInsets.zero,
             title: const Text('同步网络策略'),
-            subtitle: const Text('控制项目 / 壁纸 / 对话记录等自动同步使用的网络'),
+            subtitle: const Text('控制壁纸 / 对话记录等自动同步使用的网络'),
             trailing: DropdownButton<String>(
               value: settings.syncNetwork,
               underline: const SizedBox.shrink(),
@@ -886,33 +857,6 @@ class _SettingsScreenState extends State<SettingsScreen>
                 if (value != null) sp.setSyncNetwork(value);
               },
             ),
-          ),
-        ),
-        _Entry(
-          '项目云同步 重装不丢 project sync',
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('项目与仓库云同步'),
-            subtitle: const Text(
-              '登录后云端保存本地打开过的项目路径与远程仓库映射，'
-              '重装 App 后登录即可找回',
-            ),
-            trailing: account.isSignedIn
-                ? TextButton.icon(
-                    onPressed: () async {
-                      final messenger = ScaffoldMessenger.of(context);
-                      final ok = await account.syncProjectsNow();
-                      messenger.showSnackBar(
-                        SnackBar(
-                          content: Text(ok ? '项目列表已同步' : '同步失败'),
-                          backgroundColor: ok ? Colors.green : Colors.redAccent,
-                        ),
-                      );
-                    },
-                    icon: const Icon(Icons.sync, size: 16),
-                    label: const Text('立即同步'),
-                  )
-                : null,
           ),
         ),
       ]),

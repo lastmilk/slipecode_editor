@@ -36,6 +36,9 @@ class GiteeProvider extends ChangeNotifier {
   GiteeUser? get user => _user;
   String? get error => _error;
 
+  /// 当前已保存的 access token（仓库拉取需要用它做 HTTPS 认证）
+  String? get token => _token;
+
   bool get isConfigured => AppConfig.isGiteeConfigured;
   bool get isSignedIn => _status == GiteeAuthStatus.signedIn && _token != null;
 
@@ -53,13 +56,17 @@ class GiteeProvider extends ChangeNotifier {
       return;
     }
     _token = token;
-    _status = GiteeAuthStatus.signedIn;
+    // 校验通过后再标记为已登录，避免显示旧账号信息
+    _status = GiteeAuthStatus.unknown;
     notifyListeners();
     // 校验 token；网络不可达时降级为未登录，但保留 token 以便下次重试
     try {
-      _user = await api!
+      final user = await GiteeApiService(token)
           .getAuthenticatedUser()
           .timeout(const Duration(seconds: 10));
+      _assertGiteeAccount(user);
+      _user = user;
+      _status = GiteeAuthStatus.signedIn;
     } catch (e) {
       debugPrint('Gitee token 校验失败：$e');
       final isNetworkError = e is TimeoutException || e is SocketException;
@@ -68,6 +75,7 @@ class GiteeProvider extends ChangeNotifier {
         _token = null;
       }
       _status = GiteeAuthStatus.signedOut;
+      _user = null;
     }
     notifyListeners();
   }
@@ -85,7 +93,13 @@ class GiteeProvider extends ChangeNotifier {
     try {
       final result = await GiteeAuthService.instance.signIn();
       _token = result.accessToken;
-      _user = await api!.getAuthenticatedUser();
+      // 此时 _status 仍为 signingIn，api getter 会返回 null，必须直接构造客户端。
+      final user = await GiteeApiService(result.accessToken)
+          .getAuthenticatedUser()
+          .timeout(const Duration(seconds: 15));
+      // 防止 OAuth 回调/后端配置串台：拿到非 Gitee 账号时拒绝登录。
+      _assertGiteeAccount(user);
+      _user = user;
       _status = GiteeAuthStatus.signedIn;
       notifyListeners();
       return true;
@@ -94,6 +108,15 @@ class GiteeProvider extends ChangeNotifier {
       _status = GiteeAuthStatus.signedOut;
       notifyListeners();
       return false;
+    }
+  }
+
+  /// 校验授权结果确实是 Gitee 账号
+  void _assertGiteeAccount(GiteeUser user) {
+    final login = user.login.trim();
+    final htmlUrl = user.htmlUrl.trim().toLowerCase();
+    if (login.isEmpty || !htmlUrl.contains('gitee.com')) {
+      throw StateError('Gitee 授权返回的不是 Gitee 账号（$login），请检查 OAuth 配置');
     }
   }
 
