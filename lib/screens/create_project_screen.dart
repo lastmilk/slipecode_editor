@@ -304,6 +304,7 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
               spacing: 8,
               runSpacing: 8,
               children: PayloadRegistry.all
+                  .where((payload) => !payload.hiddenFromCreate)
                   .map((payload) => _buildPayloadChip(payload, isDark))
                   .toList(),
             ),

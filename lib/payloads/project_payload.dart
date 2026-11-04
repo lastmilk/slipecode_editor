@@ -8,6 +8,7 @@ import '../services/github_actions_templates.dart';
 import 'android_payload.dart';
 import 'flutter_payload.dart';
 import 'html_payload.dart';
+import 'loader/loader_project_payload.dart';
 import 'node_payload.dart';
 import 'taro_payload.dart';
 
@@ -89,6 +90,9 @@ abstract class ProjectPayload {
   /// 是否为 Flutter 项目（用于显示 Flutter 专属功能，如新建 Dart 类）
   bool get isFlutter => false;
 
+  /// 是否在「创建传统项目」页隐藏（如 Loader 载荷只能由设计稿/组装创建）
+  bool get hiddenFromCreate => false;
+
   /// 根据文件路径返回高亮语言
   String languageFor(String filePath) {
     final ext = p.extension(filePath).replaceFirst('.', '').toLowerCase();
@@ -108,6 +112,9 @@ class PayloadRegistry {
     const NodeBackendPayload(),
     const HtmlFrontendPayload(),
     const TaroPayload(),
+    // Loader 项目（三层 Payload 体系）不参与创建页选择，
+    // 仅用于打开已生成的 Loader 项目时识别。
+    const LoaderProjectPayload(),
   ];
 
   /// 全部已注册载荷
@@ -138,7 +145,12 @@ class PayloadRegistry {
       if (await marker.exists()) {
         final data = jsonDecode(await marker.readAsString());
         if (data is Map && data['payload'] is String) {
-          return byId(data['payload'] as String);
+          final id = data['payload'] as String;
+          // Loader 项目需进一步读取 loader.json 推断 Root 构建环境
+          if (id == LoaderProjectPayload.payloadId) {
+            return LoaderProjectPayload.detectFrom(projectDir);
+          }
+          return byId(id);
         }
       }
       return await _inferFromFiles(projectDir);
