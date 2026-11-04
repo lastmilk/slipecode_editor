@@ -24,7 +24,7 @@
 	<string>????</string>
 	<key>CFBundleVersion</key>
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
-	<!-- OAuth 深链回调：slipe://oauth/callback（GitHub）与 slipe://oauth/gitee/callback（Gitee） -->
+	<!-- OAuth 深链回调：slipe://gitoauth2（GitHub）与 slipe://oauth/gitee/callback（Gitee） -->
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
