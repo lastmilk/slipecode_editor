@@ -40,6 +40,48 @@ class PayloadParamDef {
     this.type = PayloadParamType.text,
     this.options = const [],
   });
+
+  Map<String, dynamic> toMap() => {
+        'key': key,
+        'label': label,
+        'hint': hint,
+        'defaultValue': defaultValue,
+        'type': type.name,
+        'options': options,
+      };
+
+  factory PayloadParamDef.fromMap(Map<String, dynamic> map) => PayloadParamDef(
+        map['key']?.toString() ?? 'param',
+        map['label']?.toString() ?? '',
+        hint: map['hint']?.toString() ?? '',
+        defaultValue: map['defaultValue']?.toString() ?? '',
+        type: PayloadParamType.values.firstWhere(
+          (t) => t.name == map['type'],
+          orElse: () => PayloadParamType.text,
+        ),
+        options: ((map['options'] as List?) ?? const [])
+            .map((e) => e.toString())
+            .toList(),
+      );
+}
+
+/// IconData 序列化（自定义 Payload 需要持久化图标）
+Map<String, dynamic> iconToMap(IconData icon) => {
+      'iconCodePoint': icon.codePoint,
+      if (icon.fontFamily != null) 'iconFontFamily': icon.fontFamily,
+      if (icon.fontPackage != null) 'iconFontPackage': icon.fontPackage,
+    };
+
+IconData iconFromMap(Map<String, dynamic> map) {
+  final codePoint = (map['iconCodePoint'] as num?)?.toInt() ?? 0xe1b1;
+  final family = map['iconFontFamily'] as String?;
+  final pkg = map['iconFontPackage'] as String?;
+  if (codePoint == 0) return Icons.widgets_outlined;
+  return IconData(
+    codePoint,
+    fontFamily: family,
+    fontPackage: pkg,
+  );
 }
 
 /// 参数值工具（值统一存 String；bool 为 'true'/'false'；多选用英文逗号连接）
@@ -134,6 +176,32 @@ class SystemPayloadSpec {
     this.extraParams = const [],
   });
 
+  Map<String, dynamic> toMap() => {
+        'id': id,
+        'name': name,
+        'description': description,
+        ...iconToMap(icon),
+        'defaultFolder': defaultFolder,
+        'libraryOptions': libraryOptions,
+        'defaultLibrary': defaultLibrary,
+        'extraParams': extraParams.map((e) => e.toMap()).toList(),
+      };
+
+  factory SystemPayloadSpec.fromMap(Map<String, dynamic> map) => SystemPayloadSpec(
+        id: map['id']?.toString() ?? '',
+        name: map['name']?.toString() ?? '',
+        description: map['description']?.toString() ?? '',
+        icon: iconFromMap(map),
+        defaultFolder: map['defaultFolder']?.toString() ?? 'system',
+        libraryOptions: ((map['libraryOptions'] as List?) ?? const [])
+            .map((e) => e.toString())
+            .toList(),
+        defaultLibrary: map['defaultLibrary']?.toString() ?? '',
+        extraParams: ((map['extraParams'] as List?) ?? const [])
+            .map((e) => PayloadParamDef.fromMap((e as Map).cast<String, dynamic>()))
+            .toList(),
+      );
+
   /// 完整参数表（目录名 + 组件库 + 扩展参数）
   List<PayloadParamDef> get params => [
         PayloadParamDef(
@@ -179,6 +247,30 @@ class BlockPayloadSpec {
     this.params = const [],
     required this.markdownTemplate,
   });
+
+  Map<String, dynamic> toMap() => {
+        'id': id,
+        'name': name,
+        'description': description,
+        ...iconToMap(icon),
+        'applicableSystems': applicableSystems,
+        'params': params.map((e) => e.toMap()).toList(),
+        'markdownTemplate': markdownTemplate,
+      };
+
+  factory BlockPayloadSpec.fromMap(Map<String, dynamic> map) => BlockPayloadSpec(
+        id: map['id']?.toString() ?? '',
+        name: map['name']?.toString() ?? '',
+        description: map['description']?.toString() ?? '',
+        icon: iconFromMap(map),
+        applicableSystems: ((map['applicableSystems'] as List?) ?? const [])
+            .map((e) => e.toString())
+            .toList(),
+        params: ((map['params'] as List?) ?? const [])
+            .map((e) => PayloadParamDef.fromMap((e as Map).cast<String, dynamic>()))
+            .toList(),
+        markdownTemplate: map['markdownTemplate']?.toString() ?? '',
+      );
 
   /// 是否可用于指定 System Payload
   bool appliesTo(String systemId) =>
@@ -323,7 +415,8 @@ const _webLibraries = ['ElementPlus', 'TDesign', '原生 HTML'];
 class SystemPayloadRegistry {
   SystemPayloadRegistry._();
 
-  static const List<SystemPayloadSpec> all = [
+  /// 官方内置（Root 之外，System 也允许用户自建，内置作为默认模板）
+  static const List<SystemPayloadSpec> builtin = [
     SystemPayloadSpec(
       id: 'portal',
       name: '官网门户',
@@ -397,12 +490,26 @@ class SystemPayloadRegistry {
     ),
   ];
 
+  /// 用户自定义 System Payload（由 CustomPayloadService 注入）
+  static final List<SystemPayloadSpec> _custom = [];
+
+  static List<SystemPayloadSpec> get all => [...builtin, ..._custom];
+
+  static void setCustom(List<SystemPayloadSpec> specs) {
+    _custom
+      ..clear()
+      ..addAll(specs);
+  }
+
   static SystemPayloadSpec byId(String? id) {
     for (final spec in all) {
       if (spec.id == id) return spec;
     }
     return all.first;
   }
+
+  /// 是否为官方内置 Root 之外的唯一官方约束（System 可自定义）
+  static bool isBuiltin(String id) => builtin.any((s) => s.id == id);
 }
 
 /// ---------------------------------------------------------------------------
@@ -430,7 +537,7 @@ $body
 class BlockPayloadRegistry {
   BlockPayloadRegistry._();
 
-  static final List<BlockPayloadSpec> all = [
+  static final List<BlockPayloadSpec> builtin = [
     BlockPayloadSpec(
       id: 'user_login',
       name: '用户登录模块',
@@ -614,6 +721,17 @@ class BlockPayloadRegistry {
     ),
   ];
 
+  /// 用户自定义 Block Payload（由 CustomPayloadService 注入）
+  static final List<BlockPayloadSpec> _custom = [];
+
+  static List<BlockPayloadSpec> get all => [...builtin, ..._custom];
+
+  static void setCustom(List<BlockPayloadSpec> specs) {
+    _custom
+      ..clear()
+      ..addAll(specs);
+  }
+
   static BlockPayloadSpec byId(String? id) {
     for (final spec in all) {
       if (spec.id == id) return spec;
@@ -624,4 +742,6 @@ class BlockPayloadRegistry {
   /// 某 System Payload 可用的 Block 列表
   static List<BlockPayloadSpec> forSystem(String systemId) =>
       all.where((b) => b.appliesTo(systemId)).toList();
+
+  static bool isBuiltin(String id) => builtin.any((b) => b.id == id);
 }

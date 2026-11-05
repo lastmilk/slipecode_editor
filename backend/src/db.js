@@ -152,6 +152,8 @@ const DEFAULT_DB = {
   docs: [],
   // 官网下载的最新安装包元数据（文件存 DATA_DIR/releases/）
   release: null,
+  // 社区 Payload 包（用户发布，需管理端审核通过后公开）
+  community: [],
   // 运行期配置（优先级高于环境变量，便于在管理端热更新）
   config: {
     geetest: {},
@@ -203,6 +205,7 @@ export async function loadDb() {
       docs: Array.isArray(parsed.docs) ? parsed.docs : [],
       release:
         parsed.release && typeof parsed.release === 'object' ? parsed.release : null,
+      community: Array.isArray(parsed.community) ? parsed.community : [],
       config: mergeConfig(parsed.config),
       stats: mergeStats(parsed.stats),
     };

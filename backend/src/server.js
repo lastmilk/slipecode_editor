@@ -95,6 +95,16 @@ import {
   handleGetBuildWatch,
   handleLatestBuildWatch,
 } from './routes/builds.js';
+import {
+  handleAdminDeleteCommunity,
+  handleAdminListCommunity,
+  handleAdminReviewCommunity,
+  handleDownloadCommunityPackage,
+  handleGetCommunityPackage,
+  handleListCommunity,
+  handleMyCommunityPackages,
+  handlePublishPackage,
+} from './routes/community.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ADMIN_DIR = join(__dirname, '..', 'admin');
@@ -144,6 +154,11 @@ const ROUTES = {
   'GET /api/llm/models': handleLlmModels,
   'POST /api/llm/chat': handleLlmChat,
 
+  // 社区 Payload（列表公开；发布 / 下载需登录）
+  'POST /api/community/publish': handlePublishPackage,
+  'GET /api/community/packages': handleListCommunity,
+  'GET /api/community/mine': handleMyCommunityPackages,
+
   // 使用文档（公开只读）与门户信息
   'GET /api/docs': handleListDocs,
   'GET /api/public/info': handlePortalInfo,
@@ -176,6 +191,9 @@ const ROUTES = {
   'GET /api/admin/releases': handleAdminGetRelease,
   'POST /api/admin/releases': handleAdminUploadRelease,
   'DELETE /api/admin/releases': handleAdminDeleteRelease,
+
+  // 社区审核
+  'GET /api/admin/community/packages': handleAdminListCommunity,
 };
 
 /** 带路径参数的路由（正则捕获，handler 第三个参数为正则 match） */
@@ -232,6 +250,30 @@ const DYNAMIC_ROUTES = [
     method: 'DELETE',
     pattern: /^\/api\/admin\/docs\/([^/]+)$/,
     handler: (req, res, match) => handleAdminDeleteDoc(req, res, match[1]),
+  },
+  {
+    method: 'GET',
+    pattern: /^\/api\/community\/packages\/([^/]+)$/,
+    handler: (req, res, match) =>
+      handleGetCommunityPackage(req, res, decodeURIComponent(match[1])),
+  },
+  {
+    method: 'POST',
+    pattern: /^\/api\/community\/packages\/([^/]+)\/download$/,
+    handler: (req, res, match) =>
+      handleDownloadCommunityPackage(req, res, decodeURIComponent(match[1])),
+  },
+  {
+    method: 'POST',
+    pattern: /^\/api\/admin\/community\/packages\/([^/]+)\/review$/,
+    handler: (req, res, match) =>
+      handleAdminReviewCommunity(req, res, decodeURIComponent(match[1])),
+  },
+  {
+    method: 'DELETE',
+    pattern: /^\/api\/admin\/community\/packages\/([^/]+)$/,
+    handler: (req, res, match) =>
+      handleAdminDeleteCommunity(req, res, decodeURIComponent(match[1])),
   },
 ];
 

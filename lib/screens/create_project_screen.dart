@@ -109,7 +109,7 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
       }
 
       // 打开刚创建的项目
-      await projectProvider.openProject(_targetPath);
+      await projectProvider.openProject(_targetPath, kind: 'classic');
       if (!mounted) return;
 
       // 按所选平台创建仓库并推送模板文件

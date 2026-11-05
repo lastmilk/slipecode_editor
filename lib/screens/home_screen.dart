@@ -12,11 +12,14 @@ import '../providers/gitee_provider.dart';
 import '../providers/github_provider.dart';
 import '../providers/project_provider.dart';
 import '../providers/settings_provider.dart';
+import '../services/design_draft_service.dart';
+import '../services/loader_project_service.dart';
 import '../services/project_history_service.dart';
 import '../services/saying_service.dart';
 import '../widgets/app_background.dart';
 import '../widgets/typewriter_text.dart';
 import 'account_screen.dart';
+import 'community_screen.dart';
 import 'create_loader_project_screen.dart';
 import 'create_project_screen.dart';
 import 'design_draft_editor_screen.dart';
@@ -40,6 +43,9 @@ class _HomeScreenState extends State<HomeScreen>
   List<Project> _history = [];
   String _saying = '';
   bool _loadingHistory = true;
+
+  /// 项目列表筛选：null 全部 / classic / loader / draft
+  String? _kindFilter;
 
   late final AnimationController _entranceController;
   late final Animation<double> _logoFade;
@@ -79,11 +85,70 @@ class _HomeScreenState extends State<HomeScreen>
 
   Future<void> _loadHistory() async {
     final items = await ProjectHistoryService.instance.list();
+    // 兼容旧记录：带 .slipe.json 且 payload=loader 的目录识别为 Loader 项目
+    final loaderPaths = <String>[];
+    for (final item in items) {
+      if (item.kind == 'classic' && Directory(item.path).existsSync()) {
+        try {
+          if (await LoaderProjectService.isLoaderProject(item.path)) {
+            loaderPaths.add(item.path);
+          }
+        } catch (_) {
+          // 读取失败按传统项目处理
+        }
+      }
+    }
+    if (loaderPaths.isNotEmpty) {
+      for (final path in loaderPaths) {
+        await ProjectHistoryService.instance.setKind(path, 'loader');
+      }
+    }
+    final projects = loaderPaths.isEmpty
+        ? items
+        : await ProjectHistoryService.instance.list();
+
+    // 设计稿也作为项目列表中的一类条目展示（点击进入图编排器）
+    final drafts = await DesignDraftService.instance.list();
+    final draftEntries = drafts
+        .map((d) => Project(
+              name: d.name,
+              path: 'draft:${d.id}',
+              createdAt: d.createdAt,
+              lastEditedAt: d.updatedAt,
+              kind: 'draft',
+            ))
+        .toList();
+    final merged = [...projects, ...draftEntries]
+      ..sort((a, b) => b.activityAt.compareTo(a.activityAt));
     if (!mounted) return;
     setState(() {
-      _history = items;
+      _history = merged;
       _loadingHistory = false;
     });
+  }
+
+  /// 打开列表条目：设计稿 → 图编排器；其余 → 磁盘项目
+  Future<void> _openEntry(Project project) async {
+    if (project.kind == 'draft') {
+      final id = project.path.substring('draft:'.length);
+      final draft = await DesignDraftService.instance.byId(id);
+      if (!mounted) return;
+      if (draft == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('设计稿不存在或已删除')),
+        );
+        _loadHistory();
+        return;
+      }
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => DesignDraftEditorScreen(draft: draft),
+        ),
+      );
+      _loadHistory();
+      return;
+    }
+    await _openProjectPath(project.path, name: project.name);
   }
 
   /// 首页文案：
@@ -222,6 +287,7 @@ class _HomeScreenState extends State<HomeScreen>
         await Navigator.of(context).push(
           MaterialPageRoute(builder: (_) => const DesignDraftEditorScreen()),
         );
+        _loadHistory();
     }
   }
 
@@ -239,7 +305,12 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Future<void> _removeHistory(Project project) async {
-    await ProjectHistoryService.instance.remove(project.path);
+    if (project.kind == 'draft' && project.path.startsWith('draft:')) {
+      await DesignDraftService.instance
+          .delete(project.path.substring('draft:'.length));
+    } else {
+      await ProjectHistoryService.instance.remove(project.path);
+    }
     await _loadHistory();
   }
 
@@ -366,6 +437,15 @@ class _HomeScreenState extends State<HomeScreen>
                 Row(
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
+                    IconButton(
+                      tooltip: 'Payload 社区',
+                      icon: const Icon(Icons.storefront_outlined),
+                      onPressed: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const CommunityScreen(),
+                        ),
+                      ),
+                    ),
                     IconButton(
                       tooltip: '同步仓库',
                       icon: const Icon(Icons.cloud_sync_outlined),
@@ -533,63 +613,118 @@ class _HomeScreenState extends State<HomeScreen>
     if (_loadingHistory) {
       return const Center(child: CircularProgressIndicator());
     }
-    if (_history.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            // 品牌 logo（空列表时展示）
-            ClipRRect(
-              borderRadius: BorderRadius.circular(18),
-              child: Image.asset(
-                'assets/logo/slipe_logo.jpg',
-                width: 76,
-                height: 76,
-                fit: BoxFit.cover,
-              ),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              t('home.empty'),
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 13,
-                color: isDark ? Colors.white38 : Colors.black45,
-              ),
-            ),
-          ],
+    final filtered = _kindFilter == null
+        ? _history
+        : _history.where((p) => p.kind == _kindFilter).toList();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _buildKindFilter(),
+        const SizedBox(height: 8),
+        Expanded(
+          child: filtered.isEmpty
+              ? Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      // 品牌 logo（空列表时展示）
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(18),
+                        child: Image.asset(
+                          'assets/logo/slipe_logo.jpg',
+                          width: 76,
+                          height: 76,
+                          fit: BoxFit.cover,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        _history.isEmpty
+                            ? t('home.empty')
+                            : '当前筛选下没有项目',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: isDark ? Colors.white38 : Colors.black45,
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+              : ListView.builder(
+                  itemCount: filtered.length + 1,
+                  itemBuilder: (context, index) {
+                    if (index == 0) {
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: _LastEditedCard(
+                          project: filtered.first,
+                          isDark: isDark,
+                          onTap: () => _openEntry(filtered.first),
+                        ),
+                      );
+                    }
+                    final project = filtered[index - 1];
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: _ProjectCard(
+                        project: project,
+                        isDark: isDark,
+                        onTap: () => _openEntry(project),
+                        onLongPress: () => _confirmRemove(project),
+                      ),
+                    );
+                  },
+                ),
         ),
-      );
-    }
-    return ListView.builder(
-      itemCount: _history.length + 1,
-      itemBuilder: (context, index) {
-        if (index == 0) {
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: _LastEditedCard(
-              project: _history.first,
-              isDark: isDark,
-              onTap: () => _openProjectPath(
-                _history.first.path,
-                name: _history.first.name,
-              ),
-            ),
-          );
-        }
-        final project = _history[index - 1];
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 8),
-          child: _ProjectCard(
-            project: project,
-            isDark: isDark,
-            onTap: () => _openProjectPath(project.path, name: project.name),
-            onLongPress: () => _confirmRemove(project),
-          ),
-        );
-      },
+      ],
     );
   }
+
+  /// 项目类型筛选（设计稿 / 传统项目 / Loader 项目用不同图标）
+  Widget _buildKindFilter() {
+    const items = <_KindFilterItem>[
+      _KindFilterItem(null, '全部', Icons.apps, Colors.blueGrey),
+      _KindFilterItem('loader', 'Loader', Icons.rocket_launch_outlined,
+          Colors.blueAccent),
+      _KindFilterItem('classic', '传统', Icons.folder, Colors.blue),
+      _KindFilterItem(
+          'draft', '设计稿', Icons.design_services_outlined, Colors.teal),
+    ];
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          for (final item in items)
+            Padding(
+              padding: const EdgeInsets.only(right: 6),
+              child: FilterChip(
+                avatar: Icon(
+                  item.icon,
+                  size: 14,
+                  color: _kindFilter == item.value ? item.color : null,
+                ),
+                label: Text(item.label, style: const TextStyle(fontSize: 11)),
+                selected: _kindFilter == item.value,
+                showCheckmark: false,
+                visualDensity: VisualDensity.compact,
+                onSelected: (_) => setState(() => _kindFilter = item.value),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 项目列表类型筛选项
+class _KindFilterItem {
+  final String? value;
+  final String label;
+  final IconData icon;
+  final Color color;
+
+  const _KindFilterItem(this.value, this.label, this.icon, this.color);
 }
 
 /// 「上次编辑」卡片：展示最近编辑的项目与相对时间
@@ -779,6 +914,15 @@ class _ProjectCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isLoader = project.kind == 'loader';
+    final isDraft = project.kind == 'draft';
+    final icon = isLoader
+        ? Icons.rocket_launch_outlined
+        : (isDraft ? Icons.design_services_outlined : Icons.folder);
+    final color = isDraft ? Colors.teal : Colors.blueAccent;
+    final kindLabel = isLoader
+        ? 'Loader 项目'
+        : (isDraft ? '设计稿 · 点击继续编排' : '传统项目');
     return Material(
       color: isDark ? const Color(0xFF2D2D30) : Colors.white,
       borderRadius: BorderRadius.circular(12),
@@ -794,12 +938,12 @@ class _ProjectCard extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: Colors.blueAccent.withValues(alpha: 0.1),
+                  color: color.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: const Icon(
-                  Icons.folder,
-                  color: Colors.blueAccent,
+                child: Icon(
+                  icon,
+                  color: color,
                   size: 22,
                 ),
               ),
@@ -818,7 +962,17 @@ class _ProjectCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      project.path,
+                      kindLabel,
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: color.withValues(alpha: 0.9),
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      project.path.startsWith('draft:')
+                          ? '可视化有向图编排'
+                          : project.path,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(

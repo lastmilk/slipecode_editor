@@ -168,7 +168,7 @@ class _CreateLoaderProjectScreenState extends State<CreateLoaderProjectScreen> {
       }
 
       // 打开刚创建的项目（识别为 Loader 载荷）
-      await projectProvider.openProject(_targetPath);
+      await projectProvider.openProject(_targetPath, kind: 'loader');
       if (!mounted) return;
 
       // 创建远程仓库并推送骨架
