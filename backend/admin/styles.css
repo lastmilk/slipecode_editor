@@ -219,6 +219,20 @@ h1, h2, h3, h4 { margin: 0; font-weight: 600; }
 .detail-kv { background: #f8fafc; border-radius: 12px; padding: 16px; }
 .detail-projects h4 { font-size: 14px; margin-bottom: 8px; }
 
+/* ---------------------------------------------------------------- 社区审核 */
+.cell-title { font-size: 13px; font-weight: 600; color: #0f172a; }
+.cell-sub { font-size: 11px; margin-top: 2px; line-height: 1.4; }
+.pre-block {
+  margin: 0;
+  padding: 12px;
+  max-height: 320px;
+  overflow: auto;
+  background: #f8fafc;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+  white-space: pre-wrap;
+}
+
 @media (max-width: 900px) {
   .layout { flex-direction: column; }
   .sidebar { width: 100%; flex: none; height: auto; position: static; }

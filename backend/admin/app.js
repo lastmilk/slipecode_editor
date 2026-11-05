@@ -98,6 +98,12 @@ const app = Vue.createApp({
       uploading: false,
       uploadPercent: 0,
 
+      communityPackages: [],
+      communityStatus: 'pending',
+      loadingCommunity: false,
+      communityDialog: false,
+      communityPreview: null,
+
       policies: {
         userAgreement: { title: '', content: '', version: '', updatedAt: '' },
         privacyPolicy: { title: '', content: '', version: '', updatedAt: '' },
@@ -241,6 +247,7 @@ const app = Vue.createApp({
       if (tab === 'llm') this.loadModels();
       if (tab === 'docs') this.loadDocs();
       if (tab === 'releases') this.loadRelease();
+      if (tab === 'community') this.loadCommunity();
       if (tab === 'policies') this.loadPolicies();
     },
 
@@ -666,6 +673,120 @@ const app = Vue.createApp({
         await request('/api/admin/releases', { method: 'DELETE' });
         this.release = null;
         ElementPlus.ElMessage.success('已下架');
+      } catch (err) {
+        this.handleError(err);
+      }
+    },
+
+    communityStatusText(status) {
+      if (status === 'approved') return '已通过';
+      if (status === 'rejected') return '已驳回';
+      return '待审核';
+    },
+    communityStatusType(status) {
+      if (status === 'approved') return 'success';
+      if (status === 'rejected') return 'danger';
+      return 'warning';
+    },
+
+    async loadCommunity() {
+      this.loadingCommunity = true;
+      try {
+        const status = this.communityStatus || 'pending';
+        const data = await request(`/api/admin/community/packages?status=${encodeURIComponent(status)}`);
+        this.communityPackages = data.packages || [];
+      } catch (err) {
+        this.handleError(err);
+      } finally {
+        this.loadingCommunity = false;
+      }
+    },
+
+    openCommunityPreview(row) {
+      if (!row) return;
+      let specText = '';
+      try {
+        specText = JSON.stringify(row.spec || {}, null, 2);
+      } catch {
+        specText = '';
+      }
+      this.communityPreview = { ...row, specText };
+      this.communityDialog = true;
+    },
+
+    async approveCommunity(row) {
+      if (!row) return;
+      try {
+        await ElementPlus.ElMessageBox.confirm(
+          `通过后「${row.name}」将对所有用户公开，确定通过？`,
+          '审核通过',
+          { type: 'success', confirmButtonText: '通过并公开', cancelButtonText: '取消' },
+        );
+      } catch {
+        return;
+      }
+      try {
+        await request(`/api/admin/community/packages/${encodeURIComponent(row.id)}/review`, {
+          method: 'POST',
+          body: { action: 'approve' },
+        });
+        ElementPlus.ElMessage.success('已通过，社区即时可见');
+        this.communityDialog = false;
+        await this.loadCommunity();
+      } catch (err) {
+        this.handleError(err);
+      }
+    },
+
+    async rejectCommunity(row) {
+      if (!row) return;
+      let note = '';
+      try {
+        const result = await ElementPlus.ElMessageBox.prompt(
+          '请填写驳回原因（作者可在 App 内看到）',
+          `驳回「${row.name}」`,
+          {
+            confirmButtonText: '驳回',
+            cancelButtonText: '取消',
+            inputType: 'textarea',
+            inputPlaceholder: '例如：说明文档不完整 / 与现有 Payload 重复',
+          },
+        );
+        note = (result.value || '').trim();
+      } catch {
+        return;
+      }
+      try {
+        await request(`/api/admin/community/packages/${encodeURIComponent(row.id)}/review`, {
+          method: 'POST',
+          body: { action: 'reject', note },
+        });
+        ElementPlus.ElMessage.success('已驳回');
+        this.communityDialog = false;
+        await this.loadCommunity();
+      } catch (err) {
+        this.handleError(err);
+      }
+    },
+
+    async removeCommunity(row) {
+      if (!row) return;
+      try {
+        await ElementPlus.ElMessageBox.confirm(
+          `确定删除社区包「${row.name}」？此操作不可恢复。`,
+          '删除确认',
+          { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' },
+        );
+      } catch {
+        return;
+      }
+      try {
+        await request(`/api/admin/community/packages/${encodeURIComponent(row.id)}`, {
+          method: 'DELETE',
+        });
+        ElementPlus.ElMessage.success('已删除');
+        this.communityDialog = false;
+        await this.loadCommunity();
       } catch (err) {
         this.handleError(err);
       }

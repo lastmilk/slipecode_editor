@@ -39,7 +39,8 @@ class _DesignDraftListScreenState extends State<DesignDraftListScreen> {
     final root = RootPayloadRegistry.byId(draft.root.specId);
     final blockCount = draft.systems
         .fold<int>(0, (sum, s) => sum + s.blocks.length);
-    return '${root.name} · ${draft.systems.length} 个端 · $blockCount 个模块';
+    return '${root.name} · ${draft.systems.length} 个端 · '
+        '$blockCount 个模块 · ${draft.edges.length} 条关系';
   }
 
   static String _formatTime(DateTime time) {

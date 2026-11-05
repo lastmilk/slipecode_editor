@@ -19,6 +19,9 @@ class Project {
   /// 本地路径不存在（仅内存态，不持久化）：跨设备同步回来的记录
   final bool missing;
 
+  /// 项目类型：classic（传统项目）/ loader（Loader 项目）/ draft（设计稿）
+  final String kind;
+
   const Project({
     required this.name,
     required this.path,
@@ -27,6 +30,7 @@ class Project {
     this.repoFullName,
     this.host,
     this.missing = false,
+    this.kind = 'classic',
   });
 
   String get pubspecPath => p.join(path, 'pubspec.yaml');
@@ -42,6 +46,7 @@ class Project {
     String? repoFullName,
     String? host,
     bool? missing,
+    String? kind,
   }) {
     return Project(
       name: name ?? this.name,
@@ -51,6 +56,7 @@ class Project {
       repoFullName: repoFullName ?? this.repoFullName,
       host: host ?? this.host,
       missing: missing ?? this.missing,
+      kind: kind ?? this.kind,
     );
   }
 
@@ -63,6 +69,7 @@ class Project {
         'lastEditedAt': lastEditedAt!.toIso8601String(),
       if (repoFullName != null) 'repoFullName': repoFullName,
       if (host != null) 'host': host,
+      'kind': kind,
     };
   }
 
@@ -75,6 +82,7 @@ class Project {
       lastEditedAt: DateTime.tryParse(map['lastEditedAt'] as String? ?? ''),
       repoFullName: map['repoFullName'] as String?,
       host: map['host'] as String?,
+      kind: map['kind'] as String? ?? 'classic',
     );
   }
 

@@ -43,7 +43,7 @@ class ProjectHistoryService {
   }
 
   /// 记录一次创建/打开（同路径去重并置顶，刷新最近编辑时间）
-  Future<void> touch(String path, {String? name}) async {
+  Future<void> touch(String path, {String? name, String? kind}) async {
     final prefs = await SharedPreferences.getInstance();
     final items = await list();
     final existing = items.where((e) => e.path == path).firstOrNull;
@@ -58,11 +58,22 @@ class ProjectHistoryService {
         lastEditedAt: now,
         repoFullName: existing?.repoFullName,
         host: existing?.host,
+        kind: kind ?? existing?.kind ?? 'classic',
       ),
     );
     if (items.length > _maxEntries) {
       items.removeRange(_maxEntries, items.length);
     }
+    await _save(prefs, items);
+  }
+
+  /// 修正历史记录中的项目类型（Loader 项目由 .slipe.json 判定）
+  Future<void> setKind(String path, String kind) async {
+    final prefs = await SharedPreferences.getInstance();
+    final items = await list();
+    final index = items.indexWhere((e) => e.path == path);
+    if (index == -1) return;
+    items[index] = items[index].copyWith(kind: kind);
     await _save(prefs, items);
   }
 

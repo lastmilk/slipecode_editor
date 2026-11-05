@@ -117,7 +117,7 @@ class LoaderProjectService {
             PayloadParamValues.withDefaults(bSpec.params, b.params);
         blocks.add(_NormalizedBlock(bSpec, bParams));
       }
-      normalized.add(_NormalizedSystem(spec, params, blocks));
+      normalized.add(_NormalizedSystem(sys.nodeId, spec, params, blocks));
     }
 
     // 1) .slipe.json
@@ -144,6 +144,7 @@ class LoaderProjectService {
       'systems': [
         for (final s in normalized)
           {
+            'nodeId': s.nodeId,
             'id': s.spec.id,
             'folder': s.folder,
             'params': s.params,
@@ -151,6 +152,16 @@ class LoaderProjectService {
               for (final b in s.blocks)
                 {'id': b.spec.id, 'params': b.params},
             ],
+          },
+      ],
+      'edges': [
+        for (final e in (draft?.edges ?? const <DesignEdge>[]))
+          {
+            'id': e.id,
+            'from': e.fromNodeId,
+            'to': e.toNodeId,
+            'label': e.label,
+            'kind': e.kind.name,
           },
       ],
       'created_by': 'slipe',
@@ -264,6 +275,29 @@ dist/
       buffer.writeln('- ${sysSpec.name} → ${s['folder']}/'
           '${blocks.isEmpty ? '' : '（Block：$blocks）'}');
     }
+
+    final edgeList = ((manifest['edges'] as List?) ?? const [])
+        .map((e) => (e as Map).cast<String, dynamic>())
+        .toList();
+    if (edgeList.isNotEmpty) {
+      final nameByNode = <String, String>{
+        for (final s in systems)
+          if (s['nodeId'] != null)
+            s['nodeId'].toString():
+                SystemPayloadRegistry.byId(s['id'] as String?).name,
+      };
+      buffer
+        ..writeln()
+        ..writeln('端之间的页面跳转与依赖关系（有向图，生成代码时必须落实）：');
+      for (final e in edgeList) {
+        final from = nameByNode[e['from']?.toString()] ?? '未知端';
+        final to = nameByNode[e['to']?.toString()] ?? '未知端';
+        final kind = e['kind'] == 'depend' ? '依赖' : '跳转';
+        final label = e['label']?.toString() ?? '';
+        buffer.writeln(
+            '- $from —$kind→ $to${label.isEmpty ? '' : '（$label）'}');
+      }
+    }
     return buffer.toString();
   }
 
@@ -318,7 +352,27 @@ dist/
       buffer.writeln();
       i++;
     }
+    // 有向图：页面跳转与依赖关系
+    final edges = draft?.edges ?? const <DesignEdge>[];
     buffer
+      ..writeln('## 页面跳转与依赖关系（有向图）')
+      ..writeln();
+    if (edges.isEmpty) {
+      buffer.writeln('（未编排端之间的跳转 / 依赖关系）');
+    } else {
+      final nameByNode = <String, String>{
+        for (final s in systems) s.nodeId: s.spec.name,
+      };
+      for (final e in edges) {
+        final from = nameByNode[e.fromNodeId] ?? '未知端';
+        final to = nameByNode[e.toNodeId] ?? '未知端';
+        final arrow = e.kind == DesignEdgeKind.depend ? '依赖' : '跳转';
+        buffer.writeln('- **$from** —$arrow→ **$to**'
+            '${e.label.isEmpty ? '' : '（${e.label}）'}');
+      }
+    }
+    buffer
+      ..writeln()
       ..writeln('## 构建环节')
       ..writeln()
       ..writeln('1. **AI 介入**：Agent 读取本文件与全部 .md 文本，'
@@ -406,7 +460,9 @@ class _NormalizedSystem {
   final Map<String, String> params;
   final List<_NormalizedBlock> blocks;
 
-  const _NormalizedSystem(this.spec, this.params, this.blocks);
+  final String nodeId;
+
+  const _NormalizedSystem(this.nodeId, this.spec, this.params, this.blocks);
 
   String get folder => params['folder'] ?? spec.defaultFolder;
 }

@@ -31,13 +31,18 @@ class ProjectProvider extends ChangeNotifier {
   /// 项目切换回调（main 中注入，用于重置编辑器 / 构建等按项目隔离的状态）
   Future<void> Function(String? projectPath)? onProjectChanged;
 
+  /// 本次打开的项目类型（loader / classic / draft），用于写入历史时归类
+  String? _openKind;
+
   /// 打开已有项目
-  Future<void> openProject(String path) async {
+  Future<void> openProject(String path, {String? kind}) async {
+    _openKind = kind;
     _projectPath = path;
     _payload = await PayloadRegistry.detect(path);
     // 先切换工作区，再加载文件树，避免新项目首帧仍显示上一个项目的标签页
     await onProjectChanged?.call(path);
     await refreshFileTree();
+    _openKind = null;
   }
 
   /// 关闭当前项目
@@ -62,7 +67,7 @@ class ProjectProvider extends ChangeNotifier {
       _fileTree = await _fileService.loadDirectory(_projectPath!);
       // 成功打开后记入历史（不影响主流程）
       if (_error == null) {
-        ProjectHistoryService.instance.touch(_projectPath!);
+        ProjectHistoryService.instance.touch(_projectPath!, kind: _openKind);
       }
     } catch (e) {
       _error = 'Failed to load directory: $e';

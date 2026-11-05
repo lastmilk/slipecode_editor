@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/design_draft.dart';
 import '../payloads/loader/loader_payload.dart';
 import '../services/design_draft_service.dart';
-import '../widgets/payload_assembler.dart';
+import '../widgets/payload_graph_editor.dart';
 import 'design_draft_list_screen.dart';
 
 /// 设计稿编辑器
@@ -171,7 +171,7 @@ class _DesignDraftEditorScreenState extends State<DesignDraftEditorScreen> {
                   ? Colors.blueAccent.withValues(alpha: 0.08)
                   : const Color(0xFFE3F2FD),
               child: Text(
-                '设计稿 = 完整 Vibe：编排好三层 Payload 后，创建 Loader 项目时选择「采用设计稿」即可让 AI 无感完成项目。',
+                '设计稿 = 完整 Vibe：用有向图编排端之间的跳转与依赖关系，创建 Loader 项目时选择「采用设计稿」即可让 AI 无感完成项目。',
                 style: TextStyle(
                   fontSize: 11,
                   height: 1.4,
@@ -180,7 +180,7 @@ class _DesignDraftEditorScreenState extends State<DesignDraftEditorScreen> {
               ),
             ),
             Expanded(
-              child: PayloadAssemblerView(
+              child: PayloadGraphEditor(
                 draft: _draft,
                 onChanged: _markDirty,
               ),

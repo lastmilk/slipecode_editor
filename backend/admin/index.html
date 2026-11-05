@@ -60,6 +60,7 @@
           <el-menu-item index="llm">LLM 模型</el-menu-item>
           <el-menu-item index="docs">使用文档</el-menu-item>
           <el-menu-item index="releases">安装包</el-menu-item>
+          <el-menu-item index="community">社区审核</el-menu-item>
           <el-menu-item index="policies">政策合规</el-menu-item>
         </el-menu>
         <div class="sidebar-footer">
@@ -451,6 +452,105 @@
             </template>
           </el-dialog>
         </section>
+        <!-- 社区审核 -->
+        <section v-else-if="tab === 'community'" class="panel">
+          <header class="panel-head">
+            <div>
+              <h2>社区审核</h2>
+              <p>用户发布的 Payload 包需审核通过后才会在 App 社区公开；被驳回的包仅作者可见。</p>
+            </div>
+            <el-button :loading="loadingCommunity" @click="loadCommunity">刷新</el-button>
+          </header>
+
+          <div class="card">
+            <div class="toolbar">
+              <el-select v-model="communityStatus" style="width: 160px" @change="loadCommunity">
+                <el-option label="待审核" value="pending" />
+                <el-option label="已通过" value="approved" />
+                <el-option label="已驳回" value="rejected" />
+                <el-option label="全部" value="all" />
+              </el-select>
+              <span class="dim">共 {{ communityPackages.length }} 个包</span>
+            </div>
+
+            <el-table :data="communityPackages" stripe empty-text="暂无社区包" v-loading="loadingCommunity">
+              <el-table-column label="名称" min-width="180">
+                <template #default="{ row }">
+                  <div class="cell-title">{{ row.name }}</div>
+                  <div class="dim cell-sub">{{ row.description || '（无描述）' }}</div>
+                </template>
+              </el-table-column>
+              <el-table-column label="类型" width="100">
+                <template #default="{ row }">
+                  <el-tag :type="row.kind === 'system' ? 'primary' : 'warning'" size="small">
+                    {{ row.kind === 'system' ? 'System' : 'Block' }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column prop="authorName" label="作者" min-width="120" show-overflow-tooltip />
+              <el-table-column label="提交时间" min-width="160">
+                <template #default="{ row }">{{ dateText(row.createdAt) }}</template>
+              </el-table-column>
+              <el-table-column label="下载" width="80">
+                <template #default="{ row }">{{ fmt(row.downloads) }}</template>
+              </el-table-column>
+              <el-table-column label="状态" width="100">
+                <template #default="{ row }">
+                  <el-tag :type="communityStatusType(row.status)" size="small">
+                    {{ communityStatusText(row.status) }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="操作" width="200" fixed="right">
+                <template #default="{ row }">
+                  <el-button link type="primary" @click="openCommunityPreview(row)">预览</el-button>
+                  <el-button v-if="row.status !== 'approved'" link type="success" @click="approveCommunity(row)">通过</el-button>
+                  <el-button v-if="row.status !== 'rejected'" link type="warning" @click="rejectCommunity(row)">驳回</el-button>
+                  <el-button link type="danger" @click="removeCommunity(row)">删除</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+          </div>
+
+          <el-dialog v-model="communityDialog" title="社区包详情" width="720px" top="6vh">
+            <div v-if="communityPreview">
+              <el-descriptions :column="2" border>
+                <el-descriptions-item label="名称">{{ communityPreview.name }}</el-descriptions-item>
+                <el-descriptions-item label="类型">{{ communityPreview.kind === 'system' ? 'System Payload' : 'Block Payload' }}</el-descriptions-item>
+                <el-descriptions-item label="作者">{{ communityPreview.authorName }}</el-descriptions-item>
+                <el-descriptions-item label="提交时间">{{ dateText(communityPreview.createdAt) }}</el-descriptions-item>
+                <el-descriptions-item label="状态">
+                  <el-tag :type="communityStatusType(communityPreview.status)" size="small">
+                    {{ communityStatusText(communityPreview.status) }}
+                  </el-tag>
+                </el-descriptions-item>
+                <el-descriptions-item label="累计下载">{{ fmt(communityPreview.downloads) }}</el-descriptions-item>
+                <el-descriptions-item label="描述" :span="2">
+                  <span style="white-space: pre-wrap">{{ communityPreview.description || '（无）' }}</span>
+                </el-descriptions-item>
+                <el-descriptions-item v-if="communityPreview.reviewNote" label="审核备注" :span="2">
+                  {{ communityPreview.reviewNote }}
+                </el-descriptions-item>
+              </el-descriptions>
+
+              <div v-if="communityPreview.readme" class="card" style="margin-top: 12px">
+                <div class="card-head"><h3>说明文档</h3></div>
+                <pre class="mono pre-block">{{ communityPreview.readme }}</pre>
+              </div>
+
+              <div class="card" style="margin-top: 12px">
+                <div class="card-head"><h3>Payload 定义</h3></div>
+                <pre class="mono pre-block">{{ communityPreview.specText }}</pre>
+              </div>
+            </div>
+            <template #footer>
+              <el-button @click="communityDialog = false">关闭</el-button>
+              <el-button v-if="communityPreview && communityPreview.status !== 'approved'" type="success" @click="approveCommunity(communityPreview)">通过并公开</el-button>
+              <el-button v-if="communityPreview && communityPreview.status === 'pending'" type="warning" @click="rejectCommunity(communityPreview)">驳回</el-button>
+            </template>
+          </el-dialog>
+        </section>
+
         <!-- 政策合规 -->
         <section v-else-if="tab === 'policies'" class="panel">
           <header class="panel-head">

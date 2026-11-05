@@ -19,6 +19,7 @@ import 'providers/settings_provider.dart';
 import 'providers/terminal_provider.dart';
 import 'screens/home_screen.dart';
 import 'services/app_globals.dart';
+import 'services/custom_payload_service.dart';
 import 'services/overlay_service.dart';
 import 'services/project_history_service.dart';
 import 'widgets/ai_quick_chat.dart';
@@ -34,6 +35,10 @@ Future<void> main() async {
   // 偏好设置先加载，决定首帧主题
   final settingsProvider = SettingsProvider();
   await settingsProvider.load();
+
+  // 用户自定义 Payload：启动时注入 System / Block 注册表，
+  // 保证设计稿编排器与 Loader 构建能立即看到自定义条目
+  await CustomPayloadService.instance.init();
 
   // Git 平台与账号的登录态恢复放后台执行：
   // 未配置后端/凭据或网络不可达时降级为未登录，绝不阻塞首屏
