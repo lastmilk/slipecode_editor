@@ -67,15 +67,17 @@ jobs:
           BUILD_TYPE: ${{ inputs.build_type || 'apk-release' }}
         run: |
           set -e
+          # 自定义 Payload 图标从持久化数据动态还原（iconFromMap），
+          # 属于合法的非常量 IconData 调用，必须关闭 icon tree-shaking
           case "$BUILD_TYPE" in
             apk-debug)
-              flutter build apk --debug
+              flutter build apk --debug --no-tree-shake-icons
               ;;
             appbundle-release)
-              flutter build appbundle --release
+              flutter build appbundle --release --no-tree-shake-icons
               ;;
             *)
-              flutter build apk --release
+              flutter build apk --release --no-tree-shake-icons
               ;;
           esac
 
@@ -120,7 +122,7 @@ jobs:
 
       # Developer 证书暂未配置，先构建无签名产物
       - name: Build iOS (no codesign)
-        run: flutter build ios --release --no-codesign
+        run: flutter build ios --release --no-codesign --no-tree-shake-icons
 
       - name: Package Runner.app
         run: |
