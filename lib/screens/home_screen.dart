@@ -17,7 +17,9 @@ import '../services/saying_service.dart';
 import '../widgets/app_background.dart';
 import '../widgets/typewriter_text.dart';
 import 'account_screen.dart';
+import 'create_loader_project_screen.dart';
 import 'create_project_screen.dart';
+import 'design_draft_editor_screen.dart';
 import 'editor_screen.dart';
 import 'settings_screen.dart';
 import 'docs_screen.dart';
@@ -156,10 +158,75 @@ class _HomeScreenState extends State<HomeScreen>
     await _openProjectPath(path);
   }
 
+  /// 新建入口：Loader 项目（推荐）/ 传统项目 / 设计稿
   Future<void> _createNewProject() async {
-    final created = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(builder: (_) => const CreateProjectScreen()),
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(20, 16, 20, 4),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  '创建新项目',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.rocket_launch_outlined,
+                  color: Colors.blueAccent),
+              title: const Text('创建 Loader 项目（推荐）'),
+              subtitle: const Text('采用设计稿或手动组装三层 Payload，AI 无感完成项目'),
+              onTap: () => Navigator.pop(sheetContext, 'loader'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.widgets_outlined),
+              title: const Text('创建传统项目'),
+              subtitle: const Text('Flutter / Android / Node / Web 等内置模板'),
+              onTap: () => Navigator.pop(sheetContext, 'classic'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.design_services_outlined,
+                  color: Colors.teal),
+              title: const Text('创建设计稿'),
+              subtitle: const Text('先在可视化编辑器中编排 Payload，稍后用它生成项目'),
+              onTap: () => Navigator.pop(sheetContext, 'draft'),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
     );
+    if (!mounted || action == null) return;
+
+    switch (action) {
+      case 'loader':
+        final created = await Navigator.of(context).push<bool>(
+          MaterialPageRoute(builder: (_) => const CreateLoaderProjectScreen()),
+        );
+        await _openCreatedProject(created);
+      case 'classic':
+        final created = await Navigator.of(context).push<bool>(
+          MaterialPageRoute(builder: (_) => const CreateProjectScreen()),
+        );
+        await _openCreatedProject(created);
+      case 'draft':
+        // 直接进入设计稿编辑器（新草稿）；已保存草稿可在编辑器右上角管理
+        await Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const DesignDraftEditorScreen()),
+        );
+    }
+  }
+
+  /// 创建成功后打开编辑器并刷新历史
+  Future<void> _openCreatedProject(bool? created) async {
     if (created == true && mounted) {
       final provider = context.read<ProjectProvider>();
       if (provider.projectPath != null) {

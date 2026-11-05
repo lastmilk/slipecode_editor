@@ -8,6 +8,7 @@ import 'package:provider/provider.dart';
 import '../l10n/app_localizations.dart';
 import '../models/file_node.dart';
 import '../models/open_file.dart';
+import '../payloads/loader/loader_project_payload.dart';
 import '../providers/ai_provider.dart';
 import '../providers/editor_provider.dart';
 import '../providers/git_sync_provider.dart';
@@ -27,6 +28,7 @@ import '../widgets/file_tree.dart';
 import '../widgets/symbol_keypad.dart';
 import 'ai_chat_screen.dart';
 import 'build_screen.dart';
+import 'loader_build_screen.dart';
 import 'terminal_screen.dart';
 
 /// 主编辑器界面
@@ -644,8 +646,18 @@ class _EditorScreenState extends State<EditorScreen>
           IconButton(
             icon: const Icon(Icons.build),
             tooltip: t('editor.build'),
-            onPressed: () => Navigator.of(context)
-                .push(MaterialPageRoute(builder: (_) => const BuildScreen())),
+            onPressed: () {
+              // Loader 项目走「AI 介入 + 实际构建」两环节构建页
+              final isLoader = context.read<ProjectProvider>().payload.id ==
+                  LoaderProjectPayload.payloadId;
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => isLoader
+                      ? const LoaderBuildScreen()
+                      : const BuildScreen(),
+                ),
+              );
+            },
           ),
           IconButton(
             icon: const Icon(Icons.auto_awesome),
