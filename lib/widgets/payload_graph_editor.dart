@@ -10,20 +10,33 @@ import 'payload_assembler.dart';
 /// 节点卡片宽度（画布坐标系）
 const double _kNodeWidth = 240;
 
-/// 节点卡片高度估算（用于计算连线端点）
+/// 节点内部布局常量（用于计算引脚坐标）
+const double _kHeaderHeight = 44.0; // 图标 + 名称 + 按钮行
+const double _kSubtitleHeight = 18.0; // folder/library 副标题
+const double _kBlockAreaTop = 64.0; // header + subtitle + 间距
+const double _kBlockRowHeight = 34.0; // 每个 Block 行高
+const double _kPinRadius = 6.0;
+
+/// System 输入引脚在节点内的纵向中心（header 中心）
+const double _kSystemInputPinY = 22.0;
+
+/// 节点卡片高度（用于画布尺寸与引脚计算）
 double nodeCardHeight(SystemPayloadInstance sys) {
-  final rows = sys.blocks.isEmpty ? 1 : (sys.blocks.length / 2).ceil();
-  return 92.0 + rows * 40.0;
+  return _kBlockAreaTop + sys.blocks.length * _kBlockRowHeight + 12.0;
 }
 
-/// 有向图编排器
+/// Block 行在节点内的纵向中心
+double _blockRowCenterY(int blockIndex) =>
+    _kBlockAreaTop + blockIndex * _kBlockRowHeight + _kBlockRowHeight / 2;
+
+/// 有向图编排器（类 UE Blueprint 节点连线）
 ///
-/// 新版设计稿不再使用列表排序，而是用有向图表达真实项目中的
-/// 「页面跳转」与「依赖」关系：
-/// - 拖拽节点卡片可自由摆放；
-/// - 开启「连线模式」后先点起点再点终点即可创建一条有向边；
-/// - 连线类型分为「跳转（navigate）」与「依赖（depend）」；
-/// - 关系列表支持修改类型与删除。
+/// - 画布支持双指缩放（0.5x ~ 2.5x）与单指平移；
+/// - System 节点可拖动定位；
+/// - 每个 Block 有输入（左）/ 输出（右）引脚，System 节点有输入引脚；
+/// - 从 Block 输出引脚拖到 System / Block 输入引脚即可创建有向边
+///   （起点必须是 Block，终点可以是 System 或 Block）；
+/// - 底部为可收起的抽屉式 System 调色板，拖拽放入画布。
 class PayloadGraphEditor extends StatefulWidget {
   final DesignDraft draft;
   final VoidCallback onChanged;
@@ -41,9 +54,20 @@ class PayloadGraphEditor extends StatefulWidget {
 class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
   DesignDraft get draft => widget.draft;
 
-  bool _linkMode = false;
-  String? _linkSource;
-  DesignEdgeKind _linkKind = DesignEdgeKind.navigate;
+  final TransformationController _transformController =
+      TransformationController();
+  final GlobalKey _ivKey = GlobalKey();
+
+  bool _drawerOpen = false;
+
+  /// 正在拖线的起点 {nodeId, blockId}
+  Map<String, String>? _dragFrom;
+
+  /// 拖线指针在画布坐标系的位置
+  Offset? _dragPointer;
+
+  /// 拖线期间最后的全局指针位置（onPanEnd 无位置信息，需缓存）
+  Offset? _lastGlobalPos;
 
   void _mutate(VoidCallback fn) {
     setState(fn);
@@ -54,7 +78,7 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
         900.0,
         draft.systems.fold<double>(
           0.0,
-          (value, sys) => math.max(value, sys.x + _kNodeWidth + 80),
+          (value, sys) => math.max(value, sys.x + _kNodeWidth + 120),
         ),
       );
 
@@ -67,6 +91,29 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
       );
 
   // -------------------------------------------------------------------------
+  // 坐标换算：全局坐标 → 画布（scene）坐标
+  // -------------------------------------------------------------------------
+
+  Offset _globalToScene(Offset global) {
+    final ctx = _ivKey.currentContext;
+    if (ctx == null) return global;
+    final box = ctx.findRenderObject() as RenderBox?;
+    if (box == null) return global;
+    final local = box.globalToLocal(global);
+    return _transformController.toScene(local);
+  }
+
+  // -------------------------------------------------------------------------
+  // 引脚位置（画布坐标系）
+  // -------------------------------------------------------------------------
+
+  Offset _systemInputPinPos(SystemPayloadInstance sys) =>
+      Offset(sys.x, sys.y + _kSystemInputPinY);
+
+  Offset _blockInputPinPos(SystemPayloadInstance sys, int blockIndex) =>
+      Offset(sys.x, sys.y + _blockRowCenterY(blockIndex));
+
+  // -------------------------------------------------------------------------
   // 编排操作
   // -------------------------------------------------------------------------
 
@@ -75,15 +122,14 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
         draft.root.params = {};
       });
 
-  void _addSystem(String specId) {
-    final index = draft.systems.length;
+  void _addSystemAt(String specId, Offset scenePos) {
     _mutate(() {
       draft.systems.add(
         SystemPayloadInstance(
           specId: specId,
           nodeId: 'node_${DateTime.now().microsecondsSinceEpoch}',
-          x: 40.0 + (index % 3) * 280.0,
-          y: 40.0 + (index ~/ 3) * 220.0,
+          x: math.max(0.0, scenePos.dx - _kNodeWidth / 2),
+          y: math.max(0.0, scenePos.dy - _kHeaderHeight / 2),
         ),
       );
     });
@@ -96,63 +142,130 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
         (e) => e.fromNodeId == instance.nodeId || e.toNodeId == instance.nodeId,
       );
     });
-    if (_linkSource == instance.nodeId) {
-      setState(() => _linkSource = null);
-    }
   }
 
   void _addBlock(SystemPayloadInstance instance, String blockId) {
     if (instance.blocks.any((b) => b.specId == blockId)) return;
-    _mutate(() => instance.blocks.add(BlockPayloadInstance(specId: blockId)));
+    _mutate(
+        () => instance.blocks.add(BlockPayloadInstance(specId: blockId)));
   }
 
-  void _removeBlock(SystemPayloadInstance instance, int index) =>
-      _mutate(() => instance.blocks.removeAt(index));
-
-  void _handleNodeTap(SystemPayloadInstance instance) {
-    if (!_linkMode) return;
-    if (_linkSource == null) {
-      setState(() => _linkSource = instance.nodeId);
-      return;
-    }
-    if (_linkSource == instance.nodeId) {
-      setState(() => _linkSource = null);
-      return;
-    }
-    final from = _linkSource!;
-    setState(() => _linkSource = null);
-    _connect(from, instance.nodeId);
+  void _removeBlock(SystemPayloadInstance instance, int index) {
+    final removed = instance.blocks[index];
+    _mutate(() {
+      instance.blocks.removeAt(index);
+      // 删除 Block 时清理引用它的边
+      draft.edges.removeWhere((e) =>
+          (e.fromNodeId == instance.nodeId && e.fromBlockId == removed.instanceId) ||
+          (e.toNodeId == instance.nodeId && e.toBlockId == removed.instanceId));
+    });
   }
 
-  void _connect(String fromId, String toId) {
-    if (fromId == toId) return;
+  // -------------------------------------------------------------------------
+  // 引脚拖线
+  // -------------------------------------------------------------------------
+
+  void _startDragWire(String nodeId, String blockId) {
+    setState(() {
+      _dragFrom = {'nodeId': nodeId, 'blockId': blockId};
+      _dragPointer = null;
+    });
+  }
+
+  void _updateDragWire(Offset globalPos) {
+    if (_dragFrom == null) return;
+    _lastGlobalPos = globalPos;
+    setState(() => _dragPointer = _globalToScene(globalPos));
+  }
+
+  void _endDragWire() {
+    final from = _dragFrom;
+    if (from == null) return;
+    final scenePos =
+        _lastGlobalPos != null ? _globalToScene(_lastGlobalPos!) : null;
+    if (scenePos == null) {
+      setState(() {
+        _dragFrom = null;
+        _dragPointer = null;
+      });
+      return;
+    }
+
+    // 寻找最近的输入引脚
+    const hitRadius = 28.0;
+    String? hitNodeId;
+    String? hitBlockId; // null 表示命中 System 输入引脚
+    double bestDist = hitRadius;
+
+    for (final sys in draft.systems) {
+      // System 输入引脚
+      final sp = _systemInputPinPos(sys);
+      final d = (sp - scenePos).distance;
+      if (d < bestDist) {
+        bestDist = d;
+        hitNodeId = sys.nodeId;
+        hitBlockId = null;
+      }
+      // Block 输入引脚
+      for (var i = 0; i < sys.blocks.length; i++) {
+        final bp = _blockInputPinPos(sys, i);
+        final d2 = (bp - scenePos).distance;
+        if (d2 < bestDist) {
+          bestDist = d2;
+          hitNodeId = sys.nodeId;
+          hitBlockId = sys.blocks[i].instanceId;
+        }
+      }
+    }
+
+    setState(() {
+      _dragFrom = null;
+      _dragPointer = null;
+    });
+
+    if (hitNodeId == null) return;
+    // 不能连接到自己所在的同一个 Block（自环）
+    if (hitNodeId == from['nodeId'] && hitBlockId == from['blockId']) {
+      _toast('不能连接到自身');
+      return;
+    }
+    _connect(
+      fromNodeId: from['nodeId']!,
+      fromBlockId: from['blockId']!,
+      toNodeId: hitNodeId,
+      toBlockId: hitBlockId,
+    );
+  }
+
+  void _connect({
+    required String fromNodeId,
+    required String fromBlockId,
+    required String toNodeId,
+    String? toBlockId,
+  }) {
     final exists = draft.edges.any(
-      (e) => e.fromNodeId == fromId && e.toNodeId == toId,
+      (e) =>
+          e.fromNodeId == fromNodeId &&
+          e.fromBlockId == fromBlockId &&
+          e.toNodeId == toNodeId &&
+          e.toBlockId == toBlockId,
     );
     if (exists) {
-      _toast('这两个端之间已存在连线');
+      _toast('这条连接已存在');
       return;
     }
     _mutate(() {
       draft.edges.add(
         DesignEdge(
           id: 'edge_${DateTime.now().microsecondsSinceEpoch}',
-          fromNodeId: fromId,
-          toNodeId: toId,
-          kind: _linkKind,
+          fromNodeId: fromNodeId,
+          fromBlockId: fromBlockId,
+          toNodeId: toNodeId,
+          toBlockId: toBlockId,
+          kind: DesignEdgeKind.navigate,
         ),
       );
     });
-  }
-
-  void _toggleLinkMode() {
-    setState(() {
-      _linkMode = !_linkMode;
-      _linkSource = null;
-    });
-    if (_linkMode) {
-      _toast('连线模式：先点选起点端，再点选终点端');
-    }
   }
 
   void _toast(String text) {
@@ -167,6 +280,13 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
     return SystemPayloadRegistry.byId(node.specId).name;
   }
 
+  String _blockName(String nodeId, String? blockId) {
+    if (blockId == null) return '';
+    final block = draft.blockById(nodeId, blockId);
+    if (block == null) return '已删除的模块';
+    return BlockPayloadRegistry.byId(block.specId).name;
+  }
+
   // -------------------------------------------------------------------------
   // UI
   // -------------------------------------------------------------------------
@@ -179,7 +299,7 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
         _buildRootBar(isDark),
         _buildToolbar(isDark),
         Expanded(child: _buildCanvas(isDark)),
-        _buildSystemPalette(isDark),
+        _buildDrawer(isDark),
       ],
     );
   }
@@ -250,43 +370,10 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
       padding: const EdgeInsets.fromLTRB(16, 4, 8, 6),
       child: Row(
         children: [
-          Tooltip(
-            message: '开启后：先点起点端，再点终点端，即可创建一条有向边',
-            child: FilterChip(
-              avatar: Icon(
-                _linkMode ? Icons.link : Icons.link_off,
-                size: 16,
-                color: _linkMode ? Colors.orange : Colors.blueAccent,
-              ),
-              label: Text('连线模式', style: const TextStyle(fontSize: 12)),
-              selected: _linkMode,
-              onSelected: (_) => _toggleLinkMode(),
-            ),
+          const Text(
+            '从模块右侧引脚拖到目标端 / 模块左侧引脚建立连接',
+            style: TextStyle(fontSize: 11, color: Colors.orange),
           ),
-          const SizedBox(width: 8),
-          if (_linkMode) ...[
-            for (final kind in DesignEdgeKind.values)
-              Padding(
-                padding: const EdgeInsets.only(right: 4),
-                child: ChoiceChip(
-                  label: Text(
-                    kind.label,
-                    style: const TextStyle(fontSize: 11),
-                  ),
-                  selected: _linkKind == kind,
-                  onSelected: (_) => setState(() => _linkKind = kind),
-                ),
-              ),
-            if (_linkSource != null)
-              Padding(
-                padding: const EdgeInsets.only(left: 4),
-                child: Text(
-                  '起点：${_nodeName(_linkSource!)}',
-                  style: const TextStyle(
-                      fontSize: 11, color: Colors.orange),
-                ),
-              ),
-          ],
           const Spacer(),
           Text(
             '${draft.systems.length} 端 · ${draft.edges.length} 关系',
@@ -323,43 +410,61 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
         ),
       ),
       clipBehavior: Clip.hardEdge,
-      child: SingleChildScrollView(
-        scrollDirection: Axis.vertical,
-        child: SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: SizedBox(
-            width: _canvasWidth,
-            height: _canvasHeight,
-            child: Stack(
-              children: [
-                Positioned.fill(
-                  child: CustomPaint(
-                    painter: _EdgePainter(
-                      draft: draft,
-                      isDark: isDark,
-                      highlightNodeId: _linkSource,
-                    ),
-                  ),
-                ),
-                if (draft.systems.isEmpty)
-                  Positioned(
-                    left: 24,
-                    top: 24,
-                    child: Text(
-                      '画布还是空的：点击下方「端」添加节点，\n'
-                      '然后开启「连线模式」建立跳转 / 依赖关系。',
-                      style: TextStyle(
-                        fontSize: 12,
-                        height: 1.6,
-                        color: isDark ? Colors.white38 : Colors.black45,
+      child: DragTarget<String>(
+        onWillAcceptWithDetails: (details) =>
+            details.data.startsWith('system:'),
+        onAcceptWithDetails: (details) {
+          final specId = details.data.substring('system:'.length);
+          if (specId == '__custom__') {
+            _createCustomSystem();
+            return;
+          }
+          final scenePos = _globalToScene(details.offset);
+          _addSystemAt(specId, scenePos);
+        },
+        builder: (context, candidate, _) {
+          return InteractiveViewer(
+            key: _ivKey,
+            transformationController: _transformController,
+            minScale: 0.5,
+            maxScale: 2.5,
+            constrained: false,
+            boundaryMargin: const EdgeInsets.all(200),
+            child: SizedBox(
+              width: _canvasWidth,
+              height: _canvasHeight,
+              child: Stack(
+                children: [
+                  Positioned.fill(
+                    child: CustomPaint(
+                      painter: _EdgePainter(
+                        draft: draft,
+                        isDark: isDark,
+                        dragFrom: _dragFrom,
+                        dragPointer: _dragPointer,
                       ),
                     ),
                   ),
-                for (final sys in draft.systems) _buildNode(sys, isDark),
-              ],
+                  if (draft.systems.isEmpty)
+                    Positioned(
+                      left: 24,
+                      top: 24,
+                      child: Text(
+                        '画布是空的：从底部抽屉拖动「端」到这里，\n'
+                        '再为端添加模块，从模块右侧引脚拖线建立跳转关系。',
+                        style: TextStyle(
+                          fontSize: 12,
+                          height: 1.6,
+                          color: isDark ? Colors.white38 : Colors.black45,
+                        ),
+                      ),
+                    ),
+                  for (final sys in draft.systems) _buildNode(sys, isDark),
+                ],
+              ),
             ),
-          ),
-        ),
+          );
+        },
       ),
     );
   }
@@ -370,37 +475,32 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
         ? sys.params['folder']!
         : spec.defaultFolder;
     final library = sys.params['library'] ?? spec.defaultLibrary;
-    final isSource = _linkSource == sys.nodeId;
 
     return Positioned(
       left: sys.x,
       top: sys.y,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onTap: () => _handleNodeTap(sys),
-        onPanUpdate: _linkMode
-            ? null
-            : (details) {
-                setState(() {
-                  sys.x = math.max(0.0, sys.x + details.delta.dx);
-                  sys.y = math.max(0.0, sys.y + details.delta.dy);
-                });
-                widget.onChanged();
-              },
+        onPanUpdate: (details) {
+          // details.delta 是屏幕逻辑像素，sys.x/y 是场景坐标，
+          // 需除以当前缩放比例才能跟手。
+          final scale = _transformController.value.getMaxScaleOnAxis();
+          final s = scale == 0 ? 1.0 : scale;
+          setState(() {
+            sys.x = math.max(0.0, sys.x + details.delta.dx / s);
+            sys.y = math.max(0.0, sys.y + details.delta.dy / s);
+          });
+          widget.onChanged();
+        },
         child: Container(
           width: _kNodeWidth,
           decoration: BoxDecoration(
             color: isDark ? const Color(0xFF2D2D30) : Colors.white,
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
-              color: isSource
-                  ? Colors.orange
-                  : (_linkMode
-                      ? Colors.blueAccent.withValues(alpha: 0.6)
-                      : (isDark
-                          ? const Color(0xFF3C3C3C)
-                          : const Color(0xFFE0E4E8))),
-              width: isSource ? 2 : 1,
+              color: isDark
+                  ? const Color(0xFF3C3C3C)
+                  : const Color(0xFFE0E4E8),
             ),
             boxShadow: [
               BoxShadow(
@@ -410,72 +510,82 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
               ),
             ],
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          child: Stack(
+            clipBehavior: Clip.none,
             children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(10, 8, 4, 0),
-                child: Row(
-                  children: [
-                    Icon(spec.icon, size: 18, color: Colors.teal),
-                    const SizedBox(width: 6),
-                    Expanded(
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Header
+                  SizedBox(
+                    height: _kHeaderHeight,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 6, 4, 0),
+                      child: Row(
+                        children: [
+                          Icon(spec.icon, size: 18, color: Colors.teal),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              spec.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                          IconButton(
+                            visualDensity: VisualDensity.compact,
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(
+                                minWidth: 26, minHeight: 26),
+                            tooltip: '参数',
+                            icon: const Icon(Icons.tune, size: 15),
+                            onPressed: () => PayloadParamsSheet.show(
+                              context,
+                              title: '${spec.name} · 参数',
+                              defs: spec.params,
+                              values: sys.params,
+                              onChanged: widget.onChanged,
+                            ),
+                          ),
+                          IconButton(
+                            visualDensity: VisualDensity.compact,
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(
+                                minWidth: 26, minHeight: 26),
+                            tooltip: '移除该端',
+                            icon: const Icon(Icons.close, size: 15),
+                            onPressed: () => _removeSystem(sys),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  // Subtitle
+                  SizedBox(
+                    height: _kSubtitleHeight,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 0, 10, 0),
                       child: Text(
-                        spec.name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
+                        '$folder/ · $library',
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: isDark ? Colors.white38 : Colors.black45,
                         ),
                       ),
                     ),
-                    IconButton(
-                      visualDensity: VisualDensity.compact,
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(
-                          minWidth: 26, minHeight: 26),
-                      tooltip: '参数',
-                      icon: const Icon(Icons.tune, size: 15),
-                      onPressed: () => PayloadParamsSheet.show(
-                        context,
-                        title: '${spec.name} · 参数',
-                        defs: spec.params,
-                        values: sys.params,
-                        onChanged: widget.onChanged,
-                      ),
-                    ),
-                    IconButton(
-                      visualDensity: VisualDensity.compact,
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(
-                          minWidth: 26, minHeight: 26),
-                      tooltip: '移除该端',
-                      icon: const Icon(Icons.close, size: 15),
-                      onPressed: () => _removeSystem(sys),
-                    ),
-                  ],
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(10, 2, 10, 0),
-                child: Text(
-                  '$folder/ · $library',
-                  style: TextStyle(
-                    fontSize: 10,
-                    color: isDark ? Colors.white38 : Colors.black45,
                   ),
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(6, 6, 6, 2),
-                child: Wrap(
-                  spacing: 4,
-                  runSpacing: 4,
-                  children: [
-                    for (var i = 0; i < sys.blocks.length; i++)
-                      _blockChip(sys, i, isDark),
-                    InkWell(
+                  const SizedBox(height: 2),
+                  // Blocks
+                  for (var i = 0; i < sys.blocks.length; i++)
+                    _buildBlockRow(sys, i, isDark),
+                  // Add block
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(10, 4, 10, 6),
+                    child: InkWell(
                       onTap: () => _pickBlock(sys),
                       borderRadius: BorderRadius.circular(8),
                       child: Container(
@@ -485,7 +595,6 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
                           borderRadius: BorderRadius.circular(8),
                           border: Border.all(
                             color: Colors.orange.withValues(alpha: 0.5),
-                            style: BorderStyle.solid,
                           ),
                         ),
                         child: const Row(
@@ -500,10 +609,15 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
                         ),
                       ),
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-              const SizedBox(height: 8),
+              // System 输入引脚（左侧，header 中心）
+              Positioned(
+                left: -_kPinRadius,
+                top: _kSystemInputPinY - _kPinRadius,
+                child: _inputPin(isDark),
+              ),
             ],
           ),
         ),
@@ -511,53 +625,237 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
     );
   }
 
-  Widget _blockChip(SystemPayloadInstance sys, int index, bool isDark) {
+  Widget _buildBlockRow(SystemPayloadInstance sys, int index, bool isDark) {
     final instance = sys.blocks[index];
     final spec = BlockPayloadRegistry.byId(instance.specId);
-    return InputChip(
-      avatar: Icon(spec.icon, size: 12, color: Colors.orange),
-      label: Text(spec.name, style: const TextStyle(fontSize: 10)),
-      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-      visualDensity: VisualDensity.compact,
-      padding: const EdgeInsets.symmetric(horizontal: 2),
-      onPressed: () => PayloadParamsSheet.show(
-        context,
-        title: '${spec.name} · 参数',
-        defs: spec.params,
-        values: instance.params,
-        onChanged: widget.onChanged,
+    return SizedBox(
+      height: _kBlockRowHeight,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 3),
+            child: InputChip(
+              avatar: Icon(spec.icon, size: 12, color: Colors.orange),
+              label: Text(spec.name, style: const TextStyle(fontSize: 10)),
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              visualDensity: VisualDensity.compact,
+              padding: const EdgeInsets.symmetric(horizontal: 2),
+              onPressed: () => PayloadParamsSheet.show(
+                context,
+                title: '${spec.name} · 参数',
+                defs: spec.params,
+                values: instance.params,
+                onChanged: widget.onChanged,
+              ),
+              onDeleted: () => _removeBlock(sys, index),
+              deleteIcon: const Icon(Icons.close, size: 12),
+              backgroundColor:
+                  isDark ? const Color(0xFF3A3A3D) : const Color(0xFFFFF4E5),
+            ),
+          ),
+          // Block 输入引脚（左）
+          Positioned(
+            left: -_kPinRadius,
+            top: _kBlockRowHeight / 2 - _kPinRadius,
+            child: _inputPin(isDark),
+          ),
+          // Block 输出引脚（右）
+          Positioned(
+            left: _kNodeWidth - _kPinRadius,
+            top: _kBlockRowHeight / 2 - _kPinRadius,
+            child: _outputPin(sys, index),
+          ),
+        ],
       ),
-      onDeleted: () => _removeBlock(sys, index),
-      deleteIcon: const Icon(Icons.close, size: 12),
-      backgroundColor:
-          isDark ? const Color(0xFF3A3A3D) : const Color(0xFFFFF4E5),
     );
   }
 
-  Widget _buildSystemPalette(bool isDark) {
-    return SizedBox(
-      height: 58,
-      child: ListView(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-        scrollDirection: Axis.horizontal,
+  Widget _inputPin(bool isDark) {
+    return Container(
+      width: _kPinRadius * 2,
+      height: _kPinRadius * 2,
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF6AB7FF) : Colors.blueAccent,
+        shape: BoxShape.circle,
+        border: Border.all(color: Colors.white, width: 1.5),
+      ),
+    );
+  }
+
+  Widget _outputPin(SystemPayloadInstance sys, int blockIndex) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onPanStart: (_) => _startDragWire(sys.nodeId, sys.blocks[blockIndex].instanceId),
+      onPanUpdate: (d) => _updateDragWire(d.globalPosition),
+      onPanEnd: (_) => _endDragWire(),
+      child: MouseRegion(
+        cursor: SystemMouseCursors.grab,
+        child: Container(
+          width: _kPinRadius * 2,
+          height: _kPinRadius * 2,
+          decoration: const BoxDecoration(
+            color: Colors.orange,
+            shape: BoxShape.circle,
+            boxShadow: [
+              BoxShadow(color: Colors.orangeAccent, blurRadius: 4),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // 底部抽屉式 System 调色板
+  // -------------------------------------------------------------------------
+
+  Widget _buildDrawer(bool isDark) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF2D2D30) : Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isDark ? const Color(0xFF3C3C3C) : const Color(0xFFE0E4E8),
+        ),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          for (final spec in SystemPayloadRegistry.all)
-            Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: ActionChip(
-                avatar: Icon(spec.icon, size: 15, color: Colors.teal),
-                label: Text(spec.name, style: const TextStyle(fontSize: 12)),
-                tooltip: '添加「${spec.name}」端',
-                onPressed: () => _addSystem(spec.id),
+          InkWell(
+            onTap: () => setState(() => _drawerOpen = !_drawerOpen),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              child: Row(
+                children: [
+                  Icon(
+                    _drawerOpen
+                        ? Icons.keyboard_arrow_down
+                        : Icons.keyboard_arrow_up,
+                    size: 18,
+                  ),
+                  const SizedBox(width: 6),
+                  const Text('端（System Payload）',
+                      style: TextStyle(
+                          fontSize: 12, fontWeight: FontWeight.w600)),
+                  const Spacer(),
+                  Text(
+                    '拖入画布添加',
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: isDark ? Colors.white38 : Colors.black45,
+                    ),
+                  ),
+                ],
               ),
             ),
-          ActionChip(
-            avatar: const Icon(Icons.add, size: 15, color: Colors.blueAccent),
-            label: const Text('自定义端', style: TextStyle(fontSize: 12)),
-            tooltip: '创建自定义 System Payload',
-            onPressed: _createCustomSystem,
           ),
+          if (_drawerOpen)
+            SizedBox(
+              height: 64,
+              child: ListView.separated(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                scrollDirection: Axis.horizontal,
+                itemCount: SystemPayloadRegistry.all.length + 1,
+                separatorBuilder: (_, _) => const SizedBox(width: 8),
+                itemBuilder: (context, index) {
+                  if (index == SystemPayloadRegistry.all.length) {
+                    return Draggable<String>(
+                      data: 'system:__custom__',
+                      feedback: Material(
+                        elevation: 6,
+                        borderRadius: BorderRadius.circular(10),
+                        child: _paletteChip(
+                          icon: Icons.add,
+                          label: '自定义端',
+                          color: Colors.blueAccent,
+                          isDark: isDark,
+                        ),
+                      ),
+                      childWhenDragging: Opacity(
+                          opacity: 0.35,
+                          child: _paletteChip(
+                            icon: Icons.add,
+                            label: '自定义端',
+                            color: Colors.blueAccent,
+                            isDark: isDark,
+                          )),
+                      child: _paletteChip(
+                        icon: Icons.add,
+                        label: '自定义端',
+                        color: Colors.blueAccent,
+                        isDark: isDark,
+                        onTap: _createCustomSystem,
+                      ),
+                    );
+                  }
+                  final spec = SystemPayloadRegistry.all[index];
+                  return Draggable<String>(
+                    data: 'system:${spec.id}',
+                    feedback: Material(
+                      elevation: 6,
+                      borderRadius: BorderRadius.circular(10),
+                      child: _paletteChip(
+                        icon: spec.icon,
+                        label: spec.name,
+                        color: Colors.teal,
+                        isDark: isDark,
+                      ),
+                    ),
+                    childWhenDragging: Opacity(
+                        opacity: 0.35,
+                        child: _paletteChip(
+                          icon: spec.icon,
+                          label: spec.name,
+                          color: Colors.teal,
+                          isDark: isDark,
+                        )),
+                    child: Tooltip(
+                      message: '拖入画布添加「${spec.name}」',
+                      child: _paletteChip(
+                        icon: spec.icon,
+                        label: spec.name,
+                        color: Colors.teal,
+                        isDark: isDark,
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
         ],
+      ),
+    );
+  }
+
+  Widget _paletteChip({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required bool isDark,
+    VoidCallback? onTap,
+  }) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(10),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF252527) : const Color(0xFFF8FAFC),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: color.withValues(alpha: 0.5)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 15, color: color),
+            const SizedBox(width: 5),
+            Text(label, style: const TextStyle(fontSize: 12)),
+          ],
+        ),
       ),
     );
   }
@@ -662,7 +960,7 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
               if (draft.edges.isEmpty) {
                 return Center(
                   child: Text(
-                    '还没有关系。开启「连线模式」后点选两个端即可创建。',
+                    '还没有关系。从模块右侧引脚拖到目标端 / 模块左侧引脚即可创建。',
                     style: TextStyle(
                       fontSize: 12,
                       color: isDark ? Colors.white38 : Colors.black45,
@@ -688,9 +986,9 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
                             : Colors.orange,
                       ),
                       title: Text(
-                        '${_nodeName(edge.fromNodeId)} → '
-                        '${_nodeName(edge.toNodeId)}',
-                        style: const TextStyle(fontSize: 13),
+                        '${_nodeName(edge.fromNodeId)}.${_blockName(edge.fromNodeId, edge.fromBlockId)} → '
+                        '${_nodeName(edge.toNodeId)}${edge.toBlockId == null ? '' : '.${_blockName(edge.toNodeId, edge.toBlockId)}'}',
+                        style: const TextStyle(fontSize: 12),
                       ),
                       subtitle: Text(
                         edge.label.isEmpty
@@ -744,83 +1042,119 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
   }
 }
 
-/// 画布连线绘制（有向箭头 + 关系标签）
+/// 画布连线绘制（引脚到引脚 + live wire）
 class _EdgePainter extends CustomPainter {
   final DesignDraft draft;
   final bool isDark;
-  final String? highlightNodeId;
+  final Map<String, String>? dragFrom;
+  final Offset? dragPointer;
 
   _EdgePainter({
     required this.draft,
     required this.isDark,
-    this.highlightNodeId,
+    this.dragFrom,
+    this.dragPointer,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
+    // 已有边
     for (final edge in draft.edges) {
       final from = draft.nodeById(edge.fromNodeId);
       final to = draft.nodeById(edge.toNodeId);
       if (from == null || to == null) continue;
 
-      final fromRect = Rect.fromLTWH(
-          from.x, from.y, _kNodeWidth, nodeCardHeight(from));
-      final toRect = Rect.fromLTWH(to.x, to.y, _kNodeWidth, nodeCardHeight(to));
-      final start = _boundaryPoint(fromRect, toRect.center);
-      final end = _boundaryPoint(toRect, fromRect.center);
-
-      final color = edge.kind == DesignEdgeKind.navigate
-          ? Colors.blueAccent
-          : Colors.orange;
-      final highlight = highlightNodeId != null &&
-          (edge.fromNodeId == highlightNodeId ||
-              edge.toNodeId == highlightNodeId);
-      final paint = Paint()
-        ..color = highlight ? color : color.withValues(alpha: 0.72)
-        ..strokeWidth = highlight ? 2.2 : 1.4
-        ..style = PaintingStyle.stroke;
-
-      // 轻微弧线，避免多条边互相重叠时难以分辨
-      final mid = Offset(
-        (start.dx + end.dx) / 2,
-        (start.dy + end.dy) / 2,
+      final fromBlockIdx = from.blocks
+          .indexWhere((b) => b.instanceId == edge.fromBlockId);
+      if (fromBlockIdx < 0) continue;
+      final start = Offset(
+        from.x + _kNodeWidth,
+        from.y + _blockRowCenterY(fromBlockIdx),
       );
-      final dx = end.dx - start.dx;
-      final dy = end.dy - start.dy;
-      final length = math.sqrt(dx * dx + dy * dy);
-      final bow = length < 1 ? 0.0 : 18.0;
-      final control = Offset(
-        mid.dx - dy / (length == 0 ? 1 : length) * bow,
-        mid.dy + dx / (length == 0 ? 1 : length) * bow,
-      );
-      final path = Path()
-        ..moveTo(start.dx, start.dy)
-        ..quadraticBezierTo(control.dx, control.dy, end.dx, end.dy);
-      canvas.drawPath(path, paint);
 
-      // 箭头
-      final direction = end - control;
-      final angle = math.atan2(direction.dy, direction.dx);
-      const arrowLength = 9.0;
-      const arrowAngle = math.pi / 7;
-      final arrowPaint = Paint()
-        ..color = color
-        ..style = PaintingStyle.fill;
-      final arrowPath = Path()
-        ..moveTo(end.dx, end.dy)
-        ..lineTo(
-          end.dx - arrowLength * math.cos(angle - arrowAngle),
-          end.dy - arrowLength * math.sin(angle - arrowAngle),
-        )
-        ..lineTo(
-          end.dx - arrowLength * math.cos(angle + arrowAngle),
-          end.dy - arrowLength * math.sin(angle + arrowAngle),
-        )
-        ..close();
-      canvas.drawPath(arrowPath, arrowPaint);
+      final Offset end;
+      if (edge.toBlockId == null) {
+        end = Offset(to.x, to.y + _kSystemInputPinY);
+      } else {
+        final toBlockIdx = to.blocks
+            .indexWhere((b) => b.instanceId == edge.toBlockId);
+        if (toBlockIdx < 0) continue;
+        end = Offset(to.x, to.y + _blockRowCenterY(toBlockIdx));
+      }
 
-      // 关系标签
-      final text = edge.label.isEmpty ? edge.kind.label : edge.label;
+      _drawEdge(canvas, start, end, edge.kind, edge.label, false);
+    }
+
+    // live wire
+    if (dragFrom != null && dragPointer != null) {
+      final from = draft.nodeById(dragFrom!['nodeId']);
+      if (from != null) {
+        final idx = from.blocks
+            .indexWhere((b) => b.instanceId == dragFrom!['blockId']);
+        if (idx >= 0) {
+          final start = Offset(
+            from.x + _kNodeWidth,
+            from.y + _blockRowCenterY(idx),
+          );
+          _drawEdge(canvas, start, dragPointer!, DesignEdgeKind.navigate,
+              null, true);
+        }
+      }
+    }
+  }
+
+  void _drawEdge(
+    Canvas canvas,
+    Offset start,
+    Offset end,
+    DesignEdgeKind kind,
+    String? label,
+    bool isLiveWire,
+  ) {
+    final color = kind == DesignEdgeKind.navigate
+        ? Colors.blueAccent
+        : Colors.orange;
+    final paint = Paint()
+      ..color = isLiveWire ? color.withValues(alpha: 0.85) : color.withValues(alpha: 0.8)
+      ..strokeWidth = isLiveWire ? 2.0 : 1.6
+      ..style = PaintingStyle.stroke;
+
+    // 贝塞尔曲线（水平控制点，避免回头）
+    final dx = end.dx - start.dx;
+    final controlOffset = math.max(60.0, dx.abs() * 0.5);
+    final c1 = Offset(start.dx + controlOffset, start.dy);
+    final c2 = Offset(end.dx - controlOffset, end.dy);
+    final path = Path()
+      ..moveTo(start.dx, start.dy)
+      ..cubicTo(c1.dx, c1.dy, c2.dx, c2.dy, end.dx, end.dy);
+    canvas.drawPath(path, paint);
+
+    if (isLiveWire) return;
+
+    // 箭头
+    final tangent = (end - c2);
+    final angle = math.atan2(tangent.dy, tangent.dx);
+    const arrowLength = 9.0;
+    const arrowAngle = math.pi / 7;
+    final arrowPaint = Paint()
+      ..color = color
+      ..style = PaintingStyle.fill;
+    final arrowPath = Path()
+      ..moveTo(end.dx, end.dy)
+      ..lineTo(
+        end.dx - arrowLength * math.cos(angle - arrowAngle),
+        end.dy - arrowLength * math.sin(angle - arrowAngle),
+      )
+      ..lineTo(
+        end.dx - arrowLength * math.cos(angle + arrowAngle),
+        end.dy - arrowLength * math.sin(angle + arrowAngle),
+      )
+      ..close();
+    canvas.drawPath(arrowPath, arrowPaint);
+
+    // 关系标签
+    if (label != null) {
+      final text = label.isEmpty ? kind.label : label;
       final span = TextSpan(
         text: text,
         style: TextStyle(
@@ -828,47 +1162,34 @@ class _EdgePainter extends CustomPainter {
           color: isDark ? Colors.white70 : Colors.black87,
         ),
       );
-      final painter = TextPainter(
+      final tp = TextPainter(
         text: span,
         textDirection: TextDirection.ltr,
       )..layout();
-      final labelCenter = Offset(
-        0.25 * start.dx + 0.5 * control.dx + 0.25 * end.dx,
-        0.25 * start.dy + 0.5 * control.dy + 0.25 * end.dy,
+      // 曲线中点近似
+      final mid = Offset(
+        0.125 * start.dx + 0.375 * c1.dx + 0.375 * c2.dx + 0.125 * end.dx,
+        0.125 * start.dy + 0.375 * c1.dy + 0.375 * c2.dy + 0.125 * end.dy,
       );
       final rect = RRect.fromRectAndRadius(
         Rect.fromCenter(
-          center: labelCenter,
-          width: painter.width + 10,
-          height: painter.height + 6,
+          center: mid,
+          width: tp.width + 10,
+          height: tp.height + 6,
         ),
         const Radius.circular(4),
       );
       canvas.drawRRect(
         rect,
         Paint()
-          ..color = isDark
-              ? const Color(0xFF252527)
-              : const Color(0xFFF8FAFC),
+          ..color =
+              isDark ? const Color(0xFF252527) : const Color(0xFFF8FAFC),
       );
-      painter.paint(
+      tp.paint(
         canvas,
-        labelCenter - Offset(painter.width / 2, painter.height / 2),
+        mid - Offset(tp.width / 2, tp.height / 2),
       );
     }
-  }
-
-  /// 计算从矩形中心指向 target 的边界交点
-  Offset _boundaryPoint(Rect rect, Offset target) {
-    final center = rect.center;
-    final dx = target.dx - center.dx;
-    final dy = target.dy - center.dy;
-    if (dx.abs() < 0.01 && dy.abs() < 0.01) return center;
-    final scaleX = dx.abs() < 0.01 ? double.infinity : (rect.width / 2) / dx.abs();
-    final scaleY =
-        dy.abs() < 0.01 ? double.infinity : (rect.height / 2) / dy.abs();
-    final t = math.min(scaleX, scaleY);
-    return Offset(center.dx + dx * t, center.dy + dy * t);
   }
 
   @override

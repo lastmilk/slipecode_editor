@@ -12,17 +12,14 @@ import '../providers/settings_provider.dart';
 import '../services/design_draft_service.dart';
 import '../services/git_host.dart';
 import '../services/loader_project_service.dart';
-import '../widgets/payload_assembler.dart';
 import 'design_draft_list_screen.dart';
 
 /// 创建 Loader 项目
 ///
-/// 两种组装方式：
-/// 1. 采用设计稿：直接使用已保存的设计稿（推荐，设计稿即完整 Vibe）；
-/// 2. 手动组装：在本页内嵌的可视化编辑器中临时编排三层 Payload。
-///
-/// 引擎（[LoaderProjectService]）根据组装结果自动创建目录结构、
+/// 仅支持「采用设计稿」方式：设计稿即完整 Vibe，
+/// 引擎（[LoaderProjectService]）据此自动创建目录结构、
 /// 项目必需文件与全部 .md 文本。
+/// 如需编排，请先前往「设计稿」创建并保存。
 class CreateLoaderProjectScreen extends StatefulWidget {
   /// 从设计稿列表进入时预选的设计稿
   final DesignDraft? initialDraft;
@@ -41,21 +38,8 @@ class _CreateLoaderProjectScreenState extends State<CreateLoaderProjectScreen> {
   final _orgController = TextEditingController(text: 'com.example');
   final _repoNameController = TextEditingController();
 
-  /// 组装方式：true = 采用设计稿；false = 手动组装
-  bool _useDraft = true;
-
   List<DesignDraft> _drafts = [];
   String? _selectedDraftId;
-
-  /// 手动组装用的内存草稿
-  late final DesignDraft _manualDraft = DesignDraft(
-    id: '_manual_',
-    name: '手动组装',
-    createdAt: DateTime.now(),
-    updatedAt: DateTime.now(),
-    root: RootPayloadInstance(specId: RootPayloadRegistry.all.first.id),
-    systems: [],
-  );
 
   bool _isCreating = false;
   bool _createRepo = true;
@@ -78,7 +62,6 @@ class _CreateLoaderProjectScreenState extends State<CreateLoaderProjectScreen> {
         _repoNameController.text = _nameController.text.trim();
       }
     });
-    _useDraft = widget.initialDraft != null;
     _loadDrafts();
   }
 
@@ -109,8 +92,18 @@ class _CreateLoaderProjectScreenState extends State<CreateLoaderProjectScreen> {
     return null;
   }
 
-  /// 当前生效的组装结果（设计稿或手动组装）
-  DesignDraft get _activeDraft => _useDraft ? (_selectedDraft ?? _manualDraft) : _manualDraft;
+  /// 空草稿兜底（仅用于无设计稿时的仓库默认值联动）
+  DesignDraft get _fallbackDraft => DesignDraft(
+        id: '_fallback_',
+        name: '',
+        createdAt: DateTime.now(),
+        updatedAt: DateTime.now(),
+        root: RootPayloadInstance(specId: RootPayloadRegistry.all.first.id),
+        systems: [],
+      );
+
+  /// 当前生效的设计稿
+  DesignDraft get _activeDraft => _selectedDraft ?? _fallbackDraft;
 
   /// 按 Root Payload 的 git_host 参数联动仓库默认值
   void _syncRepoDefaults() {
@@ -136,11 +129,20 @@ class _CreateLoaderProjectScreenState extends State<CreateLoaderProjectScreen> {
   Future<void> _create() async {
     if (!_formKey.currentState!.validate()) return;
 
-    final draft = _activeDraft;
+    final draft = _selectedDraft;
+    if (draft == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('请先选择或创建一个设计稿'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
     if (draft.systems.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('请至少编排一个 System Payload（端）'),
+          content: Text('该设计稿还未编排任何 System Payload（端）'),
           backgroundColor: Colors.orange,
         ),
       );
@@ -153,14 +155,13 @@ class _CreateLoaderProjectScreenState extends State<CreateLoaderProjectScreen> {
     });
 
     final projectProvider = context.read<ProjectProvider>();
-    final usingSavedDraft = _useDraft && _selectedDraft != null;
 
     try {
       await for (final line in LoaderProjectService().createLoaderProject(
         projectName: _nameController.text.trim(),
         targetPath: _targetPath,
         org: _orgController.text.trim(),
-        draft: usingSavedDraft ? draft : null,
+        draft: draft,
         root: draft.root,
         systems: draft.systems,
       )) {
@@ -260,9 +261,7 @@ class _CreateLoaderProjectScreenState extends State<CreateLoaderProjectScreen> {
             const SizedBox(height: 16),
             _buildOrgField(),
             const SizedBox(height: 20),
-            _buildModeSelector(isDark),
-            const SizedBox(height: 12),
-            if (_useDraft) _buildDraftPicker(isDark) else _buildManualAssembler(isDark),
+            _buildDraftPicker(isDark),
             const SizedBox(height: 20),
             _buildRepoOptions(isDark),
             const SizedBox(height: 24),
@@ -356,47 +355,6 @@ class _CreateLoaderProjectScreenState extends State<CreateLoaderProjectScreen> {
     );
   }
 
-  Widget _buildModeSelector(bool isDark) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Payload 组装方式',
-          style: TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w500,
-            color: isDark ? Colors.white70 : Colors.black54,
-          ),
-        ),
-        const SizedBox(height: 8),
-        SizedBox(
-          width: double.infinity,
-          child: SegmentedButton<bool>(
-            segments: const [
-              ButtonSegment(
-                value: true,
-                icon: Icon(Icons.design_services_outlined, size: 18),
-                label: Text('采用设计稿'),
-              ),
-              ButtonSegment(
-                value: false,
-                icon: Icon(Icons.handyman_outlined, size: 18),
-                label: Text('手动组装'),
-              ),
-            ],
-            selected: {_useDraft},
-            onSelectionChanged: _isCreating
-                ? null
-                : (selection) {
-                    setState(() => _useDraft = selection.first);
-                    _syncRepoDefaults();
-                  },
-          ),
-        ),
-      ],
-    );
-  }
-
   // --- 采用设计稿 -------------------------------------------------------------
 
   Widget _buildDraftPicker(bool isDark) {
@@ -426,10 +384,6 @@ class _CreateLoaderProjectScreenState extends State<CreateLoaderProjectScreen> {
                   onPressed: _openDraftManager,
                   icon: const Icon(Icons.add, size: 18),
                   label: const Text('去创建设计稿'),
-                ),
-                TextButton(
-                  onPressed: () => setState(() => _useDraft = false),
-                  child: const Text('改为手动组装'),
                 ),
               ],
             ),
@@ -570,25 +524,6 @@ class _CreateLoaderProjectScreenState extends State<CreateLoaderProjectScreen> {
               ),
             ),
         ],
-      ),
-    );
-  }
-
-  // --- 手动组装 ---------------------------------------------------------------
-
-  Widget _buildManualAssembler(bool isDark) {
-    return Container(
-      height: 560,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: isDark ? const Color(0xFF3C3C3C) : const Color(0xFFE0E4E8),
-        ),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: PayloadAssemblerView(
-        draft: _manualDraft,
-        onChanged: _syncRepoDefaults,
       ),
     );
   }

@@ -81,7 +81,7 @@ class LoaderProjectPayload extends ProjectPayload {
   @override
   bool get supportsGitee => true;
 
-  /// Loader 项目只能通过设计稿 / 手动组装创建
+  /// Loader 项目只能通过设计稿创建
   @override
   bool get hiddenFromCreate => true;
 

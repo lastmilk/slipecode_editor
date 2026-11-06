@@ -9,7 +9,7 @@ import 'github_actions_templates.dart';
 
 /// Loader 项目引擎
 ///
-/// 把「Root + System + Block」三层 Payload 的组装结果（设计稿或手动组装）
+/// 把「Root + System + Block」三层 Payload 的组装结果（设计稿）
 /// 落成磁盘上的项目骨架：
 ///
 /// ```
@@ -58,7 +58,7 @@ class LoaderProjectService {
   /// 从组装结果创建 Loader 项目
   ///
   /// [draft] 非空表示「采用设计稿」（会记录 draftId / draftName）；
-  /// 否则使用 [root] + [systems] 的手动组装结果。
+  /// [root] / [systems] 取自该设计稿。
   Stream<String> createLoaderProject({
     required String projectName,
     required String targetPath,
@@ -132,6 +132,14 @@ class LoaderProjectService {
 ''');
     yield '  + .slipe.json\n';
 
+    // nodeId → (blockInstanceId → blockSpecId)，用于解析边的 Block 粒度
+    final blockSpecByNode = <String, Map<String, String>>{
+      for (final s in (draft?.systems ?? const <SystemPayloadInstance>[]))
+        s.nodeId: {
+          for (final b in s.blocks) b.instanceId: b.specId,
+        },
+    };
+
     // 2) loader.json（机器可读清单）
     final manifest = <String, dynamic>{
       'version': 1,
@@ -159,7 +167,11 @@ class LoaderProjectService {
           {
             'id': e.id,
             'from': e.fromNodeId,
+            'fromBlock': blockSpecByNode[e.fromNodeId]?[e.fromBlockId],
             'to': e.toNodeId,
+            'toBlock': e.toBlockId == null
+                ? null
+                : blockSpecByNode[e.toNodeId]?[e.toBlockId!],
             'label': e.label,
             'kind': e.kind.name,
           },
@@ -292,10 +304,18 @@ dist/
       for (final e in edgeList) {
         final from = nameByNode[e['from']?.toString()] ?? '未知端';
         final to = nameByNode[e['to']?.toString()] ?? '未知端';
+        final fromBlockId = e['fromBlock']?.toString();
+        final toBlockId = e['toBlock']?.toString();
+        final fromName = fromBlockId == null
+            ? from
+            : '$from.${BlockPayloadRegistry.byId(fromBlockId).name}';
+        final toName = toBlockId == null
+            ? to
+            : '$to.${BlockPayloadRegistry.byId(toBlockId).name}';
         final kind = e['kind'] == 'depend' ? '依赖' : '跳转';
         final label = e['label']?.toString() ?? '';
         buffer.writeln(
-            '- $from —$kind→ $to${label.isEmpty ? '' : '（$label）'}');
+            '- $fromName —$kind→ $toName${label.isEmpty ? '' : '（$label）'}');
       }
     }
     return buffer.toString();
@@ -315,7 +335,7 @@ dist/
     final buffer = StringBuffer()
       ..writeln('# $projectName · Loader 组装文档')
       ..writeln()
-      ..writeln('> 本文件由 SLIPE 根据${draft != null ? '设计稿「${draft.name}」' : '手动组装'}'
+      ..writeln('> 本文件由 SLIPE 根据${draft != null ? '设计稿「${draft.name}」' : '组装结果'}'
           '自动生成，是项目的完整 Vibe 载体。')
       ..writeln('> AI 介入环节将按本文件与各 SYSTEM.md / blocks/*.md 完成全部代码。')
       ..writeln()
@@ -363,11 +383,26 @@ dist/
       final nameByNode = <String, String>{
         for (final s in systems) s.nodeId: s.spec.name,
       };
+      // nodeId → (blockInstanceId → blockSpecName)
+      final blockNameByNode = <String, Map<String, String>>{
+        for (final s in (draft?.systems ?? const <SystemPayloadInstance>[]))
+          s.nodeId: {
+            for (final b in s.blocks)
+              b.instanceId: BlockPayloadRegistry.byId(b.specId).name,
+          },
+      };
       for (final e in edges) {
         final from = nameByNode[e.fromNodeId] ?? '未知端';
         final to = nameByNode[e.toNodeId] ?? '未知端';
+        final fromBlockName =
+            blockNameByNode[e.fromNodeId]?[e.fromBlockId];
+        final toBlockName =
+            e.toBlockId == null ? null : blockNameByNode[e.toNodeId]?[e.toBlockId!];
+        final fromLabel =
+            fromBlockName == null ? from : '$from.$fromBlockName';
+        final toLabel = toBlockName == null ? to : '$to.$toBlockName';
         final arrow = e.kind == DesignEdgeKind.depend ? '依赖' : '跳转';
-        buffer.writeln('- **$from** —$arrow→ **$to**'
+        buffer.writeln('- **$fromLabel** —$arrow→ **$toLabel**'
             '${e.label.isEmpty ? '' : '（${e.label}）'}');
       }
     }

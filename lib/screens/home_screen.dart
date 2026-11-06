@@ -248,7 +248,7 @@ class _HomeScreenState extends State<HomeScreen>
               leading: const Icon(Icons.rocket_launch_outlined,
                   color: Colors.blueAccent),
               title: const Text('创建 Loader 项目（推荐）'),
-              subtitle: const Text('采用设计稿或手动组装三层 Payload，AI 无感完成项目'),
+              subtitle: const Text('采用设计稿组装三层 Payload，AI 无感完成项目'),
               onTap: () => Navigator.pop(sheetContext, 'loader'),
             ),
             ListTile(

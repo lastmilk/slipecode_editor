@@ -63,15 +63,48 @@ class DesignDraft {
         systems[i].y = 40.0 + (i ~/ 3) * 220.0;
       }
     }
-    var edges = ((map['edges'] as List?) ?? const [])
-        .map((e) => DesignEdge.fromMap((e as Map).cast<String, dynamic>()))
+    // nodeId → SystemPayloadInstance 索引，便于迁移时查找
+    final sysByNodeId = <String, SystemPayloadInstance>{
+      for (final s in systems) s.nodeId: s,
+    };
+
+    final rawEdges = ((map['edges'] as List?) ?? const [])
+        .map((e) => (e as Map).cast<String, dynamic>())
         .toList();
-    // 旧设计稿没有边：按原有顺序生成一条线性跳转链，保持旧的阅读顺序语义
-    if (edges.isEmpty && systems.length > 1) {
+
+    final edges = <DesignEdge>[];
+    for (final raw in rawEdges) {
+      final edge = DesignEdge.fromMap(raw);
+      // 旧数据迁移：边没有 fromBlockId（旧版边仅连接 System 节点）。
+      // 起点取源系统首个 Block 的 instanceId；源系统无 Block 则丢弃该边。
+      if (edge.fromBlockId.isEmpty) {
+        final src = sysByNodeId[edge.fromNodeId];
+        if (src == null || src.blocks.isEmpty) continue;
+        edges.add(DesignEdge(
+          id: edge.id,
+          fromNodeId: edge.fromNodeId,
+          fromBlockId: src.blocks.first.instanceId,
+          toNodeId: edge.toNodeId,
+          toBlockId: edge.toBlockId,
+          label: edge.label,
+          kind: edge.kind,
+        ));
+      } else {
+        edges.add(edge);
+      }
+    }
+    // 仅当原始 JSON 没有 edges 字段（即真正的旧版草稿）时，
+    // 才按系统顺序生成一条线性跳转链作为迁移兜底。
+    // 用户主动保存的无边多系统草稿不应被强行塞入边。
+    final hadEdgesKey = map.containsKey('edges');
+    if (!hadEdgesKey && edges.isEmpty && systems.length > 1) {
       for (var i = 0; i < systems.length - 1; i++) {
+        final src = systems[i];
+        if (src.blocks.isEmpty) continue;
         edges.add(DesignEdge(
           id: 'edge_$i',
-          fromNodeId: systems[i].nodeId,
+          fromNodeId: src.nodeId,
+          fromBlockId: src.blocks.first.instanceId,
           toNodeId: systems[i + 1].nodeId,
           label: '',
           kind: DesignEdgeKind.navigate,
@@ -101,6 +134,17 @@ class DesignDraft {
     if (nodeId == null) return null;
     for (final s in systems) {
       if (s.nodeId == nodeId) return s;
+    }
+    return null;
+  }
+
+  /// 在指定 System 节点下按 instanceId 查找 Block 实例
+  BlockPayloadInstance? blockById(String? nodeId, String? blockId) {
+    if (nodeId == null || blockId == null) return null;
+    final sys = nodeById(nodeId);
+    if (sys == null) return null;
+    for (final b in sys.blocks) {
+      if (b.instanceId == blockId) return b;
     }
     return null;
   }
@@ -180,16 +224,28 @@ class SystemPayloadInstance {
 
 /// Block Payload 实例（specId + 参数值）
 class BlockPayloadInstance {
+  /// 实例级唯一 ID（用于边精确引用某个 Block）
+  String instanceId;
   String specId;
   Map<String, String> params;
 
-  BlockPayloadInstance({required this.specId, Map<String, String>? params})
-      : params = params ?? {};
+  BlockPayloadInstance({
+    required this.specId,
+    Map<String, String>? params,
+    String? instanceId,
+  })  : params = params ?? {},
+        instanceId = instanceId ?? 'blk_${DateTime.now().microsecondsSinceEpoch}';
 
-  Map<String, dynamic> toMap() => {'specId': specId, 'params': params};
+  Map<String, dynamic> toMap() => {
+        'instanceId': instanceId,
+        'specId': specId,
+        'params': params,
+      };
 
   factory BlockPayloadInstance.fromMap(Map<String, dynamic> map) =>
       BlockPayloadInstance(
+        instanceId: map['instanceId'] as String? ??
+            'blk_${DateTime.now().microsecondsSinceEpoch}',
         specId: map['specId'] as String? ?? '',
         params: ((map['params'] as Map?) ?? const {})
             .map((k, v) => MapEntry('$k', '$v')),
@@ -213,10 +269,23 @@ extension DesignEdgeKindLabel on DesignEdgeKind {
 }
 
 /// 设计稿中的一条有向边
+///
+/// 起点必须是某个 System 节点下的 Block Payload 实例（[fromNodeId] + [fromBlockId]）；
+/// 终点可以是 System 节点本身（[toBlockId] 为 null）或某个 Block Payload 实例。
 class DesignEdge {
   final String id;
+
+  /// 起点所在 System 节点 ID
   final String fromNodeId;
+
+  /// 起点 Block 实例 ID（必填）
+  final String fromBlockId;
+
+  /// 终点所在 System 节点 ID
   final String toNodeId;
+
+  /// 终点 Block 实例 ID；为 null 表示终点是 System 节点本身
+  final String? toBlockId;
 
   /// 边上的说明文案（可为空，默认取 kind 的语义）
   String label;
@@ -226,7 +295,9 @@ class DesignEdge {
   DesignEdge({
     required this.id,
     required this.fromNodeId,
+    required this.fromBlockId,
     required this.toNodeId,
+    this.toBlockId,
     this.label = '',
     this.kind = DesignEdgeKind.navigate,
   });
@@ -234,7 +305,9 @@ class DesignEdge {
   Map<String, dynamic> toMap() => {
         'id': id,
         'fromNodeId': fromNodeId,
+        'fromBlockId': fromBlockId,
         'toNodeId': toNodeId,
+        'toBlockId': toBlockId,
         'label': label,
         'kind': kind.name,
       };
@@ -242,7 +315,9 @@ class DesignEdge {
   factory DesignEdge.fromMap(Map<String, dynamic> map) => DesignEdge(
         id: map['id'] as String? ?? '',
         fromNodeId: map['fromNodeId'] as String? ?? '',
+        fromBlockId: map['fromBlockId'] as String? ?? '',
         toNodeId: map['toNodeId'] as String? ?? '',
+        toBlockId: map['toBlockId'] as String?,
         label: map['label'] as String? ?? '',
         kind: DesignEdgeKind.values.firstWhere(
           (k) => k.name == map['kind'],
