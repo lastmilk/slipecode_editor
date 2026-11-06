@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>SLIPE · 口袋里的云端 IDE</title>
+  <meta name="description" content="SLIPE 是一款移动端 Flutter 代码编辑器：语法高亮、AI 编程助手、GitHub / Gitee 云端构建与项目云同步，让你随时随地完成从编码到出包的完整流程。" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%234F7CFF'/%3E%3Cpath d='M18 22l10 10-10 10M32 44h14' stroke='%23fff' stroke-width='5' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=JetBrains+Mono:ital,wght@0,400;0,500;1,400&family=Noto+Sans+SC:wght@300;400;500;700;900&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="grain" aria-hidden="true"></div>
+  <div class="cursor-glow" id="cursor-glow" aria-hidden="true"></div>
+
+  <!-- ══════════ NAV ══════════ -->
+  <header class="nav" id="nav">
+    <div class="nav-inner">
+      <a class="brand" href="#top">
+        <svg class="brand-mark" viewBox="0 0 64 64" aria-hidden="true">
+          <rect width="64" height="64" rx="14" fill="#4F7CFF"/>
+          <path d="M18 22l10 10-10 10M32 44h14" stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+        </svg>
+        <span class="brand-name">SLIPE</span>
+        <span class="brand-tag mono">v1.0</span>
+      </a>
+      <nav class="nav-links">
+        <a href="#features"><span class="mono nav-num">01</span>功能</a>
+        <a href="#workflow"><span class="mono nav-num">02</span>工作流</a>
+        <a href="#film"><span class="mono nav-num">03</span>影片</a>
+        <a href="#download"><span class="mono nav-num">04</span>下载</a>
+      </nav>
+      <a class="btn btn-primary btn-sm nav-cta" href="#download">立即下载</a>
+    </div>
+  </header>
+
+  <main id="top">
+    <!-- ══════════ HERO ══════════ -->
+    <section class="hero">
+      <div class="hero-bg" aria-hidden="true">
+        <div class="hero-grid"></div>
+        <div class="hero-glow hero-glow-a"></div>
+        <div class="hero-glow hero-glow-b"></div>
+      </div>
+      <div class="container hero-inner">
+        <div class="hero-copy">
+          <p class="kicker mono reveal"><span class="kicker-dot"></span>// POCKET-SIZED CLOUD IDE</p>
+          <h1 class="hero-title">
+            <span class="reveal d1">把 <em>IDE</em></span>
+            <span class="reveal d2">装进口袋<span class="accent">。</span></span>
+          </h1>
+          <p class="hero-desc reveal d3">
+            SLIPE 是一款为移动时代打造的 Flutter 代码编辑器——语法高亮、AI 编程助手、
+            GitHub / Gitee 云端构建与项目云同步。从写下第一行代码到打出安装包，
+            全部在手机上完成。
+          </p>
+          <div class="hero-actions reveal d4">
+            <a class="btn btn-primary" href="#download">
+              <svg viewBox="0 0 24 24" class="icon"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 21h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              免费下载
+            </a>
+            <a class="btn btn-ghost" href="#film">
+              <svg viewBox="0 0 24 24" class="icon"><path d="M8 5.5v13l11-6.5-11-6.5z" fill="currentColor"/></svg>
+              观看影片
+            </a>
+          </div>
+          <dl class="hero-stats reveal d5">
+            <div><dt class="mono">6+</dt><dd>全平台支持</dd></div>
+            <div><dt class="mono">100<span class="accent">+</span></dt><dd>每日签到积分</dd></div>
+            <div><dt class="mono">0<span class="accent">依赖</span></dt><dd>本地零环境构建</dd></div>
+          </dl>
+        </div>
+        <div class="hero-visual reveal d3">
+          <figure class="phone-card" id="phone-card">
+            <img src="assets/hero-phone.jpg" alt="SLIPE 手机上的代码编辑器界面" />
+            <figcaption class="mono phone-caption">main.dart — editing</figcaption>
+            <div class="phone-chip mono chip-a">build #128 ✓</div>
+            <div class="phone-chip mono chip-b">AI · 3 fixes</div>
+          </figure>
+        </div>
+      </div>
+      <div class="ticker" aria-hidden="true">
+        <div class="ticker-track mono">
+          <span>FLUTTER EDITOR</span><i>◆</i><span>CLOUD BUILD</span><i>◆</i><span>AI ASSISTANT</span><i>◆</i><span>GITHUB / GITEE</span><i>◆</i><span>TERMINAL</span><i>◆</i><span>SYNTAX HIGHLIGHT</span><i>◆</i>
+          <span>FLUTTER EDITOR</span><i>◆</i><span>CLOUD BUILD</span><i>◆</i><span>AI ASSISTANT</span><i>◆</i><span>GITHUB / GITEE</span><i>◆</i><span>TERMINAL</span><i>◆</i><span>SYNTAX HIGHLIGHT</span><i>◆</i>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════ FEATURES ══════════ -->
+    <section id="features" class="section">
+      <div class="container">
+        <header class="sec-head reveal">
+          <p class="mono sec-num">01 / FEATURES</p>
+          <h2 class="sec-title">一部手机，<br />就是整条流水线<span class="accent">。</span></h2>
+        </header>
+
+        <div class="feat-grid">
+          <article class="feat-card feat-lg reveal">
+            <div class="feat-media">
+              <img src="assets/feature-ai.jpg" alt="AI 编程助手对话与代码修复" loading="lazy" />
+            </div>
+            <div class="feat-body">
+              <p class="mono feat-tag">AI PAIR-PROGRAMMER</p>
+              <h3>AI 编程助手，随叫随到</h3>
+              <p>内置 LLM 对话，读得懂你的项目上下文。报错贴进去，修复方案直接落到代码里；每日签到送积分，内置模型免配置即用。</p>
+              <ul class="feat-list mono">
+                <li>→ 代码解释 / 重构 / 查错</li>
+                <li>→ Markdown 渲染对话记录云同步</li>
+                <li>→ 积分抵扣，模型可自由切换</li>
+              </ul>
+            </div>
+          </article>
+
+          <article class="feat-card reveal">
+            <div class="feat-media">
+              <img src="assets/feature-cloud.jpg" alt="云端构建：代码上传到云端打包" loading="lazy" />
+            </div>
+            <div class="feat-body">
+              <p class="mono feat-tag">CLOUD BUILD</p>
+              <h3>云端构建，出包不求人</h3>
+              <p>代码推送至 GitHub / Gitee，云端流水线自动完成 Flutter 构建。手机不打折，性能全在云上。</p>
+            </div>
+          </article>
+
+          <article class="feat-card reveal">
+            <div class="feat-media">
+              <img src="assets/feature-git.jpg" alt="Git 仓库与云端安全同步" loading="lazy" />
+            </div>
+            <div class="feat-body">
+              <p class="mono feat-tag">GIT SYNC</p>
+              <h3>仓库同步，无缝衔接</h3>
+              <p>GitHub PKCE 与 Gitee OAuth 安全授权，克隆、提交、推送一气呵成。换台设备，项目原样等你。</p>
+            </div>
+          </article>
+        </div>
+
+        <ul class="spec-grid reveal">
+          <li><span class="mono spec-key">EDITOR</span>语法高亮 · 代码补全 · 多标签编辑</li>
+          <li><span class="mono spec-key">TERMINAL</span>内置终端 · 音量键快捷键映射</li>
+          <li><span class="mono spec-key">TEMPLATES</span>App / Package / Plugin 模板一键创建</li>
+          <li><span class="mono spec-key">SYNC</span>项目 · 对话 · 壁纸 多设备云同步</li>
+          <li><span class="mono spec-key">SECURITY</span>生物认证解锁 · 安全存储凭据</li>
+          <li><span class="mono spec-key">NETWORK</span>Wi-Fi / 任意网络同步策略可选</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ══════════ WORKFLOW ══════════ -->
+    <section id="workflow" class="section section-alt">
+      <div class="container wf-inner">
+        <header class="sec-head reveal">
+          <p class="mono sec-num">02 / WORKFLOW</p>
+          <h2 class="sec-title">从灵感<br />到安装包，四步<span class="accent">。</span></h2>
+        </header>
+        <ol class="wf-steps">
+          <li class="reveal"><span class="mono wf-num">01</span><h3>创建项目</h3><p>内置模板秒级 scaffold，不依赖本机 Flutter 环境。</p></li>
+          <li class="reveal"><span class="mono wf-num">02</span><h3>编写代码</h3><p>高亮、补全、AI 辅助，移动端也有桌面级体验。</p></li>
+          <li class="reveal"><span class="mono wf-num">03</span><h3>推送仓库</h3><p>一键提交到 GitHub / Gitee，版本历史清晰可见。</p></li>
+          <li class="reveal"><span class="mono wf-num">04</span><h3>云端出包</h3><p>流水线自动构建，完成后通知直达手机。</p></li>
+        </ol>
+        <div class="terminal reveal" aria-hidden="true">
+          <div class="terminal-bar">
+            <span class="t-dot"></span><span class="t-dot"></span><span class="t-dot"></span>
+            <span class="mono terminal-title">slipe — cloud build</span>
+          </div>
+          <pre class="terminal-body mono" id="terminal-log"></pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════ FILM ══════════ -->
+    <section id="film" class="section">
+      <div class="container">
+        <header class="sec-head reveal">
+          <p class="mono sec-num">03 / FILM</p>
+          <h2 class="sec-title">看见 SLIPE<span class="accent">。</span></h2>
+        </header>
+        <div class="film-frame reveal">
+          <div class="film-bar">
+            <span class="t-dot"></span><span class="t-dot"></span><span class="t-dot"></span>
+            <span class="mono film-title">slipe — promo.mp4</span>
+          </div>
+          <video src="assets/promo.mp4" poster="assets/hero-phone.jpg" autoplay muted loop playsinline></video>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════ DOWNLOAD ══════════ -->
+    <section id="download" class="section section-alt">
+      <div class="container">
+        <header class="sec-head reveal">
+          <p class="mono sec-num">04 / DOWNLOAD</p>
+          <h2 class="sec-title">现在就把 IDE<br />装进口袋<span class="accent">。</span></h2>
+        </header>
+        <div class="dl-grid">
+          <a class="dl-card reveal" href="#" data-soon="false">
+            <svg viewBox="0 0 24 24" class="dl-icon"><path d="M7 9V7a5 5 0 0 1 10 0v2M5 9h14v8a3 3 0 0 1-3 3H8a3 3 0 0 1-3-3V9z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M9 13h.01M15 13h.01" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><path d="M4 12v3M20 12v3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+            <div><h3>Android</h3><p class="mono">APK · 推荐</p></div>
+            <span class="dl-arrow">→</span>
+          </a>
+          <a class="dl-card reveal" href="#" data-soon="true">
+            <svg viewBox="0 0 24 24" class="dl-icon"><path d="M12 6.5c1.2-1.6 3-2 4.2-1.2.4 2.4-.8 4.7-2.4 6.2-1.5 1.4-3.3 2-4.3 3.4-.9 1.2-1.3 2.9-.8 4.6-1.9.4-3.7-.8-4.6-2.6C2.9 14.6 3 11 4.6 8.9 6.2 6.9 9 5.6 12 6.5z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M14.5 3.5c.6.8.7 1.9.3 2.8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+            <div><h3>iOS</h3><p class="mono">TestFlight · 筹备中</p></div>
+            <span class="dl-badge mono">SOON</span>
+          </a>
+          <a class="dl-card reveal" href="#" data-soon="true">
+            <svg viewBox="0 0 24 24" class="dl-icon"><rect x="3" y="4" width="18" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M9 20h6M12 16v4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+            <div><h3>桌面端</h3><p class="mono">macOS · Windows · Linux</p></div>
+            <span class="dl-badge mono">SOON</span>
+          </a>
+        </div>
+        <p class="dl-note mono reveal">* 注册即送积分，每日签到 +100，内置 LLM 开箱即用。</p>
+      </div>
+    </section>
+  </main>
+
+  <!-- ══════════ FOOTER ══════════ -->
+  <footer class="footer">
+    <div class="container footer-inner">
+      <div class="footer-brand">
+        <svg class="brand-mark" viewBox="0 0 64 64" aria-hidden="true">
+          <rect width="64" height="64" rx="14" fill="#4F7CFF"/>
+          <path d="M18 22l10 10-10 10M32 44h14" stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+        </svg>
+        <div>
+          <p class="footer-name">SLIPE</p>
+          <p class="mono footer-slogan">code anywhere, ship everywhere.</p>
+        </div>
+      </div>
+      <nav class="footer-links">
+        <a href="#features">功能</a>
+        <a href="#workflow">工作流</a>
+        <a href="#film">影片</a>
+        <a href="#download">下载</a>
+      </nav>
+    </div>
+    <p class="mono footer-copy">© 2026 SLIPE · slipe.cn — pocket-sized cloud IDE</p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
