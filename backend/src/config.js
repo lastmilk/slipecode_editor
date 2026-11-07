@@ -112,8 +112,8 @@ export const GITHUB = {
   clientId: env.GITHUB_CLIENT_ID || '',
   clientSecret: env.GITHUB_CLIENT_SECRET || '',
   redirectUri:
-    env.GITHUB_REDIRECT_URI || 'https://api.slipe.cn/api/oauth/github/callback',
-  deepLink: env.GITHUB_DEEP_LINK || 'slipe://oauth/callback',
+    env.GITHUB_REDIRECT_URI || 'https://api.lineregre.com/api/oauth/github/callback',
+  deepLink: env.GITHUB_DEEP_LINK || 'slipe://gitoauth2',
   oauthBase: env.GITHUB_OAUTH_BASE || 'https://github.com/login/oauth',
 };
 

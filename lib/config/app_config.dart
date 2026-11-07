@@ -31,7 +31,7 @@ class AppConfig {
   /// 授权回调地址（GitHub OAuth App 里登记的 URL，通常是后端中转地址）
   static String get oauthRedirectUri => _env(
         'GITHUB_OAUTH_REDIRECT_URI',
-        'https://api.slipe.cn/api/oauth/github/callback',
+        'https://api.lineregre.com/api/oauth/github/callback',
       );
 
   /// App 自身监听的深链，后端换到 token 后 302 到这里

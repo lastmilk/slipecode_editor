@@ -130,7 +130,7 @@ function firstHeaderValue(value) {
  *
  * GitHub 换取 token 时要求 redirect_uri 与授权时使用的回调地址完全一致。
  * 服务器环境变量里可能配的是旧域名（如 ser1996.niav.cn），
- * 与 App 实际使用的 api.slipe.cn 不一致就会报
+ * 与 App 实际使用的 api.lineregre.com 不一致就会报
  * `The redirect_uri MUST match the registered callback URL`。
  */
 function resolveCallbackRedirectUri(req) {
@@ -141,7 +141,7 @@ function resolveCallbackRedirectUri(req) {
   ).toLowerCase();
 
   let host = firstHeaderValue(req.headers['x-forwarded-host']) || firstHeaderValue(req.headers.host);
-  // Nginx 反代常带默认端口（api.slipe.cn:443），需去掉才能与登记的回调一致
+  // Nginx 反代常带默认端口（api.lineregre.com:443），需去掉才能与登记的回调一致
   if (proto === 'https' && host.endsWith(':443')) host = host.slice(0, -4);
   if (proto === 'http' && host.endsWith(':80')) host = host.slice(0, -3);
 

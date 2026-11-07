@@ -10,8 +10,8 @@
 //   routes/      —— auth / me / projects / chat / oauth / llm / admin
 //
 // 域名约定：
-//   api.slipe.cn        → 全部 /api/* 接口
-//   workadmin.slipe.cn  → Element Plus 管理页面（/）
+//   api.lineregre.com        → 全部 /api/* 接口
+//   workadmin.lineregre.com  → Element Plus 管理页面（/）
 //   （本地开发可用 /admin 直接访问管理页面）
 //
 // 启动：node src/server.js
@@ -377,8 +377,8 @@ const server = createServer(async (req, res) => {
 await loadDb();
 server.listen(PORT, () => {
   console.log(`SLIPE backend listening on http://localhost:${PORT}`);
-  console.log('  API      : https://api.slipe.cn');
-  console.log('  WorkAdmin: https://workadmin.slipe.cn');
+  console.log('  API      : https://api.lineregre.com');
+  console.log('  WorkAdmin: https://workadmin.lineregre.com');
   if (!process.env.JWT_SECRET) {
     console.warn('[WARN] 未设置 JWT_SECRET，当前使用开发默认值，生产环境必须设置');
   }

@@ -20,6 +20,9 @@ const double _kPinRadius = 6.0;
 /// System 输入引脚在节点内的纵向中心（header 中心）
 const double _kSystemInputPinY = 22.0;
 
+/// 引脚触控半径（移动端需要比视觉更大的可点区域）
+const double _kPinTapRadius = 14.0;
+
 /// 节点卡片高度（用于画布尺寸与引脚计算）
 double nodeCardHeight(SystemPayloadInstance sys) {
   return _kBlockAreaTop + sys.blocks.length * _kBlockRowHeight + 12.0;
@@ -34,8 +37,11 @@ double _blockRowCenterY(int blockIndex) =>
 /// - 画布支持双指缩放（0.5x ~ 2.5x）与单指平移；
 /// - System 节点可拖动定位；
 /// - 每个 Block 有输入（左）/ 输出（右）引脚，System 节点有输入引脚；
-/// - 从 Block 输出引脚拖到 System / Block 输入引脚即可创建有向边
-///   （起点必须是 Block，终点可以是 System 或 Block）；
+/// - 连线支持两种方式：
+///   1. 点选（移动端友好）：点击起点 Block 输出引脚（自动高亮），
+///      再点击目标 System / Block 的输入引脚完成连接；
+///   2. 拖拽：从 Block 输出引脚拖到 System / Block 输入引脚；
+///   （起点必须是 Block，终点可以是 System 或 Block）
 /// - 底部为可收起的抽屉式 System 调色板，拖拽放入画布。
 class PayloadGraphEditor extends StatefulWidget {
   final DesignDraft draft;
@@ -69,26 +75,34 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
   /// 拖线期间最后的全局指针位置（onPanEnd 无位置信息，需缓存）
   Offset? _lastGlobalPos;
 
+  /// 点选连线的起点 {nodeId, blockId}（移动端友好交互）
+  Map<String, String>? _wireSource;
+
+  bool _isSource(String nodeId, String blockId) =>
+      _wireSource != null &&
+      _wireSource!['nodeId'] == nodeId &&
+      _wireSource!['blockId'] == blockId;
+
   void _mutate(VoidCallback fn) {
     setState(fn);
     widget.onChanged();
   }
 
   double get _canvasWidth => math.max(
-        900.0,
-        draft.systems.fold<double>(
-          0.0,
-          (value, sys) => math.max(value, sys.x + _kNodeWidth + 120),
-        ),
-      );
+    900.0,
+    draft.systems.fold<double>(
+      0.0,
+      (value, sys) => math.max(value, sys.x + _kNodeWidth + 120),
+    ),
+  );
 
   double get _canvasHeight => math.max(
-        620.0,
-        draft.systems.fold<double>(
-          0.0,
-          (value, sys) => math.max(value, sys.y + nodeCardHeight(sys) + 80),
-        ),
-      );
+    620.0,
+    draft.systems.fold<double>(
+      0.0,
+      (value, sys) => math.max(value, sys.y + nodeCardHeight(sys) + 80),
+    ),
+  );
 
   // -------------------------------------------------------------------------
   // 坐标换算：全局坐标 → 画布（scene）坐标
@@ -118,9 +132,9 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
   // -------------------------------------------------------------------------
 
   void _selectRoot(String specId) => _mutate(() {
-        draft.root.specId = specId;
-        draft.root.params = {};
-      });
+    draft.root.specId = specId;
+    draft.root.params = {};
+  });
 
   void _addSystemAt(String specId, Offset scenePos) {
     _mutate(() {
@@ -142,12 +156,15 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
         (e) => e.fromNodeId == instance.nodeId || e.toNodeId == instance.nodeId,
       );
     });
+    // 清理指向已删除节点的点选起点
+    if (_wireSource?['nodeId'] == instance.nodeId) {
+      setState(() => _wireSource = null);
+    }
   }
 
   void _addBlock(SystemPayloadInstance instance, String blockId) {
     if (instance.blocks.any((b) => b.specId == blockId)) return;
-    _mutate(
-        () => instance.blocks.add(BlockPayloadInstance(specId: blockId)));
+    _mutate(() => instance.blocks.add(BlockPayloadInstance(specId: blockId)));
   }
 
   void _removeBlock(SystemPayloadInstance instance, int index) {
@@ -155,10 +172,20 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
     _mutate(() {
       instance.blocks.removeAt(index);
       // 删除 Block 时清理引用它的边
-      draft.edges.removeWhere((e) =>
-          (e.fromNodeId == instance.nodeId && e.fromBlockId == removed.instanceId) ||
-          (e.toNodeId == instance.nodeId && e.toBlockId == removed.instanceId));
+      draft.edges.removeWhere(
+        (e) =>
+            (e.fromNodeId == instance.nodeId &&
+                e.fromBlockId == removed.instanceId) ||
+            (e.toNodeId == instance.nodeId &&
+                e.toBlockId == removed.instanceId),
+      );
     });
+    // 清理指向已删除 Block 的点选起点
+    if (_wireSource != null &&
+        _wireSource!['nodeId'] == instance.nodeId &&
+        _wireSource!['blockId'] == removed.instanceId) {
+      setState(() => _wireSource = null);
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -181,8 +208,9 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
   void _endDragWire() {
     final from = _dragFrom;
     if (from == null) return;
-    final scenePos =
-        _lastGlobalPos != null ? _globalToScene(_lastGlobalPos!) : null;
+    final scenePos = _lastGlobalPos != null
+        ? _globalToScene(_lastGlobalPos!)
+        : null;
     if (scenePos == null) {
       setState(() {
         _dragFrom = null;
@@ -235,6 +263,50 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
       toNodeId: hitNodeId,
       toBlockId: hitBlockId,
     );
+  }
+
+  // -------------------------------------------------------------------------
+  // 点选连线（移动端友好：点起点 → 高亮 → 点终点）
+  // -------------------------------------------------------------------------
+
+  /// 点选/取消起点（Block 输出引脚）
+  void _toggleWireSource(String nodeId, String blockId) {
+    final wasSelected = _isSource(nodeId, blockId);
+    setState(() {
+      _wireSource = wasSelected ? null : {'nodeId': nodeId, 'blockId': blockId};
+    });
+    if (!wasSelected) {
+      _toast(
+        '已选中起点「${_nodeName(nodeId)} · ${_blockName(nodeId, blockId)}」，'
+        '再点击目标端或模块的输入引脚完成连接',
+      );
+    }
+  }
+
+  /// 点选终点（[toBlockId] 为 null 表示 System 输入引脚）
+  void _tapInputPin(String nodeId, String? blockId) {
+    final from = _wireSource;
+    if (from == null) {
+      _toast('请先点击起点模块右侧的输出引脚');
+      return;
+    }
+    if (nodeId == from['nodeId'] && blockId == from['blockId']) {
+      _toast('不能连接到自身');
+      return;
+    }
+    setState(() => _wireSource = null);
+    _connect(
+      fromNodeId: from['nodeId']!,
+      fromBlockId: from['blockId']!,
+      toNodeId: nodeId,
+      toBlockId: blockId,
+    );
+  }
+
+  /// 点击画布空白处取消点选起点
+  void _cancelWireSource() {
+    if (_wireSource == null) return;
+    setState(() => _wireSource = null);
   }
 
   void _connect({
@@ -320,11 +392,13 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
         children: [
           Icon(rootSpec.icon, size: 18, color: Colors.blueAccent),
           const SizedBox(width: 8),
-          Text('Root',
-              style: TextStyle(
-                fontSize: 11,
-                color: isDark ? Colors.white54 : Colors.black45,
-              )),
+          Text(
+            'Root',
+            style: TextStyle(
+              fontSize: 11,
+              color: isDark ? Colors.white54 : Colors.black45,
+            ),
+          ),
           const SizedBox(width: 8),
           Expanded(
             child: DropdownButtonHideUnderline(
@@ -371,7 +445,7 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
       child: Row(
         children: [
           const Text(
-            '从模块右侧引脚拖到目标端 / 模块左侧引脚建立连接',
+            '点击模块右侧引脚选中起点，再点击目标端 / 模块左侧引脚完成连接',
             style: TextStyle(fontSize: 11, color: Colors.orange),
           ),
           const Spacer(),
@@ -430,37 +504,42 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
             maxScale: 2.5,
             constrained: false,
             boundaryMargin: const EdgeInsets.all(200),
-            child: SizedBox(
-              width: _canvasWidth,
-              height: _canvasHeight,
-              child: Stack(
-                children: [
-                  Positioned.fill(
-                    child: CustomPaint(
-                      painter: _EdgePainter(
-                        draft: draft,
-                        isDark: isDark,
-                        dragFrom: _dragFrom,
-                        dragPointer: _dragPointer,
-                      ),
-                    ),
-                  ),
-                  if (draft.systems.isEmpty)
-                    Positioned(
-                      left: 24,
-                      top: 24,
-                      child: Text(
-                        '画布是空的：从底部抽屉拖动「端」到这里，\n'
-                        '再为端添加模块，从模块右侧引脚拖线建立跳转关系。',
-                        style: TextStyle(
-                          fontSize: 12,
-                          height: 1.6,
-                          color: isDark ? Colors.white38 : Colors.black45,
+            // 点击画布空白处取消已选中的连线起点
+            child: GestureDetector(
+              behavior: HitTestBehavior.translucent,
+              onTap: _cancelWireSource,
+              child: SizedBox(
+                width: _canvasWidth,
+                height: _canvasHeight,
+                child: Stack(
+                  children: [
+                    Positioned.fill(
+                      child: CustomPaint(
+                        painter: _EdgePainter(
+                          draft: draft,
+                          isDark: isDark,
+                          dragFrom: _dragFrom,
+                          dragPointer: _dragPointer,
                         ),
                       ),
                     ),
-                  for (final sys in draft.systems) _buildNode(sys, isDark),
-                ],
+                    if (draft.systems.isEmpty)
+                      Positioned(
+                        left: 24,
+                        top: 24,
+                        child: Text(
+                          '画布是空的：从底部抽屉拖动「端」到这里，\n'
+                          '再为端添加模块，点击模块右侧引脚即可开始连线。',
+                          style: TextStyle(
+                            fontSize: 12,
+                            height: 1.6,
+                            color: isDark ? Colors.white38 : Colors.black45,
+                          ),
+                        ),
+                      ),
+                    for (final sys in draft.systems) _buildNode(sys, isDark),
+                  ],
+                ),
               ),
             ),
           );
@@ -475,6 +554,8 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
         ? sys.params['folder']!
         : spec.defaultFolder;
     final library = sys.params['library'] ?? spec.defaultLibrary;
+    // 该节点包含已选中的连线起点时高亮边框
+    final hasWireSource = _wireSource?['nodeId'] == sys.nodeId;
 
     return Positioned(
       left: sys.x,
@@ -498,9 +579,12 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
             color: isDark ? const Color(0xFF2D2D30) : Colors.white,
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
-              color: isDark
+              color: hasWireSource
+                  ? Colors.orange
+                  : isDark
                   ? const Color(0xFF3C3C3C)
                   : const Color(0xFFE0E4E8),
+              width: hasWireSource ? 2 : 1,
             ),
             boxShadow: [
               BoxShadow(
@@ -540,7 +624,9 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
                             visualDensity: VisualDensity.compact,
                             padding: EdgeInsets.zero,
                             constraints: const BoxConstraints(
-                                minWidth: 26, minHeight: 26),
+                              minWidth: 26,
+                              minHeight: 26,
+                            ),
                             tooltip: '参数',
                             icon: const Icon(Icons.tune, size: 15),
                             onPressed: () => PayloadParamsSheet.show(
@@ -555,7 +641,9 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
                             visualDensity: VisualDensity.compact,
                             padding: EdgeInsets.zero,
                             constraints: const BoxConstraints(
-                                minWidth: 26, minHeight: 26),
+                              minWidth: 26,
+                              minHeight: 26,
+                            ),
                             tooltip: '移除该端',
                             icon: const Icon(Icons.close, size: 15),
                             onPressed: () => _removeSystem(sys),
@@ -590,7 +678,9 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
                       borderRadius: BorderRadius.circular(8),
                       child: Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 4),
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
                         decoration: BoxDecoration(
                           borderRadius: BorderRadius.circular(8),
                           border: Border.all(
@@ -602,9 +692,13 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
                           children: [
                             Icon(Icons.add, size: 13, color: Colors.orange),
                             SizedBox(width: 2),
-                            Text('模块',
-                                style: TextStyle(
-                                    fontSize: 10, color: Colors.orange)),
+                            Text(
+                              '模块',
+                              style: TextStyle(
+                                fontSize: 10,
+                                color: Colors.orange,
+                              ),
+                            ),
                           ],
                         ),
                       ),
@@ -614,9 +708,9 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
               ),
               // System 输入引脚（左侧，header 中心）
               Positioned(
-                left: -_kPinRadius,
-                top: _kSystemInputPinY - _kPinRadius,
-                child: _inputPin(isDark),
+                left: -_kPinTapRadius,
+                top: _kSystemInputPinY - _kPinTapRadius,
+                child: _inputPin(isDark, nodeId: sys.nodeId),
               ),
             ],
           ),
@@ -650,20 +744,25 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
               ),
               onDeleted: () => _removeBlock(sys, index),
               deleteIcon: const Icon(Icons.close, size: 12),
-              backgroundColor:
-                  isDark ? const Color(0xFF3A3A3D) : const Color(0xFFFFF4E5),
+              backgroundColor: isDark
+                  ? const Color(0xFF3A3A3D)
+                  : const Color(0xFFFFF4E5),
             ),
           ),
           // Block 输入引脚（左）
           Positioned(
-            left: -_kPinRadius,
-            top: _kBlockRowHeight / 2 - _kPinRadius,
-            child: _inputPin(isDark),
+            left: -_kPinTapRadius,
+            top: _kBlockRowHeight / 2 - _kPinTapRadius,
+            child: _inputPin(
+              isDark,
+              nodeId: sys.nodeId,
+              blockId: instance.instanceId,
+            ),
           ),
           // Block 输出引脚（右）
           Positioned(
-            left: _kNodeWidth - _kPinRadius,
-            top: _kBlockRowHeight / 2 - _kPinRadius,
+            left: _kNodeWidth - _kPinTapRadius,
+            top: _kBlockRowHeight / 2 - _kPinTapRadius,
             child: _outputPin(sys, index),
           ),
         ],
@@ -671,35 +770,77 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
     );
   }
 
-  Widget _inputPin(bool isDark) {
-    return Container(
-      width: _kPinRadius * 2,
-      height: _kPinRadius * 2,
-      decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF6AB7FF) : Colors.blueAccent,
-        shape: BoxShape.circle,
-        border: Border.all(color: Colors.white, width: 1.5),
+  /// 输入引脚（终点）。点选模式下点击它完成连接；
+  /// 已选中起点时放大发光提示「可以点击我」。
+  Widget _inputPin(bool isDark, {String? nodeId, String? blockId}) {
+    final awaitingTarget = _wireSource != null;
+    final pinSize = _kPinRadius * 2 * (awaitingTarget ? 1.4 : 1.0);
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: nodeId == null ? null : () => _tapInputPin(nodeId, blockId),
+      child: SizedBox(
+        width: _kPinTapRadius * 2,
+        height: _kPinTapRadius * 2,
+        child: Center(
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            width: pinSize,
+            height: pinSize,
+            decoration: BoxDecoration(
+              color: isDark ? const Color(0xFF6AB7FF) : Colors.blueAccent,
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.white, width: 1.5),
+              boxShadow: awaitingTarget
+                  ? [
+                      BoxShadow(
+                        color: Colors.blueAccent.withValues(alpha: 0.7),
+                        blurRadius: 8,
+                        spreadRadius: 1,
+                      ),
+                    ]
+                  : null,
+            ),
+          ),
+        ),
       ),
     );
   }
 
+  /// 输出引脚（起点）。点击选中/取消起点，也支持原拖拽连线。
   Widget _outputPin(SystemPayloadInstance sys, int blockIndex) {
+    final blockId = sys.blocks[blockIndex].instanceId;
+    final selected = _isSource(sys.nodeId, blockId);
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onPanStart: (_) => _startDragWire(sys.nodeId, sys.blocks[blockIndex].instanceId),
+      onTap: () => _toggleWireSource(sys.nodeId, blockId),
+      onPanStart: (_) => _startDragWire(sys.nodeId, blockId),
       onPanUpdate: (d) => _updateDragWire(d.globalPosition),
       onPanEnd: (_) => _endDragWire(),
       child: MouseRegion(
-        cursor: SystemMouseCursors.grab,
-        child: Container(
-          width: _kPinRadius * 2,
-          height: _kPinRadius * 2,
-          decoration: const BoxDecoration(
-            color: Colors.orange,
-            shape: BoxShape.circle,
-            boxShadow: [
-              BoxShadow(color: Colors.orangeAccent, blurRadius: 4),
-            ],
+        cursor: SystemMouseCursors.click,
+        child: SizedBox(
+          width: _kPinTapRadius * 2,
+          height: _kPinTapRadius * 2,
+          child: Center(
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 150),
+              width: _kPinRadius * 2 * (selected ? 1.5 : 1.0),
+              height: _kPinRadius * 2 * (selected ? 1.5 : 1.0),
+              decoration: BoxDecoration(
+                color: selected ? Colors.deepOrange : Colors.orange,
+                shape: BoxShape.circle,
+                border: selected
+                    ? Border.all(color: Colors.white, width: 2)
+                    : null,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.orangeAccent,
+                    blurRadius: selected ? 12 : 4,
+                    spreadRadius: selected ? 2 : 0,
+                  ),
+                ],
+              ),
+            ),
           ),
         ),
       ),
@@ -737,9 +878,10 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
                     size: 18,
                   ),
                   const SizedBox(width: 6),
-                  const Text('端（System Payload）',
-                      style: TextStyle(
-                          fontSize: 12, fontWeight: FontWeight.w600)),
+                  const Text(
+                    '端（System Payload）',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                  ),
                   const Spacer(),
                   Text(
                     '拖入画布添加',
@@ -756,8 +898,10 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
             SizedBox(
               height: 64,
               child: ListView.separated(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
                 scrollDirection: Axis.horizontal,
                 itemCount: SystemPayloadRegistry.all.length + 1,
                 separatorBuilder: (_, _) => const SizedBox(width: 8),
@@ -776,13 +920,14 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
                         ),
                       ),
                       childWhenDragging: Opacity(
-                          opacity: 0.35,
-                          child: _paletteChip(
-                            icon: Icons.add,
-                            label: '自定义端',
-                            color: Colors.blueAccent,
-                            isDark: isDark,
-                          )),
+                        opacity: 0.35,
+                        child: _paletteChip(
+                          icon: Icons.add,
+                          label: '自定义端',
+                          color: Colors.blueAccent,
+                          isDark: isDark,
+                        ),
+                      ),
                       child: _paletteChip(
                         icon: Icons.add,
                         label: '自定义端',
@@ -806,13 +951,14 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
                       ),
                     ),
                     childWhenDragging: Opacity(
-                        opacity: 0.35,
-                        child: _paletteChip(
-                          icon: spec.icon,
-                          label: spec.name,
-                          color: Colors.teal,
-                          isDark: isDark,
-                        )),
+                      opacity: 0.35,
+                      child: _paletteChip(
+                        icon: spec.icon,
+                        label: spec.name,
+                        color: Colors.teal,
+                        isDark: isDark,
+                      ),
+                    ),
                     child: Tooltip(
                       message: '拖入画布添加「${spec.name}」',
                       child: _paletteChip(
@@ -930,8 +1076,10 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
                       ListTile(
                         leading: Icon(block.icon, color: Colors.orange),
                         title: Text(block.name),
-                        subtitle: Text(block.description,
-                            style: const TextStyle(fontSize: 11)),
+                        subtitle: Text(
+                          block.description,
+                          style: const TextStyle(fontSize: 11),
+                        ),
                         onTap: () {
                           Navigator.pop(sheetContext);
                           _addBlock(sys, block.id);
@@ -960,7 +1108,7 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
               if (draft.edges.isEmpty) {
                 return Center(
                   child: Text(
-                    '还没有关系。从模块右侧引脚拖到目标端 / 模块左侧引脚即可创建。',
+                    '还没有关系。点击模块右侧引脚选中起点，再点击目标端 / 模块左侧引脚即可创建。',
                     style: TextStyle(
                       fontSize: 12,
                       color: isDark ? Colors.white38 : Colors.black45,
@@ -972,8 +1120,10 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
                 children: [
                   const Padding(
                     padding: EdgeInsets.fromLTRB(16, 0, 16, 6),
-                    child: Text('页面跳转与依赖关系',
-                        style: TextStyle(fontWeight: FontWeight.w600)),
+                    child: Text(
+                      '页面跳转与依赖关系',
+                      style: TextStyle(fontWeight: FontWeight.w600),
+                    ),
                   ),
                   for (final edge in draft.edges)
                     ListTile(
@@ -1064,8 +1214,9 @@ class _EdgePainter extends CustomPainter {
       final to = draft.nodeById(edge.toNodeId);
       if (from == null || to == null) continue;
 
-      final fromBlockIdx = from.blocks
-          .indexWhere((b) => b.instanceId == edge.fromBlockId);
+      final fromBlockIdx = from.blocks.indexWhere(
+        (b) => b.instanceId == edge.fromBlockId,
+      );
       if (fromBlockIdx < 0) continue;
       final start = Offset(
         from.x + _kNodeWidth,
@@ -1076,8 +1227,9 @@ class _EdgePainter extends CustomPainter {
       if (edge.toBlockId == null) {
         end = Offset(to.x, to.y + _kSystemInputPinY);
       } else {
-        final toBlockIdx = to.blocks
-            .indexWhere((b) => b.instanceId == edge.toBlockId);
+        final toBlockIdx = to.blocks.indexWhere(
+          (b) => b.instanceId == edge.toBlockId,
+        );
         if (toBlockIdx < 0) continue;
         end = Offset(to.x, to.y + _blockRowCenterY(toBlockIdx));
       }
@@ -1089,15 +1241,22 @@ class _EdgePainter extends CustomPainter {
     if (dragFrom != null && dragPointer != null) {
       final from = draft.nodeById(dragFrom!['nodeId']);
       if (from != null) {
-        final idx = from.blocks
-            .indexWhere((b) => b.instanceId == dragFrom!['blockId']);
+        final idx = from.blocks.indexWhere(
+          (b) => b.instanceId == dragFrom!['blockId'],
+        );
         if (idx >= 0) {
           final start = Offset(
             from.x + _kNodeWidth,
             from.y + _blockRowCenterY(idx),
           );
-          _drawEdge(canvas, start, dragPointer!, DesignEdgeKind.navigate,
-              null, true);
+          _drawEdge(
+            canvas,
+            start,
+            dragPointer!,
+            DesignEdgeKind.navigate,
+            null,
+            true,
+          );
         }
       }
     }
@@ -1115,7 +1274,9 @@ class _EdgePainter extends CustomPainter {
         ? Colors.blueAccent
         : Colors.orange;
     final paint = Paint()
-      ..color = isLiveWire ? color.withValues(alpha: 0.85) : color.withValues(alpha: 0.8)
+      ..color = isLiveWire
+          ? color.withValues(alpha: 0.85)
+          : color.withValues(alpha: 0.8)
       ..strokeWidth = isLiveWire ? 2.0 : 1.6
       ..style = PaintingStyle.stroke;
 
@@ -1162,10 +1323,8 @@ class _EdgePainter extends CustomPainter {
           color: isDark ? Colors.white70 : Colors.black87,
         ),
       );
-      final tp = TextPainter(
-        text: span,
-        textDirection: TextDirection.ltr,
-      )..layout();
+      final tp = TextPainter(text: span, textDirection: TextDirection.ltr)
+        ..layout();
       // 曲线中点近似
       final mid = Offset(
         0.125 * start.dx + 0.375 * c1.dx + 0.375 * c2.dx + 0.125 * end.dx,
@@ -1182,13 +1341,9 @@ class _EdgePainter extends CustomPainter {
       canvas.drawRRect(
         rect,
         Paint()
-          ..color =
-              isDark ? const Color(0xFF252527) : const Color(0xFFF8FAFC),
+          ..color = isDark ? const Color(0xFF252527) : const Color(0xFFF8FAFC),
       );
-      tp.paint(
-        canvas,
-        mid - Offset(tp.width / 2, tp.height / 2),
-      );
+      tp.paint(canvas, mid - Offset(tp.width / 2, tp.height / 2));
     }
   }
 

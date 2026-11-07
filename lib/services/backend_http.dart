@@ -7,7 +7,7 @@ import '../config/app_config.dart';
 
 /// 账号后端专用 HTTP 客户端
 ///
-/// 背景：线上后端 `api.slipe.cn` 的域名解析指向共享服务器，
+/// 背景：线上后端 `api.lineregre.com` 的域名解析指向共享服务器，
 /// 该服务器当前下发的是另一站点（如 `ser1996.niav.cn`）的证书，
 /// 因此 Dart 会抛出 `CERTIFICATE_VERIFY_FAILED: Hostname mismatch`。
 ///

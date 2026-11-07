@@ -10,7 +10,7 @@
 - Gitee OAuth token 代理（Gitee 不支持 PKCE，必须由后端持有 `client_secret`）
 - 积分体系：每日签到 +100 积分，积分用于抵扣内置 LLM 调用
 - LLM 内置代理：OpenAI 兼容 `/chat/completions`，按 token 计积分
-- 管理端：`workadmin.slipe.cn` Element Plus 管理页 + `/api/admin/*` 接口（凭据配置、统计、用户详情二次验证、积分调整、LLM 模型管理）
+- 管理端：`workadmin.lineregre.com` Element Plus 管理页 + `/api/admin/*` 接口（凭据配置、统计、用户详情二次验证、积分调整、LLM 模型管理）
 
 ## 运行
 
@@ -27,8 +27,8 @@ npm start
 
 | 域名 | 用途 |
 | --- | --- |
-| `api.slipe.cn` | 全部 `/api/*` 接口（App 的 `ACCOUNT_BACKEND_BASE_URL`） |
-| `workadmin.slipe.cn` | Element Plus 管理页面（根路径即管理端） |
+| `api.lineregre.com` | 全部 `/api/*` 接口（App 的 `ACCOUNT_BACKEND_BASE_URL`） |
+| `workadmin.lineregre.com` | Element Plus 管理页面（根路径即管理端） |
 
 本地开发可直接访问 `http://localhost:8787/admin`。交由 Nginx/宝塔做 HTTPS 与反向代理时，两个站点都反代到同一个 `127.0.0.1:8787` 即可。
 
@@ -49,8 +49,8 @@ npm start
 | `GITEE_REDIRECT_URI` | 否 | Gitee 回调地址，默认 `slipe://oauth/gitee/callback` |
 | `GITHUB_CLIENT_ID` | GitHub 必填 | GitHub OAuth App 的 Client ID |
 | `GITHUB_CLIENT_SECRET` | GitHub 必填 | GitHub OAuth App 的 Client Secret |
-| `GITHUB_REDIRECT_URI` | 否 | GitHub OAuth App 里登记的 callback URL，默认 `https://api.slipe.cn/api/oauth/github/callback` |
-| `GITHUB_DEEP_LINK` | 否 | 换 token 后 302 回 App 的深链，默认 `slipe://oauth/callback` |
+| `GITHUB_REDIRECT_URI` | 否 | GitHub OAuth App 里登记的 callback URL，默认 `https://api.lineregre.com/api/oauth/github/callback` |
+| `GITHUB_DEEP_LINK` | 否 | 换 token 后 302 回 App 的深链，默认 `slipe://gitoauth2` |
 | `ADMIN_PASSWORD` | 否 | 管理员初始密码，默认 `slipe-admin-2026`；登录后请在管理页修改（修改后写入数据库哈希，环境变量不再生效） |
 | `ADMIN_TOKEN` | 否 | 可选静态管理令牌（兼容脚本调用），一般无需设置 |
 | `GEETEST_CAPTCHA_ID` | 生产必填 | 极验 GT4 Captcha ID（登录 / 注册二次校验） |
@@ -99,7 +99,7 @@ node src/server.js
 | `PUT` | `/api/settings` | 需登录，`{settings}` 保存偏好设置 |
 | `POST` | `/api/oauth/gitee/token` | `{code, redirect_uri}` → Gitee token（供 App 使用） |
 | `POST` | `/api/oauth/gitee/refresh` | `{refresh_token}` → 续期 Gitee token |
-| `GET` | `/api/oauth/github/callback` | GitHub 回调中转：后端用 client_secret 换 token，再 302 回 `slipe://oauth/callback?ticket=...` |
+| `GET` | `/api/oauth/github/callback` | GitHub 回调中转：后端用 client_secret 换 token，再 302 回 `slipe://gitoauth2?ticket=...` |
 | `POST` | `/api/oauth/github/token` | `{ticket}`（推荐）或 `{code, redirect_uri}` → GitHub token（供 App 使用） |
 | `POST` | `/api/checkin` | 需登录，每日签到 +100 积分；当天重复签到返回「今日已签到」（`checkedInToday: true`） |
 | `GET` | `/api/credits` | 需登录，返回 `{credits, checkedInToday}` |
@@ -116,7 +116,7 @@ node src/server.js
 
 ### 管理端
 
-浏览器访问 `https://workadmin.slipe.cn`（或本地 `/admin`），输入管理员密码登录（默认 `slipe-admin-2026`，可通过 `ADMIN_PASSWORD` 修改初始值）。登录后签发 8 小时有效的管理员 JWT。
+浏览器访问 `https://workadmin.lineregre.com`（或本地 `/admin`），输入管理员密码登录（默认 `slipe-admin-2026`，可通过 `ADMIN_PASSWORD` 修改初始值）。登录后签发 8 小时有效的管理员 JWT。
 
 管理页提供：
 
@@ -144,8 +144,8 @@ node src/server.js
 
 ## 部署注意
 
-- 生产环境请使用 HTTPS，并把 App 的 `ACCOUNT_BACKEND_BASE_URL` 指向 `https://api.slipe.cn`。
-- `api.slipe.cn` 与 `workadmin.slipe.cn` 都反代到同一进程（默认 `127.0.0.1:8787`）；管理页按 Host 头返回。
+- 生产环境请使用 HTTPS，并把 App 的 `ACCOUNT_BACKEND_BASE_URL` 指向 `https://api.lineregre.com`。
+- `api.lineregre.com` 与 `workadmin.lineregre.com` 都反代到同一进程（默认 `127.0.0.1:8787`）；管理页按 Host 头返回。
 - 反向代理需放行 `POST/PUT/DELETE`、`Authorization` 与 `X-Admin-Password` 头。
 - 首次上线后请立即在管理页修改默认管理员密码，并配置极验 / 阿里云凭据。
 - 当前实现是单实例 JSON 存储，适合个人/小团队；多实例部署需换成数据库与共享会话密钥。
