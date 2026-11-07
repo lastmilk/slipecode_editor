@@ -22,8 +22,7 @@ class CreateProjectScreen extends StatefulWidget {
 class _CreateProjectScreenState extends State<CreateProjectScreen> {
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
-  final _pathController = TextEditingController();
-  final _orgController = TextEditingController(text: 'com.example');
+  final _orgController = TextEditingController();
   final _repoNameController = TextEditingController();
 
   String _template = 'app';
@@ -34,8 +33,11 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
 
   ProjectPayload get _payload => PayloadRegistry.byId(_payloadId);
 
-  /// 是否创建远程仓库并推送模板文件
-  bool _createRepo = true;
+  /// 是否创建远程仓库并推送模板文件（用户显式选择后的值）
+  bool _createRepo = false;
+
+  /// 用户是否手动切换过建仓开关；未切换时跟随偏好设置默认值
+  bool _repoSwitchTouched = false;
 
   /// 目标 Git 平台（默认 GitHub）
   GitHost _host = GitHost.github;
@@ -43,28 +45,43 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
   /// 用户是否手动改过仓库名；未改过时跟随项目名
   bool _repoNameEdited = false;
 
+  /// 用户是否手动改过 Org；未改过时跟随项目名（com.example.<项目名>）
+  bool _orgEdited = false;
+
   final List<String> _outputLines = [];
+
+  /// 是否有任一 Git 平台已登录（决定远程仓库功能是否可用）
+  bool get _anyHostSignedIn {
+    final github = context.read<GitHubProvider>();
+    final gitee = context.read<GiteeProvider>();
+    return github.isSignedIn || gitee.isSignedIn;
+  }
+
+  /// 实际生效的建仓开关：
+  /// 未登录任何平台时强制关闭；未手动切换时跟随偏好设置
+  bool get _effectiveCreateRepo {
+    if (!_anyHostSignedIn) return false;
+    if (_repoSwitchTouched) return _createRepo;
+    return context.read<SettingsProvider>().settings.createRepoOnCreate;
+  }
 
   @override
   void initState() {
     super.initState();
-    // 项目默认保存在应用私有目录（无需任何存储权限）。
-    // 新版本已移除「共享存储」功能：如需使用已有项目，
-    // 请从首页通过系统文件选择器导入。
     final settings = context.read<SettingsProvider>().settings;
-    getApplicationDocumentsDirectory().then((dir) {
-      if (!mounted || _pathController.text.isNotEmpty) return;
-      setState(() => _pathController.text = p.join(dir.path, 'Projects'));
-    });
 
     // 偏好设置中的默认 Git 平台与建仓开关
     _host = settings.defaultGitHost;
     _createRepo = settings.createRepoOnCreate;
 
-    // 仓库名默认等于项目名
+    // 仓库名 / Org 默认跟随项目名
     _nameController.addListener(() {
+      final name = _nameController.text.trim();
       if (!_repoNameEdited) {
-        _repoNameController.text = _nameController.text.trim();
+        _repoNameController.text = name;
+      }
+      if (!_orgEdited) {
+        _orgController.text = name.isEmpty ? 'com.example' : 'com.example.$name';
       }
     });
   }
@@ -72,16 +89,20 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
   @override
   void dispose() {
     _nameController.dispose();
-    _pathController.dispose();
     _orgController.dispose();
     _repoNameController.dispose();
     super.dispose();
   }
 
-  String get _targetPath {
-    final dir = _pathController.text.trim();
-    final name = _nameController.text.trim();
-    return p.join(dir, name);
+  /// 项目固定存放在应用私有目录下（用户无需也无法更改）
+  Future<String> _resolveTargetPath() async {
+    final docs = await getApplicationDocumentsDirectory();
+    return p.join(docs.path, 'Projects', _nameController.text.trim());
+  }
+
+  String get _org {
+    final org = _orgController.text.trim();
+    return org.isEmpty ? 'com.example' : org;
   }
 
   Future<void> _createProject() async {
@@ -94,13 +115,14 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
 
     final createService = ProjectCreateService();
     final projectProvider = context.read<ProjectProvider>();
+    final targetPath = await _resolveTargetPath();
 
     try {
       await for (final line in createService.createProject(
         payload: _payload,
         projectName: _nameController.text.trim(),
-        targetPath: _targetPath,
-        org: _orgController.text.trim(),
+        targetPath: targetPath,
+        org: _org,
         template: _template,
       )) {
         setState(() {
@@ -109,11 +131,11 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
       }
 
       // 打开刚创建的项目
-      await projectProvider.openProject(_targetPath, kind: 'classic');
+      await projectProvider.openProject(targetPath, kind: 'classic');
       if (!mounted) return;
 
-      // 按所选平台创建仓库并推送模板文件
-      if (_createRepo) {
+      // 按所选平台创建仓库并推送模板文件（需已登录对应平台）
+      if (_effectiveCreateRepo) {
         final repoName = _repoNameController.text.trim().isEmpty
             ? _nameController.text.trim()
             : _repoNameController.text.trim();
@@ -122,7 +144,7 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
             final github = context.read<GitHubProvider>();
             if (github.isSignedIn) {
               await github.createRepoWithInitialPush(
-                _targetPath,
+                targetPath,
                 repoName,
                 onLog: (line) {
                   if (mounted) setState(() => _outputLines.add(line));
@@ -139,7 +161,7 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
             final gitee = context.read<GiteeProvider>();
             if (gitee.isSignedIn) {
               await gitee.createRepoWithInitialPush(
-                _targetPath,
+                targetPath,
                 repoName,
                 onLog: (line) {
                   if (mounted) setState(() => _outputLines.add(line));
@@ -243,50 +265,32 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
             ),
             const SizedBox(height: 16),
 
-            // 项目路径
-            TextFormField(
-              controller: _pathController,
-              enabled: !_isCreating,
-              decoration: InputDecoration(
-                labelText: t('create.location'),
-                hintText: '/storage/emulated/0/Projects',
-                border: const OutlineInputBorder(),
-                prefixIcon: const Icon(Icons.folder),
-                suffixIcon: IconButton(
-                  icon: const Icon(Icons.folder_open),
-                  onPressed: _isCreating
-                      ? null
-                      : () async {
-                          // 简单提示
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(t('create.manualPathHint')),
-                            ),
-                          );
-                        },
-                ),
-              ),
-              textInputAction: TextInputAction.next,
-              validator: (value) {
-                if (value == null || value.isEmpty) {
-                  return t('create.locationRequired');
-                }
-                return null;
-              },
-            ),
-            const SizedBox(height: 16),
-
-            // Org
+            // Org（包名前缀）：默认跟随项目名 com.example.<项目名>，
+            // 用户手动修改后不再跟随
             TextFormField(
               controller: _orgController,
               enabled: !_isCreating,
+              onChanged: (value) {
+                final name = _nameController.text.trim();
+                final auto = name.isEmpty ? 'com.example' : 'com.example.$name';
+                _orgEdited = value.trim().isNotEmpty && value.trim() != auto;
+              },
               decoration: InputDecoration(
                 labelText: t('create.orgLabel'),
-                hintText: 'com.example',
+                hintText: 'com.example.<项目名>',
                 border: const OutlineInputBorder(),
                 prefixIcon: const Icon(Icons.domain),
               ),
               textInputAction: TextInputAction.next,
+              validator: (value) {
+                final org = (value ?? '').trim();
+                if (org.isEmpty) return null; // 空时回退 com.example
+                if (!RegExp(r'^[a-zA-Z][a-zA-Z0-9_]*(\.[a-zA-Z][a-zA-Z0-9_]*)+$')
+                    .hasMatch(org)) {
+                  return '包名格式不正确（如 com.example.app）';
+                }
+                return null;
+              },
             ),
             const SizedBox(height: 20),
 
@@ -433,7 +437,40 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
     );
   }
 
+  /// 未登录任何 Git 平台时，试图开启建仓功能 → 弹窗提醒配置账号
+  void _showRepoLoginRequiredDialog() {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('需要配置 Git 平台账号'),
+        content: const Text(
+          '创建远程仓库需要登录 GitHub 或 Gitee 账号。\n'
+          '请先在首页底部或账号页完成登录，再开启此功能。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: Text(t('common.confirm')),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildRepoOptions(bool isDark) {
+    final github = context.watch<GitHubProvider>();
+    final gitee = context.watch<GiteeProvider>();
+    final signedInHosts = <GitHost>[
+      if (github.isSignedIn) GitHost.github,
+      if (gitee.isSignedIn) GitHost.gitee,
+    ];
+    final anySignedIn = signedInHosts.isNotEmpty;
+    // 当前选中平台未登录时，自动切到已登录平台
+    if (anySignedIn && !signedInHosts.contains(_host)) {
+      _host = signedInHosts.first;
+    }
+    final effectiveCreateRepo = anySignedIn && _effectiveCreateRepo;
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       decoration: BoxDecoration(
@@ -448,13 +485,26 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
             title: Text(t('create.repoSwitchTitle')),
-            subtitle: Text(t('create.repoSwitchSubtitle')),
-            value: _createRepo,
+            subtitle: Text(
+              anySignedIn
+                  ? t('create.repoSwitchSubtitle')
+                  : '未登录 GitHub / Gitee，默认关闭',
+            ),
+            value: effectiveCreateRepo,
             onChanged: _isCreating
                 ? null
-                : (value) => setState(() => _createRepo = value),
+                : (value) {
+                    if (value && !anySignedIn) {
+                      _showRepoLoginRequiredDialog();
+                      return;
+                    }
+                    setState(() {
+                      _repoSwitchTouched = true;
+                      _createRepo = value;
+                    });
+                  },
           ),
-          if (_createRepo) ...[
+          if (effectiveCreateRepo) ...[
             const Divider(height: 8),
             Padding(
               padding: const EdgeInsets.only(top: 8),
@@ -462,7 +512,8 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                 children: [
                   Text(t('create.platform'), style: const TextStyle(fontSize: 13)),
                   const SizedBox(width: 12),
-                  ...GitHost.values.map(
+                  // 仅展示已登录的平台选项
+                  ...signedInHosts.map(
                     (host) => Padding(
                       padding: const EdgeInsets.only(right: 8),
                       child: ChoiceChip(

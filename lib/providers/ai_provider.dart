@@ -109,6 +109,9 @@ class AiProvider extends ChangeNotifier {
   /// 是否已配置 LLM
   bool get isConfigured => _settings.settings.isLlmConfigured;
 
+  /// Agent 可调用的 MCP 工具（用于 AGC 模式「MCP/Skills」面板展示）
+  List<McpTool> get mcpTools => List.unmodifiable(_toolbox.tools);
+
   AppSettings get _s => _settings.settings;
 
   void _safeNotify() {

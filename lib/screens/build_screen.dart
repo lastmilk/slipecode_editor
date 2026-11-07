@@ -22,6 +22,33 @@ import '../widgets/log_console.dart';
 class BuildScreen extends StatefulWidget {
   const BuildScreen({super.key});
 
+  /// 构建功能入口守卫：GitHub / Gitee 均未登录时弹窗提醒并返回 false。
+  ///
+  /// 进入构建页面前调用；已登录任一平台则直接放行。
+  static Future<bool> ensureSignedIn(BuildContext context) async {
+    final github = context.read<GitHubProvider>();
+    final gitee = context.read<GiteeProvider>();
+    if (github.isSignedIn || gitee.isSignedIn) return true;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('需要配置 Git 平台账号'),
+        content: const Text(
+          '云端构建依赖 GitHub Actions / Gitee Go，'
+          '需要登录 GitHub 或 Gitee 账号才能使用。\n'
+          '请先在首页底部或账号页完成登录。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('知道了'),
+          ),
+        ],
+      ),
+    );
+    return false;
+  }
+
   @override
   State<BuildScreen> createState() => _BuildScreenState();
 }
@@ -303,9 +330,20 @@ class _BuildScreenState extends State<BuildScreen> {
     bool canBuild,
     String? projectPath,
   ) {
+    // 仅展示已登录的平台选项（未登录的平台隐藏）
+    final signedInHosts = <GitHost>[
+      if (github.isSignedIn) GitHost.github,
+      if (gitee.isSignedIn) GitHost.gitee,
+    ];
+    if (link == null &&
+        signedInHosts.isNotEmpty &&
+        !signedInHosts.contains(_host)) {
+      _host = signedInHosts.first;
+    }
+
     return [
       // 平台选择（已关联仓库时锁定）
-      if (link == null) ...[
+      if (link == null && signedInHosts.isNotEmpty) ...[
         Text(
           t('build.platform'),
           style: TextStyle(
@@ -317,7 +355,7 @@ class _BuildScreenState extends State<BuildScreen> {
         const SizedBox(height: 8),
         Wrap(
           spacing: 8,
-          children: GitHost.values.map((host) {
+          children: signedInHosts.map((host) {
             return ChoiceChip(
               label: Text(host.label),
               selected: _host == host,

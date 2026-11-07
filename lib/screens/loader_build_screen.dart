@@ -71,8 +71,10 @@ class _LoaderBuildScreenState extends State<LoaderBuildScreen> {
     }
   }
 
-  /// 环节二：进入传统的实际构建（云端出包）
-  void _startRealBuild() {
+  /// 环节二：进入传统的实际构建（云端出包，需先登录 Git 平台）
+  Future<void> _startRealBuild() async {
+    final ok = await BuildScreen.ensureSignedIn(context);
+    if (!ok || !mounted) return;
     Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => const BuildScreen()),
     );

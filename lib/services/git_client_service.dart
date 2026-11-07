@@ -1,9 +1,10 @@
 import 'dart:io';
 
-import 'package:flutter/services.dart';
-import 'package:git2dart/git2dart.dart';
+import 'package:archive/archive.dart';
+import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as p;
 
+import '../config/app_config.dart';
 import '../models/sync_repo.dart';
 import 'git_host.dart';
 
@@ -21,129 +22,149 @@ class GitSyncOutcome {
 
   final String path;
 
-  /// true = 新建克隆，false = 已有仓库增量拉取
+  /// true = 新建下载，false = 已有仓库覆盖更新
   final bool cloned;
 }
 
-/// 本地 Git 仓库拉取。
+/// 本地仓库拉取。
 ///
-/// - Android：通过平台通道调用 JGit（org.eclipse.jgit）执行 clone / pull；
-/// - iOS：使用 git2dart（libgit2）执行 clone / fetch + hard reset；
-/// - 桌面端同样走 libgit2，方便调试。
+/// 不再依赖 JGit（Android 上稳定性差、会导致闪退）与 libgit2（原生库），
+/// 统一改为通过平台 REST API 下载仓库 Zip 归档并解压：
+/// - GitHub：GET /repos/{owner}/{repo}/zipball/{branch}
+/// - Gitee：GET /repos/{owner}/{repo}/zipball?ref={branch}
+///
+/// 应用内的提交推送本来就全部走 REST API（不依赖本地 .git），
+/// 因此归档方式对后续「推送 / 构建」链路完全兼容。
 class GitClientService {
   GitClientService._();
 
   static final GitClientService instance = GitClientService._();
 
-  static const MethodChannel _channel = MethodChannel('slipe/git');
+  /// 归档体积可能较大，下载给足超时时间
+  static const _downloadTimeout = Duration(seconds: 180);
 
   Future<GitSyncOutcome> syncRepo(
     SyncRepo repo, {
     required String destPath,
-    required String username,
     required String token,
   }) async {
-    if (Platform.isAndroid) {
-      return _syncWithJGit(
-        repo,
-        destPath: destPath,
-        username: username,
-        token: token,
-      );
-    }
-    return _syncWithLibgit2(
-      repo,
-      destPath: destPath,
-      username: username,
-      token: token,
-    );
+    final bytes = await _downloadArchive(repo, token: token);
+    final archive = _decodeZip(bytes);
+    final existed = Directory(destPath).existsSync();
+    await _extractTo(archive, destPath, fullName: repo.fullName);
+    return GitSyncOutcome(path: destPath, cloned: !existed);
   }
 
-  Future<GitSyncOutcome> _syncWithJGit(
+  // ---------------------------------------------------------------------------
+  // 下载
+  // ---------------------------------------------------------------------------
+
+  Future<List<int>> _downloadArchive(
     SyncRepo repo, {
-    required String destPath,
-    required String username,
     required String token,
   }) async {
+    final Uri uri;
+    final Map<String, String> headers;
+    if (repo.host == GitHost.github) {
+      uri = Uri.parse(
+        '${AppConfig.apiBase}/repos/${repo.fullName}/zipball/${repo.defaultBranch}',
+      );
+      headers = {
+        'Authorization': 'Bearer $token',
+        'Accept': 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+      };
+    } else {
+      // Gitee OpenAPI v5：GET /repos/{owner}/{repo}/zipball?ref=<分支>
+      uri =
+          Uri.parse(
+            '${AppConfig.giteeApiBase}/repos/${repo.fullName}/zipball',
+          ).replace(
+            queryParameters: {'access_token': token, 'ref': repo.defaultBranch},
+          );
+      headers = const {};
+    }
+
+    final http.Response res;
     try {
-      final result = await _channel.invokeMapMethod<String, dynamic>(
-        'cloneOrPull',
-        {
-          'url': repo.cloneUrl,
-          'destPath': destPath,
-          'branch': repo.defaultBranch,
-          'username': username,
-          'token': token,
-        },
+      res = await http
+          .get(uri, headers: headers)
+          .timeout(_downloadTimeout);
+    } catch (e) {
+      throw GitSyncException('网络请求失败：$e');
+    }
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw GitSyncException(
+        '${repo.host.label} 归档下载失败（HTTP ${res.statusCode}）',
       );
-      return GitSyncOutcome(
-        path: destPath,
-        cloned: (result?['cloned'] as bool?) ?? false,
-      );
-    } on PlatformException catch (e) {
-      throw GitSyncException(e.message ?? 'Git 操作失败（${e.code}）');
-    } on MissingPluginException {
-      throw GitSyncException('当前客户端未集成 JGit，无法拉取仓库');
+    }
+    if (res.bodyBytes.isEmpty) {
+      throw GitSyncException('${repo.host.label} 返回了空的归档数据');
+    }
+    return res.bodyBytes;
+  }
+
+  // ---------------------------------------------------------------------------
+  // 解压
+  // ---------------------------------------------------------------------------
+
+  Archive _decodeZip(List<int> bytes) {
+    try {
+      return ZipDecoder().decodeBytes(bytes);
+    } catch (e) {
+      throw GitSyncException('Zip 归档解析失败：$e');
     }
   }
 
-  Future<GitSyncOutcome> _syncWithLibgit2(
-    SyncRepo repo, {
-    required String destPath,
-    required String username,
-    required String token,
+  /// 把归档内容写入 [destPath]。
+  ///
+  /// GitHub / Gitee 的仓库 Zip 顶层都有一个形如
+  /// `owner-repo-<sha>/` 的目录，解压时剥掉这一层。
+  Future<void> _extractTo(
+    Archive archive,
+    String destPath, {
+    required String fullName,
   }) async {
-    final callbacks = Callbacks(
-      credentials: UserPass(username: username, password: token),
-    );
-    final gitDir = Directory(p.join(destPath, '.git'));
-    final parent = Directory(destPath).parent;
-    if (!parent.existsSync()) parent.createSync(recursive: true);
-
-    try {
-      if (gitDir.existsSync()) {
-        final repository = Repository.open(destPath);
-        try {
-          final origin = Remote.lookup(repo: repository, name: 'origin');
-          origin.fetch(
-            refspecs: [
-              '+refs/heads/${repo.defaultBranch}:'
-                  'refs/remotes/origin/${repo.defaultBranch}',
-            ],
-            callbacks: callbacks,
-          );
-          final target = RevParse.single(
-            repo: repository,
-            spec: 'origin/${repo.defaultBranch}',
-          );
-          if (target is! Commit) {
-            throw GitSyncException('找不到远程分支 ${repo.defaultBranch}');
-          }
-          repository.reset(oid: target.oid, resetType: GitReset.hard);
-        } finally {
-          repository.free();
-        }
-        return GitSyncOutcome(path: destPath, cloned: false);
-      }
-
-      final dir = Directory(destPath);
-      if (dir.existsSync()) {
-        if (dir.listSync().isNotEmpty) {
-          throw GitSyncException('目标目录已存在且不是 Git 仓库：$destPath');
-        }
-        dir.deleteSync(recursive: true);
-      }
-      final repository = Repository.clone(
-        url: repo.cloneUrl,
-        localPath: destPath,
-        checkoutBranch: repo.defaultBranch,
-        callbacks: callbacks,
-      );
-      repository.free();
-      return GitSyncOutcome(path: destPath, cloned: true);
-    } on Git2DartError catch (e) {
-      throw GitSyncException('libgit2 拉取失败：${e.message}');
+    final dir = Directory(destPath);
+    if (await dir.exists()) {
+      // 覆盖更新：整目录替换，保证与远端完全一致（远端删掉的文件本地也删除）
+      await dir.delete(recursive: true);
     }
+    await dir.create(recursive: true);
+
+    var written = 0;
+    for (final entry in archive) {
+      if (!entry.isFile) continue;
+      final relative = _stripTopLevel(entry.name);
+      if (relative == null) continue;
+      final outFile = File(p.join(destPath, relative));
+      await outFile.parent.create(recursive: true);
+      await outFile.writeAsBytes(entry.content as List<int>, flush: true);
+      written++;
+    }
+    if (written == 0) {
+      throw GitSyncException('归档中没有任何文件');
+    }
+    // 写入同步标记：记录该目录是哪个仓库的副本，供 resolveDestPath 判断
+    await File(
+      p.join(destPath, _syncMarkerName),
+    ).writeAsString(fullName, flush: true);
+  }
+
+  static const _syncMarkerName = '.slipe_sync';
+
+  /// 剥掉 Zip 顶层目录；返回 null 表示该条目不需要写入
+  String? _stripTopLevel(String name) {
+    final normalized = name.replaceAll('\\', '/');
+    final segments = normalized
+        .split('/')
+        .where((s) => s.isNotEmpty)
+        .toList();
+    if (segments.length <= 1) return null;
+    final relative = segments.sublist(1).join('/');
+    // 防目录穿越
+    if (relative.isEmpty || relative.split('/').contains('..')) return null;
+    return relative;
   }
 
   /// 生成仓库在本地项目目录下的存放路径
@@ -151,16 +172,20 @@ class GitClientService {
   /// 同名仓库（GitHub / Gitee 可能存在同名项目）自动加平台前缀避免覆盖。
   String resolveDestPath(String projectsRoot, SyncRepo repo) {
     final direct = p.join(projectsRoot, repo.name);
-    final gitDir = Directory(p.join(direct, '.git'));
-    if (!Directory(direct).existsSync() || gitDir.existsSync()) {
+    if (!Directory(direct).existsSync()) {
       return direct;
+    }
+    // 目录已存在且正是该仓库的同步副本（有同步标记且一致）时原地更新；
+    // 否则（本地同名项目）落到带平台后缀的路径，避免误覆盖用户项目。
+    try {
+      final marker = File(p.join(direct, _syncMarkerName));
+      if (marker.existsSync() &&
+          marker.readAsStringSync().trim() == repo.fullName) {
+        return direct;
+      }
+    } catch (_) {
+      // 读取失败按冲突处理
     }
     return p.join(projectsRoot, '${repo.name}_${repo.host.id}');
   }
-
-  /// 仓库认证用户名：
-  /// GitHub 的 Personal Access Token 使用 `x-access-token`，
-  /// Gitee 官方推荐 `oauth2:<token>` 形式。
-  String authUsername(GitHost host) =>
-      host == GitHost.github ? 'x-access-token' : 'oauth2';
 }
