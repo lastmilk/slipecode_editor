@@ -122,10 +122,10 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
   // -------------------------------------------------------------------------
 
   Offset _systemInputPinPos(SystemPayloadInstance sys) =>
-      Offset(sys.x, sys.y + _kSystemInputPinY);
+      Offset(sys.x + _kPinTapRadius, sys.y + _kSystemInputPinY);
 
   Offset _blockInputPinPos(SystemPayloadInstance sys, int blockIndex) =>
-      Offset(sys.x, sys.y + _blockRowCenterY(blockIndex));
+      Offset(sys.x + _kPinTapRadius, sys.y + _blockRowCenterY(blockIndex));
 
   // -------------------------------------------------------------------------
   // 编排操作
@@ -706,9 +706,11 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
                   ),
                 ],
               ),
-              // System 输入引脚（左侧，header 中心）
+              // System 输入引脚（左侧，header 中心）。
+              // 命中盒放在节点界内（left: 0），视觉圆在 _inputPin 内左移回边缘；
+              // 放在负坐标会导致界外部分收不到点击（clipBehavior 只管绘制）。
               Positioned(
-                left: -_kPinTapRadius,
+                left: 0,
                 top: _kSystemInputPinY - _kPinTapRadius,
                 child: _inputPin(isDark, nodeId: sys.nodeId),
               ),
@@ -722,7 +724,11 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
   Widget _buildBlockRow(SystemPayloadInstance sys, int index, bool isDark) {
     final instance = sys.blocks[index];
     final spec = BlockPayloadRegistry.byId(instance.specId);
+    // 必须显式给满宽：否则在 Column(crossAxisAlignment: start) 中
+    // 行 Stack 宽度会塌缩为芯片固有宽度，右侧输出引脚落在行界外，
+    // RenderBox.hitTest 的 size.contains 检查会让它永远收不到点击。
     return SizedBox(
+      width: _kNodeWidth,
       height: _kBlockRowHeight,
       child: Stack(
         clipBehavior: Clip.none,
@@ -749,9 +755,9 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
                   : const Color(0xFFFFF4E5),
             ),
           ),
-          // Block 输入引脚（左）
+          // Block 输入引脚（左）：命中盒在行界内，视觉圆左移回边缘
           Positioned(
-            left: -_kPinTapRadius,
+            left: 0,
             top: _kBlockRowHeight / 2 - _kPinTapRadius,
             child: _inputPin(
               isDark,
@@ -759,9 +765,9 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
               blockId: instance.instanceId,
             ),
           ),
-          // Block 输出引脚（右）
+          // Block 输出引脚（右）：命中盒在行界内，视觉圆右移回边缘
           Positioned(
-            left: _kNodeWidth - _kPinTapRadius,
+            left: _kNodeWidth - _kPinTapRadius * 2,
             top: _kBlockRowHeight / 2 - _kPinTapRadius,
             child: _outputPin(sys, index),
           ),
@@ -772,6 +778,10 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
 
   /// 输入引脚（终点）。点选模式下点击它完成连接；
   /// 已选中起点时放大发光提示「可以点击我」。
+  ///
+  /// 注意：28×28 命中盒与视觉圆必须同心且完整位于节点卡片界内。
+  /// Flutter 命中测试先检查祖先 size.contains，视觉圆一旦探出卡片边缘，
+  /// 探出部分就永远点不中（clipBehavior 只管绘制），移动端会完全失效。
   Widget _inputPin(bool isDark, {String? nodeId, String? blockId}) {
     final awaitingTarget = _wireSource != null;
     final pinSize = _kPinRadius * 2 * (awaitingTarget ? 1.4 : 1.0);
@@ -807,6 +817,7 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
   }
 
   /// 输出引脚（起点）。点击选中/取消起点，也支持原拖拽连线。
+  /// 命中盒与视觉圆同心且完整位于卡片界内（原因见 _inputPin 注释）。
   Widget _outputPin(SystemPayloadInstance sys, int blockIndex) {
     final blockId = sys.blocks[blockIndex].instanceId;
     final selected = _isSource(sys.nodeId, blockId);
@@ -1219,19 +1230,22 @@ class _EdgePainter extends CustomPainter {
       );
       if (fromBlockIdx < 0) continue;
       final start = Offset(
-        from.x + _kNodeWidth,
+        from.x + _kNodeWidth - _kPinTapRadius,
         from.y + _blockRowCenterY(fromBlockIdx),
       );
 
       final Offset end;
       if (edge.toBlockId == null) {
-        end = Offset(to.x, to.y + _kSystemInputPinY);
+        end = Offset(to.x + _kPinTapRadius, to.y + _kSystemInputPinY);
       } else {
         final toBlockIdx = to.blocks.indexWhere(
           (b) => b.instanceId == edge.toBlockId,
         );
         if (toBlockIdx < 0) continue;
-        end = Offset(to.x, to.y + _blockRowCenterY(toBlockIdx));
+        end = Offset(
+          to.x + _kPinTapRadius,
+          to.y + _blockRowCenterY(toBlockIdx),
+        );
       }
 
       _drawEdge(canvas, start, end, edge.kind, edge.label, false);
@@ -1246,7 +1260,7 @@ class _EdgePainter extends CustomPainter {
         );
         if (idx >= 0) {
           final start = Offset(
-            from.x + _kNodeWidth,
+            from.x + _kNodeWidth - _kPinTapRadius,
             from.y + _blockRowCenterY(idx),
           );
           _drawEdge(
