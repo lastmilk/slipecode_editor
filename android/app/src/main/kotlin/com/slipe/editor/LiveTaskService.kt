@@ -267,7 +267,7 @@ class LiveTaskService : Service() {
     }
 
     private fun summaryNotification(): Notification {
-        val text = if (tasks.isEmpty) "任务进行中" else tasks.values.last().text
+        val text = if (tasks.isEmpty()) "任务进行中" else tasks.values.last().text
         return builder()
             .setContentTitle("SLIPE 任务进行中")
             .setContentText(text)
