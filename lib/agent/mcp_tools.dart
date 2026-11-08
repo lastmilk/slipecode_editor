@@ -102,6 +102,35 @@ class McpToolbox {
         ...?externalManager?.definitions,
       ];
 
+  /// 写操作工具（/plan 计划模式下禁用）
+  static const Set<String> writeToolNames = {
+    'write_file',
+    'replace_in_file',
+    'create_file',
+    'create_dart_class',
+    'rename_file',
+    'delete_file',
+    'run_terminal_command',
+    'run_build',
+  };
+
+  /// 判断工具是否属于写操作。
+  /// 第三方 MCP 工具无法预知副作用，计划模式下一律视为写操作禁用。
+  static bool isWriteTool(String name) =>
+      writeToolNames.contains(name) ||
+      name.startsWith(ExternalMcpManager.toolPrefix);
+
+  /// 供 LLM 使用的工具定义；[planOnly] 为 true 时只保留读取类工具
+  List<Map<String, dynamic>> definitionsFor({bool planOnly = false}) {
+    final all = definitions;
+    if (!planOnly) return all;
+    return all.where((def) {
+      final fn = def['function'];
+      final name = fn is Map ? (fn['name'] ?? '').toString() : '';
+      return !isWriteTool(name);
+    }).toList();
+  }
+
   bool get _terminalReady => terminal?.available ?? false;
 
   String? get _root => project.projectPath;

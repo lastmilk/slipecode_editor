@@ -49,6 +49,13 @@ import {
   handlePutChatHistory,
 } from './routes/chat.js';
 import {
+  handleCreateConversation,
+  handleDeleteConversation,
+  handleGetConversation,
+  handleListConversations,
+  handleUpdateConversation,
+} from './routes/conversations.js';
+import {
   handleBillingPlans,
   handleRedeemActivationCode,
   handleAdminListActivationCodes,
@@ -143,6 +150,10 @@ const ROUTES = {
   'PUT /api/chat/history': handlePutChatHistory,
   'DELETE /api/chat/history': handleDeleteChatHistory,
 
+  // AI 多会话（跨端同步）
+  'GET /api/conversations': handleListConversations,
+  'POST /api/conversations': handleCreateConversation,
+
   // 头像 / 壁纸
   'POST /api/me/avatar': handleUploadAvatar,
   'POST /api/me/wallpaper': handleUploadWallpaper,
@@ -215,6 +226,24 @@ const ROUTES = {
 
 /** 带路径参数的路由（正则捕获，handler 第三个参数为正则 match） */
 const DYNAMIC_ROUTES = [
+  {
+    method: 'GET',
+    pattern: /^\/api\/conversations\/([^/]+)$/,
+    handler: (req, res, match) =>
+      handleGetConversation(req, res, decodeURIComponent(match[1])),
+  },
+  {
+    method: 'PUT',
+    pattern: /^\/api\/conversations\/([^/]+)$/,
+    handler: (req, res, match) =>
+      handleUpdateConversation(req, res, decodeURIComponent(match[1])),
+  },
+  {
+    method: 'DELETE',
+    pattern: /^\/api\/conversations\/([^/]+)$/,
+    handler: (req, res, match) =>
+      handleDeleteConversation(req, res, decodeURIComponent(match[1])),
+  },
   {
     method: 'GET',
     pattern: /^\/api\/build\/watch\/([^/]+)\/artifact$/,

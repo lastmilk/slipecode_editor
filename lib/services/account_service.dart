@@ -306,6 +306,86 @@ class AccountService {
   }
 
   // ---------------------------------------------------------------------------
+  // AI 多会话跨端同步
+  // ---------------------------------------------------------------------------
+
+  /// 会话元信息列表（不含 messages）
+  Future<List<Map<String, dynamic>>> listConversations(String token) async {
+    _ensureConfigured();
+    final res = await _client
+        .get(_u('/api/conversations'), headers: _headers(token))
+        .timeout(const Duration(seconds: 20));
+    final data = await _decode(res, '获取会话列表失败');
+    final list = data['conversations'];
+    if (list is List) {
+      return list.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+    }
+    return const [];
+  }
+
+  /// 新建会话（可带客户端生成的 id，避免合并冲突）
+  Future<Map<String, dynamic>> createConversation(
+    String token, {
+    String? id,
+    String? title,
+  }) async {
+    _ensureConfigured();
+    final res = await _client
+        .post(
+          _u('/api/conversations'),
+          headers: _headers(token),
+          body: jsonEncode({
+            if (id != null) 'id': id,
+            if (title != null) 'title': title,
+          }),
+        )
+        .timeout(const Duration(seconds: 20));
+    final data = await _decode(res, '创建会话失败');
+    return Map<String, dynamic>.from(data['conversation'] as Map);
+  }
+
+  /// 获取完整会话（含 messages）
+  Future<Map<String, dynamic>> fetchConversation(String token, String id) async {
+    _ensureConfigured();
+    final res = await _client
+        .get(_u('/api/conversations/$id'), headers: _headers(token))
+        .timeout(const Duration(seconds: 20));
+    final data = await _decode(res, '获取会话失败');
+    return Map<String, dynamic>.from(data['conversation'] as Map);
+  }
+
+  /// 更新会话（标题 / 置顶 / 消息）
+  Future<void> updateConversation(
+    String token,
+    String id, {
+    String? title,
+    bool? pinned,
+    List<Map<String, dynamic>>? messages,
+  }) async {
+    _ensureConfigured();
+    final res = await _client
+        .put(
+          _u('/api/conversations/$id'),
+          headers: _headers(token),
+          body: jsonEncode({
+            if (title != null) 'title': title,
+            if (pinned != null) 'pinned': pinned,
+            if (messages != null) 'messages': messages,
+          }),
+        )
+        .timeout(const Duration(seconds: 30));
+    await _decode(res, '同步会话失败');
+  }
+
+  Future<void> deleteConversation(String token, String id) async {
+    _ensureConfigured();
+    final res = await _client
+        .delete(_u('/api/conversations/$id'), headers: _headers(token))
+        .timeout(const Duration(seconds: 20));
+    await _decode(res, '删除会话失败');
+  }
+
+  // ---------------------------------------------------------------------------
   // 头像 / 壁纸
   // ---------------------------------------------------------------------------
 

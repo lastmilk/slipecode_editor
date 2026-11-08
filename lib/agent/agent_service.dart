@@ -81,9 +81,18 @@ class AgentService {
     void Function(String delta)? onDelta,
     void Function(String delta)? onReasoning,
     String extraSystemPrompt = '',
+    bool planOnly = false,
     bool Function()? isCancelled,
   }) async {
-    final system = await buildSystemPrompt(extraSkill: extraSystemPrompt);
+    var system = await buildSystemPrompt(extraSkill: extraSystemPrompt);
+    if (planOnly) {
+      system += '\n# 计划模式（/plan）\n'
+          '用户现在只需要一份实施计划，不要做任何实际修改：\n'
+          '- 可以使用读取类工具（读文件、列目录、搜索代码）来了解现状；\n'
+          '- 禁止调用任何写入/修改/删除/构建/终端类工具，第三方 MCP 工具也全部禁用；\n'
+          '- 输出格式：目标 → 现状分析 → 分步实施计划（含涉及文件与改动要点）→ 风险与确认点。\n'
+          '计划要具体、可执行，等待用户确认后再进入实际执行。\n';
+    }
     final messages = <ChatMessage>[
       ChatMessage(role: ChatRole.system, content: system),
       ...history,
@@ -109,6 +118,7 @@ class AgentService {
           messages: messages,
           onDelta: onDelta,
           onReasoning: emitReasoning,
+          planOnly: planOnly,
         );
       } catch (e) {
         // 部分模型不支持 tools / 流式：首轮失败时退回普通对话
@@ -174,6 +184,22 @@ class AgentService {
         steps.add(step);
         onStep?.call(step);
 
+        // 计划模式双保险：写工具已从定义中过滤，模型仍尝试调用时直接拦截
+        if (planOnly && McpToolbox.isWriteTool(name)) {
+          step
+            ..result = '已跳过：计划模式下不执行写入类工具'
+            ..running = false;
+          onStep?.call(step);
+          messages.add(
+            ChatMessage.toolResult(
+              toolCallId: id,
+              name: name,
+              content: '已跳过：计划模式下不执行写入类工具',
+            ),
+          );
+          continue;
+        }
+
         final result = await toolbox.execute(name, args);
         // 工具结果回填到 step，供对话流显式展示
         step
@@ -217,6 +243,7 @@ class AgentService {
     required List<ChatMessage> messages,
     void Function(String delta)? onDelta,
     void Function(String delta)? onReasoning,
+    bool planOnly = false,
   }) async {
     Map<String, dynamic>? finalMessage;
     await for (final chunk in LlmService.instance.streamChatMessage(
@@ -224,7 +251,7 @@ class AgentService {
       apiKey: apiKey,
       model: model,
       messages: messages,
-      tools: toolbox.definitions,
+      tools: toolbox.definitionsFor(planOnly: planOnly),
     )) {
       if (chunk.deltaText != null) onDelta?.call(chunk.deltaText!);
       if (chunk.reasoningText != null) onReasoning?.call(chunk.reasoningText!);

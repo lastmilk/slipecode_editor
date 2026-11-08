@@ -6,13 +6,17 @@ import 'package:provider/provider.dart';
 
 import '../agent/mcp_tools.dart';
 import '../l10n/app_localizations.dart';
+import '../models/chat_segment.dart';
+import '../providers/account_provider.dart';
 import '../providers/ai_provider.dart';
 import '../providers/editor_provider.dart';
 import '../providers/project_provider.dart';
 import '../services/ai_change_journal.dart';
 import '../services/ai_extensions_service.dart';
+import '../services/conversation_service.dart';
 import '../services/llm_service.dart';
 import '../widgets/llm_model_bar.dart';
+import '../widgets/mcp_edit_dialog.dart';
 import 'settings_screen.dart';
 
 /// AGC（AI Generated Code）模式主界面
@@ -34,9 +38,13 @@ class _AgcScreenState extends State<AgcScreen> {
   final TextEditingController _inputController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
 
+  /// 输入以「/」开头时为指令匹配关键字（不含 '/'），否则为 null
+  String? _slashQuery;
+
   @override
   void initState() {
     super.initState();
+    _inputController.addListener(_onInputChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       context.read<AiProvider>().ensureCloudHistoryLoaded();
@@ -48,6 +56,25 @@ class _AgcScreenState extends State<AgcScreen> {
     _inputController.dispose();
     _scrollController.dispose();
     super.dispose();
+  }
+
+  void _onInputChanged() {
+    final text = _inputController.text;
+    final query =
+        text.startsWith('/') && !text.contains(' ') && !text.contains('\n')
+        ? text.substring(1)
+        : null;
+    if (query != _slashQuery) setState(() => _slashQuery = query);
+  }
+
+  /// 执行选中的「/」指令
+  void _runSlashCommand(String command) {
+    _inputController.clear();
+    switch (command) {
+      case '/plan':
+        context.read<AiProvider>().setPlanMode(true);
+        break;
+    }
   }
 
   void _scrollToBottom({bool animate = true}) {
@@ -69,6 +96,11 @@ class _AgcScreenState extends State<AgcScreen> {
   Future<void> _send([String? preset]) async {
     final text = (preset ?? _inputController.text).trim();
     if (text.isEmpty) return;
+    // 直接发送「/」指令时同样生效（如用户未点选面板，直接输入 /plan 回车）
+    if (text == '/plan') {
+      _runSlashCommand(text);
+      return;
+    }
     _inputController.clear();
     await context.read<AiProvider>().sendMessage(text);
     _scrollToBottom();
@@ -85,6 +117,9 @@ class _AgcScreenState extends State<AgcScreen> {
 
     final empty = ai.messages.isEmpty && !ai.isStreaming;
 
+    // 工具调用已聚合进消息的渲染分段，时间线只展示对话消息
+    final items = ai.timeline.whereType<ChatMessage>().toList();
+
     return Column(
       children: [
         // 未配置 LLM 提示（内置模型可用时不会提示）
@@ -100,9 +135,9 @@ class _AgcScreenState extends State<AgcScreen> {
               : ListView.builder(
                   controller: _scrollController,
                   padding: const EdgeInsets.fromLTRB(14, 14, 14, 8),
-                  itemCount: ai.timeline.length + (ai.isStreaming ? 1 : 0),
+                  itemCount: items.length + (ai.isStreaming ? 1 : 0),
                   itemBuilder: (context, index) {
-                    if (index >= ai.timeline.length) {
+                    if (index >= items.length) {
                       return _AgcAiMessage(
                         content: ai.streamingText.isEmpty
                             ? t('ai.thinking')
@@ -112,24 +147,27 @@ class _AgcScreenState extends State<AgcScreen> {
                         reasoning: ai.streamingReasoning.isEmpty
                             ? null
                             : ai.streamingReasoning,
+                        segments: ai.streamSegments,
                       );
                     }
-                    final item = ai.timeline[index];
-                    if (item is AgentToolStep) {
-                      return _AgcToolCard(step: item, isDark: isDark);
-                    }
-                    final msg = item as ChatMessage;
+                    final msg = items[index];
                     if (msg.role == ChatRole.user) {
                       return _AgcUserMessage(
                         content: msg.content,
                         isDark: isDark,
                       );
                     }
+                    final isLast =
+                        index == items.length - 1 && !ai.isStreaming;
                     return _AgcAiMessage(
                       content: msg.content,
                       isDark: isDark,
                       streaming: false,
                       reasoning: msg.reasoning,
+                      segments: msg.segments,
+                      showPlanAction:
+                          msg.kind == 'plan' && isLast && !ai.isThinking,
+                      onExecutePlan: () => ai.executePlan(),
                     );
                   },
                 ),
@@ -156,11 +194,22 @@ class _AgcScreenState extends State<AgcScreen> {
         // AI 改动待确认条
         const _AgcPendingBanner(),
 
+        // 计划模式提示条（/plan 指令开启）
+        if (ai.planMode) _buildPlanChip(isDark),
+
         // 模型与积分栏
         Padding(
           padding: const EdgeInsets.fromLTRB(14, 2, 14, 0),
           child: LlmModelBar(isDark: isDark),
         ),
+
+        // 「/」指令面板
+        if (_slashQuery != null && !ai.isThinking)
+          _SlashCommandPanel(
+            query: _slashQuery!,
+            isDark: isDark,
+            onSelect: _runSlashCommand,
+          ),
 
         // 输入栏
         _AgcInputBar(
@@ -169,6 +218,37 @@ class _AgcScreenState extends State<AgcScreen> {
           onSend: _send,
         ),
       ],
+    );
+  }
+
+  /// 计划模式提示条：提醒用户 AI 只会制定计划，确认后才执行
+  Widget _buildPlanChip(bool isDark) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(14, 5, 6, 5),
+      color: const Color(0xFF7C4DFF).withValues(alpha: 0.10),
+      child: Row(
+        children: [
+          const Icon(
+            Icons.format_list_numbered,
+            size: 15,
+            color: Color(0xFF7C4DFF),
+          ),
+          const SizedBox(width: 6),
+          const Expanded(
+            child: Text(
+              '计划模式：AI 会先制定实施计划，确认后再执行',
+              style: TextStyle(fontSize: 11, color: Color(0xFF7C4DFF)),
+            ),
+          ),
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            iconSize: 15,
+            onPressed: () => context.read<AiProvider>().setPlanMode(false),
+            icon: const Icon(Icons.close, color: Color(0xFF7C4DFF)),
+          ),
+        ],
+      ),
     );
   }
 
@@ -343,20 +423,35 @@ class _AgcUserMessage extends StatelessWidget {
 }
 
 /// AI 消息：全宽、无气泡边框（Trae 风格），Markdown 渲染
+///
+/// 当 [segments] 非空时按真实时间顺序分段渲染
+/// （思考过程折叠块 / 工具调用聚合卡片 / 正文穿插）。
 class _AgcAiMessage extends StatelessWidget {
   const _AgcAiMessage({
     required this.content,
     required this.isDark,
     required this.streaming,
     this.reasoning,
+    this.segments,
+    this.showPlanAction = false,
+    this.onExecutePlan,
   });
 
   final String content;
   final bool isDark;
   final bool streaming;
 
-  /// AI 思考过程（reasoning_content）
+  /// AI 思考过程（reasoning_content，无分段时的旧渲染路径）
   final String? reasoning;
+
+  /// 按时间顺序排列的渲染分段（思考 / 工具批次 / 正文）
+  final List<ChatSegment>? segments;
+
+  /// 是否为计划消息且等待用户确认执行
+  final bool showPlanAction;
+
+  /// 用户点击「执行计划」
+  final VoidCallback? onExecutePlan;
 
   @override
   Widget build(BuildContext context) {
@@ -404,21 +499,77 @@ class _AgcAiMessage extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 6),
-          if (reasoning != null && reasoning!.isNotEmpty)
-            _AgcThinkingBlock(
-              text: reasoning!,
-              isDark: isDark,
-              streaming: streaming,
+          if (segments != null && segments!.isNotEmpty)
+            ..._buildSegments()
+          else ...[
+            if (reasoning != null && reasoning!.isNotEmpty)
+              _AgcThinkingBlock(
+                text: reasoning!,
+                isDark: isDark,
+                streaming: streaming,
+              ),
+            MarkdownBody(
+              data: streaming ? '$content ▌' : content,
+              selectable: true,
+              styleSheet: _styleSheet(isDark),
+              builders: {'pre': _AgcCodeBlockBuilder(isDark)},
             ),
-          MarkdownBody(
-            data: streaming ? '$content ▌' : content,
-            selectable: true,
-            styleSheet: _styleSheet(isDark),
-            builders: {'pre': _AgcCodeBlockBuilder(isDark)},
-          ),
+          ],
+          if (showPlanAction)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF2D6CF6),
+                  visualDensity: VisualDensity.compact,
+                ),
+                onPressed: onExecutePlan,
+                icon: const Icon(Icons.play_arrow, size: 16),
+                label: const Text(
+                  '执行计划',
+                  style: TextStyle(fontSize: 12),
+                ),
+              ),
+            ),
         ],
       ),
     );
+  }
+
+  /// 按时间顺序渲染分段：思考折叠块 / 工具批次卡片 / 正文 Markdown
+  List<Widget> _buildSegments() {
+    final list = segments!;
+    final widgets = <Widget>[];
+    for (var i = 0; i < list.length; i++) {
+      final seg = list[i];
+      final isLast = i == list.length - 1;
+      switch (seg.kind) {
+        case ChatSegmentKind.reasoning:
+          widgets.add(
+            _AgcThinkingBlock(
+              text: seg.text,
+              isDark: isDark,
+              streaming: streaming && isLast,
+            ),
+          );
+        case ChatSegmentKind.tools:
+          widgets.add(
+            _AgcToolBatchCard(steps: seg.steps, isDark: isDark),
+          );
+        case ChatSegmentKind.text:
+          final text = seg.text;
+          if (text.isEmpty && !(streaming && isLast)) break;
+          widgets.add(
+            MarkdownBody(
+              data: streaming && isLast ? '$text ▌' : text,
+              selectable: true,
+              styleSheet: _styleSheet(isDark),
+              builders: {'pre': _AgcCodeBlockBuilder(isDark)},
+            ),
+          );
+      }
+    }
+    return widgets;
   }
 
   static MarkdownStyleSheet _styleSheet(bool isDark) {
@@ -493,42 +644,35 @@ class _AgcThinkingBlockState extends State<_AgcThinkingBlock> {
   @override
   Widget build(BuildContext context) {
     final isDark = widget.isDark;
-    final borderColor = isDark ? Colors.white12 : const Color(0xFFE4E7EC);
-    final hintColor = isDark ? Colors.white54 : Colors.black54;
+    final hintColor = isDark ? Colors.white54 : Colors.black45;
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      decoration: BoxDecoration(
-        color: isDark
-            ? Colors.white.withValues(alpha: 0.04)
-            : Colors.black.withValues(alpha: 0.03),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: borderColor),
-      ),
+    // Trae 风格：无边框的「思考过程 ›」低调行，展开后显示思考正文
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           InkWell(
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(6),
             onTap: () => setState(() => _expanded = !_expanded),
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              padding: const EdgeInsets.symmetric(vertical: 4),
               child: Row(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.psychology_outlined, size: 13, color: hintColor),
+                  Icon(Icons.psychology_outlined, size: 14, color: hintColor),
                   const SizedBox(width: 5),
                   Text(
                     widget.streaming ? '思考中…' : '思考过程',
                     style: TextStyle(
-                      fontSize: 11,
+                      fontSize: 12.5,
                       fontWeight: FontWeight.w500,
                       color: hintColor,
                     ),
                   ),
-                  const Spacer(),
                   Icon(
-                    _expanded ? Icons.expand_less : Icons.expand_more,
-                    size: 15,
+                    _expanded ? Icons.expand_more : Icons.chevron_right,
+                    size: 16,
                     color: hintColor,
                   ),
                 ],
@@ -537,13 +681,13 @@ class _AgcThinkingBlockState extends State<_AgcThinkingBlock> {
           ),
           if (_expanded)
             Padding(
-              padding: const EdgeInsets.fromLTRB(10, 0, 10, 8),
+              padding: const EdgeInsets.only(left: 19, top: 2, bottom: 4),
               child: Text(
                 widget.text,
                 style: TextStyle(
-                  fontSize: 11.5,
-                  height: 1.5,
-                  color: isDark ? Colors.white60 : Colors.black54,
+                  fontSize: 12,
+                  height: 1.6,
+                  color: isDark ? Colors.white54 : Colors.black54,
                 ),
               ),
             ),
@@ -754,10 +898,183 @@ class _AgcToolCardState extends State<_AgcToolCard> {
   }
 }
 
+/// 工具调用聚合卡片（Trae 风格）
+///
+/// 连续多个工具调用聚合为一个可折叠卡片，
+/// 标题按工具类型归纳：执行 N 条命令 / 读取 N 个文件 / 搜索 N 次 / 调用 N 个工具。
+class _AgcToolBatchCard extends StatefulWidget {
+  const _AgcToolBatchCard({required this.steps, required this.isDark});
+
+  final List<AgentToolStep> steps;
+  final bool isDark;
+
+  @override
+  State<_AgcToolBatchCard> createState() => _AgcToolBatchCardState();
+}
+
+class _AgcToolBatchCardState extends State<_AgcToolBatchCard> {
+  bool _expanded = false;
+
+  /// 按步骤中的工具名归纳批次标题
+  String get _label {
+    final steps = widget.steps;
+    final n = steps.length;
+    bool all(bool Function(String) test) =>
+        steps.every((s) => test(s.tool.toLowerCase()));
+    if (all((t) => t.contains('terminal') || t.contains('shell'))) {
+      return '执行 $n 条命令';
+    }
+    if (all((t) => t.contains('read') || t.contains('get'))) {
+      return '读取 $n 个文件';
+    }
+    if (all((t) =>
+        t.contains('search') || t.contains('list') || t.contains('grep'))) {
+      return '搜索 $n 次';
+    }
+    if (all((t) =>
+        t.contains('write') ||
+        t.contains('create') ||
+        t.contains('replace') ||
+        t.contains('edit'))) {
+      return '修改 $n 个文件';
+    }
+    return '调用 $n 个工具';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = widget.isDark;
+    final running = widget.steps.any((s) => s.running);
+    final hintColor = isDark ? Colors.white54 : Colors.black45;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          InkWell(
+            borderRadius: BorderRadius.circular(6),
+            onTap: () => setState(() => _expanded = !_expanded),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (running)
+                    const SizedBox(
+                      width: 12,
+                      height: 12,
+                      child: CircularProgressIndicator(strokeWidth: 1.5),
+                    )
+                  else
+                    Icon(Icons.build_outlined, size: 14, color: hintColor),
+                  const SizedBox(width: 5),
+                  Text(
+                    _label,
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w500,
+                      color: hintColor,
+                    ),
+                  ),
+                  Icon(
+                    _expanded ? Icons.expand_more : Icons.chevron_right,
+                    size: 16,
+                    color: hintColor,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (_expanded)
+            Padding(
+              padding: const EdgeInsets.only(left: 19, top: 2, bottom: 4),
+              child: Column(
+                children: widget.steps
+                    .map((s) => _AgcToolCard(step: s, isDark: isDark))
+                    .toList(),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 「/」指令面板：输入 '/' 时弹出，按前缀过滤，点选执行
+class _SlashCommandPanel extends StatelessWidget {
+  const _SlashCommandPanel({
+    required this.query,
+    required this.isDark,
+    required this.onSelect,
+  });
+
+  /// 指令匹配关键字（不含 '/'）
+  final String query;
+  final bool isDark;
+  final ValueChanged<String> onSelect;
+
+  /// 已支持的指令（后续可扩展）
+  static const _commands = [
+    (
+      '/plan',
+      '计划模式',
+      'AI 先制定实施计划，确认后再执行',
+      Icons.format_list_numbered,
+    ),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final matched = _commands
+        .where((c) => c.$1.startsWith('/$query'))
+        .toList();
+    if (matched.isEmpty) return const SizedBox.shrink();
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 4, 12, 0),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF26262B) : Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: isDark
+              ? Colors.white.withValues(alpha: 0.12)
+              : const Color(0xFFE0E4E8),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? 0.3 : 0.08),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: matched
+            .map(
+              (c) => ListTile(
+                dense: true,
+                leading: Icon(c.$4, size: 17, color: const Color(0xFF7C4DFF)),
+                title: Text(
+                  '${c.$1} · ${c.$2}',
+                  style: const TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                subtitle: Text(c.$3, style: const TextStyle(fontSize: 11)),
+                onTap: () => onSelect(c.$1),
+              ),
+            )
+            .toList(),
+      ),
+    );
+  }
+}
+
 /// AI 改动待确认条
 class _AgcPendingBanner extends StatelessWidget {
   const _AgcPendingBanner();
-
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -971,140 +1288,371 @@ class _AgcInputBar extends StatelessWidget {
 // 侧边栏面板：对话记录
 // =============================================================================
 
-/// AGC 模式侧边栏「对话记录」面板
+/// AGC 模式侧边栏「对话记录」面板（DeepSeek 风格会话列表）
 ///
-/// 展示当前会话的对话时间线（用户提问 / AI 回复摘要 / 工具调用），
-/// 支持一键开启新对话。
-class AgcHistoryPanel extends StatelessWidget {
+/// - 顶部搜索框（按标题与消息内容过滤）
+/// - 「置顶」折叠分组 + 按时间分组（今天 / 昨天 / 7 天内 / 更早）
+/// - 长按条目：置顶 / 重命名 / 删除
+/// - 底部用户栏（登录邮箱；未登录提示仅本地保存）
+class AgcHistoryPanel extends StatefulWidget {
   const AgcHistoryPanel({super.key, this.onClose});
 
-  /// 点击条目后的回调（一般由编辑器用于收起侧边栏）
+  /// 点击会话条目后的回调（一般由编辑器用于收起侧边栏）
   final VoidCallback? onClose;
+
+  @override
+  State<AgcHistoryPanel> createState() => _AgcHistoryPanelState();
+}
+
+class _AgcHistoryPanelState extends State<AgcHistoryPanel> {
+  final TextEditingController _searchController = TextEditingController();
+  String _query = '';
+  bool _pinnedExpanded = true;
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  /// 时间分组：0=今天 1=昨天 2=7天内 3=更早
+  int _groupOf(int updatedAt) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final day = DateTime.fromMillisecondsSinceEpoch(updatedAt);
+    final diff = today.difference(DateTime(day.year, day.month, day.day)).inDays;
+    if (diff <= 0) return 0;
+    if (diff == 1) return 1;
+    if (diff < 7) return 2;
+    return 3;
+  }
+
+  static const _groupTitles = ['今天', '昨天', '7 天内', '更早'];
 
   @override
   Widget build(BuildContext context) {
     final ai = context.watch<AiProvider>();
+    final account = context.watch<AccountProvider>();
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final timeline = ai.timeline;
 
-    return Column(
-      children: [
-        Container(
-          height: 38,
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          decoration: BoxDecoration(
-            border: Border(
-              bottom: BorderSide(
-                color: isDark ? Colors.white12 : Colors.black12,
+    return ListenableBuilder(
+      listenable: ai.conversations,
+      builder: (context, _) {
+        final service = ai.conversations;
+        final query = _query.trim().toLowerCase();
+        final all = service.conversations.where((c) {
+          if (query.isEmpty) return true;
+          if (c.title.toLowerCase().contains(query)) return true;
+          return c.messages.any(
+            (m) => m.content.toLowerCase().contains(query),
+          );
+        }).toList();
+        final pinned = all.where((c) => c.pinned).toList();
+        final unpinned = all.where((c) => !c.pinned).toList();
+
+        return Column(
+          children: [
+            // 搜索框
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 10, 10, 6),
+              child: TextField(
+                controller: _searchController,
+                onChanged: (v) => setState(() => _query = v),
+                style: const TextStyle(fontSize: 13),
+                decoration: InputDecoration(
+                  hintText: '搜索对话内容…',
+                  hintStyle: TextStyle(
+                    fontSize: 12,
+                    color: isDark ? Colors.white30 : Colors.black26,
+                  ),
+                  prefixIcon: const Icon(Icons.search, size: 17),
+                  isDense: true,
+                  filled: true,
+                  fillColor: isDark
+                      ? Colors.white.withValues(alpha: 0.06)
+                      : Colors.black.withValues(alpha: 0.04),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(20),
+                    borderSide: BorderSide.none,
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(vertical: 8),
+                ),
               ),
             ),
-          ),
-          child: Row(
-            children: [
-              Icon(
-                Icons.history,
-                size: 16,
-                color: isDark ? Colors.white54 : Colors.black45,
-              ),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(
-                  '${timeline.whereType<ChatMessage>().length} 条消息',
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: isDark ? Colors.white38 : Colors.black38,
-                  ),
-                ),
-              ),
-              TextButton.icon(
-                style: TextButton.styleFrom(
-                  visualDensity: VisualDensity.compact,
-                ),
-                onPressed: ai.isThinking
-                    ? null
-                    : () {
-                        ai.clear();
-                        onClose?.call();
-                      },
-                icon: const Icon(Icons.add_comment_outlined, size: 14),
-                label: const Text('新对话', style: TextStyle(fontSize: 11)),
-              ),
-            ],
-          ),
-        ),
-        Expanded(
-          child: timeline.isEmpty
-              ? Center(
-                  child: Text(
-                    '暂无对话记录',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: isDark ? Colors.white30 : Colors.black26,
+
+            // 开启新对话
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 0, 10, 6),
+              child: SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
                     ),
                   ),
-                )
-              : ListView.builder(
-                  padding: const EdgeInsets.symmetric(vertical: 6),
-                  itemCount: timeline.length,
-                  itemBuilder: (context, index) {
-                    final item = timeline[index];
-                    if (item is AgentToolStep) {
-                      return ListTile(
-                        dense: true,
-                        leading: Icon(
-                          Icons.build_circle_outlined,
-                          size: 16,
-                          color: stepColor(item),
-                        ),
-                        title: Text(
-                          item.summary.isEmpty ? item.tool : item.summary,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontSize: 12,
-                            fontFamily: 'monospace',
-                          ),
-                        ),
-                        subtitle: Text(
-                          item.tool,
-                          style: const TextStyle(fontSize: 10),
-                        ),
-                        onTap: onClose,
-                      );
-                    }
-                    final msg = item as ChatMessage;
-                    final isUser = msg.role == ChatRole.user;
-                    return ListTile(
-                      dense: true,
-                      leading: Icon(
-                        isUser ? Icons.person_outline : Icons.auto_awesome,
-                        size: 16,
-                        color: isUser
-                            ? const Color(0xFF2D6CF6)
-                            : const Color(0xFF7C4DFF),
-                      ),
-                      title: Text(
-                        msg.content,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 12),
-                      ),
-                      subtitle: Text(
-                        isUser ? '我' : 'SLIPE AI',
-                        style: const TextStyle(fontSize: 10),
-                      ),
-                      onTap: onClose,
-                    );
-                  },
+                  onPressed: ai.isThinking
+                      ? null
+                      : () {
+                          ai.startNewSession();
+                          widget.onClose?.call();
+                        },
+                  icon: const Icon(Icons.add, size: 15),
+                  label: const Text('开启新对话', style: TextStyle(fontSize: 12)),
                 ),
-        ),
-      ],
+              ),
+            ),
+
+            // 会话列表
+            Expanded(
+              child: all.isEmpty
+                  ? Center(
+                      child: Text(
+                        query.isEmpty ? '暂无对话记录' : '没有匹配的对话',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: isDark ? Colors.white30 : Colors.black26,
+                        ),
+                      ),
+                    )
+                  : ListView(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      children: [
+                        if (pinned.isNotEmpty) ...[
+                          _buildPinnedHeader(isDark),
+                          if (_pinnedExpanded)
+                            ...pinned.map((c) => _buildTile(c, service, isDark)),
+                          const Divider(height: 16),
+                        ],
+                        for (var g = 0; g < 4; g++)
+                          ..._buildGroup(g, unpinned, service, isDark),
+                      ],
+                    ),
+            ),
+
+            // 底部用户栏
+            _buildUserBar(account, isDark),
+          ],
+        );
+      },
     );
   }
 
-  Color stepColor(AgentToolStep step) => step.running
-      ? const Color(0xFF448AFF)
-      : (step.failed ? Colors.orange : Colors.green);
+  /// 「置顶」可折叠分组头
+  Widget _buildPinnedHeader(bool isDark) {
+    return InkWell(
+      onTap: () => setState(() => _pinnedExpanded = !_pinnedExpanded),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 6, 14, 2),
+        child: Row(
+          children: [
+            Text(
+              '置顶',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                color: isDark ? Colors.white38 : Colors.black38,
+              ),
+            ),
+            const SizedBox(width: 2),
+            Icon(
+              _pinnedExpanded ? Icons.expand_less : Icons.expand_more,
+              size: 14,
+              color: isDark ? Colors.white38 : Colors.black38,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 构建某个时间分组（组头 + 组内会话条目）
+  List<Widget> _buildGroup(
+    int group,
+    List<AiConversation> unpinned,
+    ConversationService service,
+    bool isDark,
+  ) {
+    final items = unpinned.where((c) => _groupOf(c.updatedAt) == group).toList();
+    if (items.isEmpty) return const [];
+    return [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(14, 8, 14, 2),
+        child: Text(
+          _groupTitles[group],
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+            color: isDark ? Colors.white38 : Colors.black38,
+          ),
+        ),
+      ),
+      ...items.map((c) => _buildTile(c, service, isDark)),
+    ];
+  }
+
+  /// 单个会话条目：选中高亮，长按弹出操作菜单
+  Widget _buildTile(
+    AiConversation conv,
+    ConversationService service,
+    bool isDark,
+  ) {
+    final selected = service.currentId == conv.id;
+    return ListTile(
+      dense: true,
+      selected: selected,
+      selectedTileColor: const Color(0xFF2D6CF6).withValues(alpha: 0.10),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14),
+      title: Row(
+        children: [
+          Expanded(
+            child: Text(
+              conv.title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
+              ),
+            ),
+          ),
+          if (!conv.synced)
+            Icon(
+              Icons.cloud_off_outlined,
+              size: 13,
+              color: isDark ? Colors.white24 : Colors.black26,
+            ),
+        ],
+      ),
+      onTap: () {
+        context.read<AiProvider>().openSession(conv.id);
+        widget.onClose?.call();
+      },
+      onLongPress: () => _showSessionActions(conv, service),
+    );
+  }
+
+  /// 长按会话：置顶 / 重命名 / 删除
+  void _showSessionActions(AiConversation conv, ConversationService service) {
+    showModalBottomSheet<void>(
+      context: context,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              dense: true,
+              leading: Icon(
+                conv.pinned ? Icons.push_pin_outlined : Icons.push_pin,
+                size: 18,
+              ),
+              title: Text(conv.pinned ? '取消置顶' : '置顶'),
+              onTap: () {
+                service.togglePin(conv.id);
+                Navigator.of(sheetContext).pop();
+              },
+            ),
+            ListTile(
+              dense: true,
+              leading: const Icon(Icons.edit_outlined, size: 18),
+              title: const Text('重命名'),
+              onTap: () {
+                Navigator.of(sheetContext).pop();
+                _renameSession(conv, service);
+              },
+            ),
+            ListTile(
+              dense: true,
+              leading: Icon(Icons.delete_outline, size: 18, color: Colors.red.shade400),
+              title: Text('删除', style: TextStyle(color: Colors.red.shade400)),
+              onTap: () {
+                Navigator.of(sheetContext).pop();
+                context.read<AiProvider>().deleteSession(conv.id);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 重命名会话对话框
+  Future<void> _renameSession(
+    AiConversation conv,
+    ConversationService service,
+  ) async {
+    final controller = TextEditingController(text: conv.title);
+    final renamed = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('重命名对话', style: TextStyle(fontSize: 15)),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLength: 40,
+          decoration: const InputDecoration(hintText: '输入新的对话名称'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: Text(t('common.cancel')),
+          ),
+          FilledButton(
+            onPressed: () =>
+                Navigator.of(dialogContext).pop(controller.text.trim()),
+            child: Text(t('common.confirm')),
+          ),
+        ],
+      ),
+    );
+    if (renamed != null && renamed.trim().isNotEmpty) {
+      service.rename(conv.id, renamed.trim());
+    }
+  }
+
+  /// 底部用户栏：头像 + 邮箱；未登录提示仅本地保存
+  Widget _buildUserBar(AccountProvider account, bool isDark) {
+    final user = account.user;
+    final subtitle = user == null
+        ? '未登录 · 会话仅保存在本机'
+        : (user.email.isNotEmpty ? user.email : user.displayName);
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 8, 14, 10),
+      decoration: BoxDecoration(
+        border: Border(
+          top: BorderSide(color: isDark ? Colors.white12 : Colors.black12),
+        ),
+      ),
+      child: Row(
+        children: [
+          CircleAvatar(
+            radius: 13,
+            backgroundColor:
+                isDark ? Colors.white12 : Colors.black.withValues(alpha: 0.08),
+            child: Icon(
+              Icons.person_outline,
+              size: 15,
+              color: isDark ? Colors.white54 : Colors.black45,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              subtitle,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 11,
+                color: isDark ? Colors.white54 : Colors.black45,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 // =============================================================================
@@ -1206,7 +1754,7 @@ class AgcToolsPanel extends StatelessWidget {
               isDark: isDark,
             ),
             if (servers.isEmpty)
-              _emptyHint('未配置第三方 MCP，可在设置中导入或添加')
+              _emptyHint('未配置第三方 MCP，可直接添加或粘贴配置导入')
             else
               ...servers.map(
                 (server) => ListTile(
@@ -1233,13 +1781,41 @@ class AgcToolsPanel extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(fontSize: 11),
                   ),
+                  trailing: const Icon(Icons.chevron_right, size: 16),
+                  onTap: () async {
+                    final ai = context.read<AiProvider>();
+                    await showMcpServerEditor(context, existing: server);
+                    await ai.refreshMcpTools();
+                  },
                 ),
               ),
             ListTile(
               dense: true,
               leading: const Icon(Icons.add_circle_outline, size: 18),
-              title: const Text('管理 MCP 服务器', style: TextStyle(fontSize: 12)),
-              onTap: () => _openSettings(context),
+              title: const Text('添加 MCP 服务器', style: TextStyle(fontSize: 12)),
+              subtitle: const Text(
+                '支持 HTTP / SSE / stdio 三种传输方式',
+                style: TextStyle(fontSize: 10),
+              ),
+              onTap: () async {
+                final ai = context.read<AiProvider>();
+                await showMcpServerEditor(context);
+                await ai.refreshMcpTools();
+              },
+            ),
+            ListTile(
+              dense: true,
+              leading: const Icon(Icons.content_paste_outlined, size: 18),
+              title: const Text('粘贴 JSON 配置导入', style: TextStyle(fontSize: 12)),
+              subtitle: const Text(
+                '支持 Claude / Trae / Cursor 格式',
+                style: TextStyle(fontSize: 10),
+              ),
+              onTap: () async {
+                final ai = context.read<AiProvider>();
+                await showMcpConfigImport(context);
+                await ai.refreshMcpTools();
+              },
             ),
             const SizedBox(height: 8),
             _SectionHeader(

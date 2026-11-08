@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import '../models/chat_segment.dart';
+
 /// 聊天消息角色
 enum ChatRole { system, user, assistant, tool }
 
@@ -22,6 +24,12 @@ class ChatMessage {
   /// 深度思考模型的思考过程（reasoning_content），仅用于展示，不回传上游
   final String? reasoning;
 
+  /// 消息类型：normal（普通回复）| plan（/plan 计划模式产出）
+  final String kind;
+
+  /// assistant 消息的渲染分段（思考/正文/工具调用按时间顺序穿插），仅用于展示
+  final List<ChatSegment>? segments;
+
   const ChatMessage({
     required this.role,
     required this.content,
@@ -29,6 +37,8 @@ class ChatMessage {
     this.name,
     this.toolCalls,
     this.reasoning,
+    this.kind = 'normal',
+    this.segments,
   });
 
   factory ChatMessage.toolResult({

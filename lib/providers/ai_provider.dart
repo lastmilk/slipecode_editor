@@ -7,6 +7,7 @@ import '../agent/mcp_tools.dart';
 import '../config/app_config.dart';
 import '../l10n/app_localizations.dart';
 import '../models/app_settings.dart';
+import '../models/chat_segment.dart';
 import '../models/credits.dart';
 import '../models/llm_profile.dart';
 import '../providers/account_provider.dart';
@@ -15,12 +16,10 @@ import '../providers/editor_provider.dart';
 import '../providers/project_provider.dart';
 import '../providers/settings_provider.dart';
 import '../providers/terminal_provider.dart';
-import '../services/account_service.dart';
 import '../services/ai_extensions_service.dart';
-import '../services/chat_history_service.dart';
+import '../services/conversation_service.dart';
 import '../services/external_mcp_manager.dart';
 import '../services/llm_service.dart';
-import '../services/network_policy.dart';
 
 /// AI 助手状态
 enum AiStatus { idle, thinking, error }
@@ -92,10 +91,14 @@ class AiProvider extends ChangeNotifier {
   String _streamingReasoning = '';
   DateTime _lastStreamNotify = DateTime.now();
 
+  /// 当前流式回复的渲染分段（思考过程 / 工具调用批次 / 正文按时间穿插）
+  final List<ChatSegment> _streamSegments = [];
+
+  /// 计划模式（/plan 指令开启）：AI 只制定计划，用户确认后再执行
+  bool _planMode = false;
+
   // 对话记录
   bool _historyLoaded = false;
-  bool _cloudHistoryPulled = false;
-  Timer? _pushTimer;
 
   // VibeCoding
   bool _vibeBusy = false;
@@ -125,6 +128,12 @@ class AiProvider extends ChangeNotifier {
 
   /// 当前流式接收中的思考过程（DeepSeek / StepFun 等推理模型）
   String get streamingReasoning => _streamingReasoning;
+
+  /// 当前流式回复的渲染分段（思考 / 工具批次 / 正文按时间穿插）
+  List<ChatSegment> get streamSegments => List.unmodifiable(_streamSegments);
+
+  /// 是否为计划模式（/plan）：AI 只制定计划，不执行写操作
+  bool get planMode => _planMode;
 
   /// VibeCoding 是否正在执行（编辑器需锁定）
   bool get vibeBusy => _vibeBusy;
@@ -221,117 +230,134 @@ class AiProvider extends ChangeNotifier {
     if (!_disposed) notifyListeners();
   }
 
-  /// 清空对话（同时清空本地与已开启的云端记录）
+  /// 重新加载第三方 MCP 工具（新增 / 编辑 / 启用服务器后调用）
+  Future<void> refreshMcpTools() async {
+    await _prepareExtensions();
+    _safeNotify();
+  }
+
+  /// 清空当前会话消息（会话本身保留在列表中）
   Future<void> clear() async {
     _messages.clear();
     _steps.clear();
     _timeline.clear();
+    _streamSegments.clear();
     _error = null;
     _status = AiStatus.idle;
     _streamingText = '';
+    _streamingReasoning = '';
     _isStreaming = false;
-    await ChatHistoryService.instance.clear();
-    if (_s.chatCloudSync && _account.isSignedIn) {
-      try {
-        await AccountService.instance.deleteChatHistory(_account.token!);
-      } catch (_) {
-        // 云端清空失败不影响本地
-      }
+    final currentId = ConversationService.instance.currentId;
+    if (currentId != null) {
+      ConversationService.instance.updateMessages(currentId, const []);
     }
     _safeNotify();
   }
 
-  /// 首次打开 Agent 面板时加载本地记录；开启云同步时拉取云端补充
-  Future<void> ensureCloudHistoryLoaded() async {
-    await _ensureHistoryLoaded();
-    if (_cloudHistoryPulled) return;
-    _cloudHistoryPulled = true;
-    if (!_s.chatCloudSync || !_account.isSignedIn) return;
-    try {
-      if (!await NetworkPolicy.canSyncNow(_s)) return;
-      final remote =
-          await AccountService.instance.fetchChatHistory(_account.token!);
-      if (remote.isEmpty) return;
-      final existing = _messages
-          .map((m) => '${m.role.name}|${m.content}')
-          .toSet();
-      for (final item in remote) {
-        final role =
-            item['role'] == 'assistant' ? ChatRole.assistant : ChatRole.user;
-        final content = (item['content'] ?? '').toString();
-        if (content.isEmpty || existing.contains('${role.name}|$content')) {
-          continue;
-        }
-        final message = ChatMessage(role: role, content: content);
-        _messages.add(message);
-        _timeline.add(message);
-      }
-      _safeNotify();
-    } catch (e) {
-      debugPrint('拉取云端对话记录失败：$e');
-    }
+  // ---------------------------------------------------------------------------
+  // 多会话管理（DeepSeek 风格侧边栏，支持跨端同步）
+  // ---------------------------------------------------------------------------
+
+  /// 会话列表服务（供侧边栏直接监听 / 操作）
+  ConversationService get conversations => ConversationService.instance;
+
+  /// 加载会话列表（按当前登录用户隔离；开启云同步时自动与云端合并）
+  Future<void> ensureSessionsLoaded() async {
+    await ConversationService.instance.ensureLoaded(
+      userId: _account.user?.id ?? '',
+      token: _account.token,
+      cloudEnabled: _s.chatCloudSync && _account.isSignedIn,
+      settings: _s,
+    );
   }
 
-  Future<void> _ensureHistoryLoaded() async {
+  /// 打开 Agent 面板时加载会话与当前会话消息
+  Future<void> ensureCloudHistoryLoaded() async {
+    await ensureSessionsLoaded();
     if (_historyLoaded) return;
     _historyLoaded = true;
-    try {
-      final records = await ChatHistoryService.instance.load();
-      for (final item in records) {
-        final content = (item['content'] ?? '').toString();
-        if (content.isEmpty) continue;
-        final reasoning = (item['reasoning'] ?? '').toString();
-        final message = ChatMessage(
-          role: item['role'] == 'assistant' ? ChatRole.assistant : ChatRole.user,
-          content: content,
-          reasoning: reasoning.isEmpty ? null : reasoning,
-        );
-        _messages.add(message);
-        _timeline.add(message);
-      }
-      if (_messages.isNotEmpty) _safeNotify();
-    } catch (e) {
-      debugPrint('读取本地对话记录失败：$e');
+    final current = ConversationService.instance.current;
+    if (current != null && current.messages.isNotEmpty) {
+      _messages.addAll(current.messages);
+      _timeline.addAll(current.messages);
+      _safeNotify();
     }
   }
 
-  Future<void> _persistHistory() async {
-    final records = <Map<String, dynamic>>[];
-    final now = DateTime.now().millisecondsSinceEpoch;
-    for (final message in _messages) {
-      if (message.role != ChatRole.user &&
-          message.role != ChatRole.assistant) {
-        continue;
-      }
-      records.add({
-        'role': message.role == ChatRole.assistant ? 'assistant' : 'user',
-        'content': message.content,
-        if (message.reasoning != null && message.reasoning!.isNotEmpty)
-          'reasoning': message.reasoning,
-        'ts': now,
-      });
-    }
-    await ChatHistoryService.instance.save(records);
+  /// 新建会话并切换到它
+  void startNewSession() {
+    ConversationService.instance.createLocal();
+    _loadCurrentSession();
+  }
 
-    if (!_s.chatCloudSync || !_account.isSignedIn) return;
-    _pushTimer?.cancel();
-    _pushTimer = Timer(const Duration(seconds: 2), () async {
-      try {
-        if (!await NetworkPolicy.canSyncNow(_s)) return;
-        await AccountService.instance.pushChatHistory(
-          _account.token!,
-          records,
-        );
-      } catch (e) {
-        debugPrint('上传对话记录失败：$e');
-      }
-    });
+  /// 打开指定会话
+  void openSession(String id) {
+    if (ConversationService.instance.currentId == id) return;
+    ConversationService.instance.open(id);
+    _loadCurrentSession();
+  }
+
+  /// 删除会话；若删除的是当前会话则切换到最近的会话
+  Future<void> deleteSession(String id) async {
+    final service = ConversationService.instance;
+    final wasCurrent = service.currentId == id;
+    await service.delete(id);
+    if (!wasCurrent) return;
+    final next = service.conversations.firstOrNull;
+    if (next != null) {
+      service.open(next.id);
+    }
+    _loadCurrentSession();
+  }
+
+  /// 把当前会话消息加载进对话区
+  void _loadCurrentSession() {
+    _messages
+      ..clear()
+      ..addAll(ConversationService.instance.current?.messages ?? []);
+    _steps.clear();
+    _timeline
+      ..clear()
+      ..addAll(_messages);
+    _streamSegments.clear();
+    _error = null;
+    _status = AiStatus.idle;
+    _isStreaming = false;
+    _streamingText = '';
+    _streamingReasoning = '';
+    _historyLoaded = true;
+    _safeNotify();
+  }
+
+  /// 当前会话消息变化后持久化（本地 + 云端防抖同步）
+  void _persistConversation() {
+    final currentId = ConversationService.instance.currentId;
+    if (currentId != null) {
+      ConversationService.instance.updateMessages(currentId, _messages);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // 计划模式（/plan 指令）
+  // ---------------------------------------------------------------------------
+
+  /// 开启 / 关闭计划模式
+  void setPlanMode(bool value) {
+    if (_planMode == value) return;
+    _planMode = value;
+    _safeNotify();
+  }
+
+  /// 用户确认后，退出计划模式并按最近一条计划开始执行
+  Future<void> executePlan() async {
+    _planMode = false;
+    await sendMessage('计划已确认，请严格按照上述计划开始执行。');
   }
 
   /// 发送一条用户消息，Agent 会自动调用工具完成任务（流式输出）
   Future<void> sendMessage(String text) async {
     if (text.trim().isEmpty) return;
-    await _ensureHistoryLoaded();
+    await ensureCloudHistoryLoaded();
     // 合规：未同意《用户协议》与《隐私政策》→ 受限模式，AI 助手不可用
     if (_settings.settings.policyAcceptedVersion.isEmpty) {
       _error = t('ai.error.policyFirst');
@@ -351,6 +377,9 @@ class AiProvider extends ChangeNotifier {
 
     final extraSkill = await _prepareExtensions();
 
+    // 确保有当前会话（首条消息自动生成会话标题）
+    ConversationService.instance.ensureCurrent(firstUserText: text);
+
     final userMessage = ChatMessage(role: ChatRole.user, content: text);
     _messages.add(userMessage);
     _timeline.add(userMessage);
@@ -360,6 +389,7 @@ class AiProvider extends ChangeNotifier {
     _isStreaming = true;
     _streamingText = '';
     _streamingReasoning = '';
+    _streamSegments.clear();
     _safeNotify();
 
     // 只带最近 20 条，避免 token 爆炸
@@ -370,6 +400,11 @@ class AiProvider extends ChangeNotifier {
     _lastStreamNotify = DateTime.now();
     void onDelta(String delta) {
       _streamingText += delta;
+      // 分段渲染：正文追加到末尾 text 段（否则新建一段）
+      if (_streamSegments.isEmpty || !_streamSegments.last.isText) {
+        _streamSegments.add(ChatSegment.text());
+      }
+      _streamSegments.last.text += delta;
       final now = DateTime.now();
       if (now.difference(_lastStreamNotify).inMilliseconds > 80) {
         _lastStreamNotify = now;
@@ -379,12 +414,19 @@ class AiProvider extends ChangeNotifier {
 
     void onReasoning(String delta) {
       _streamingReasoning += delta;
+      // 分段渲染：思考过程追加到末尾 reasoning 段（否则新建一段）
+      if (_streamSegments.isEmpty || !_streamSegments.last.isReasoning) {
+        _streamSegments.add(ChatSegment.reasoning());
+      }
+      _streamSegments.last.text += delta;
       final now = DateTime.now();
       if (now.difference(_lastStreamNotify).inMilliseconds > 80) {
         _lastStreamNotify = now;
         _safeNotify();
       }
     }
+
+    final planOnly = _planMode;
 
     try {
       final result = await _agent.run(
@@ -395,11 +437,18 @@ class AiProvider extends ChangeNotifier {
         onStep: (step) {
           if (!_steps.contains(step)) _steps.add(step);
           if (!_timeline.contains(step)) _timeline.add(step);
+          // 分段渲染：连续的工具调用聚合为一个批次段
+          if (_streamSegments.isEmpty || !_streamSegments.last.isTools) {
+            _streamSegments.add(ChatSegment.tools([]));
+          }
+          final batch = _streamSegments.last;
+          if (!batch.steps.contains(step)) batch.steps.add(step);
           _safeNotify();
         },
         onDelta: onDelta,
         onReasoning: onReasoning,
         extraSystemPrompt: extraSkill,
+        planOnly: planOnly,
       );
       _isStreaming = false;
       _streamingText = '';
@@ -408,10 +457,16 @@ class AiProvider extends ChangeNotifier {
         role: ChatRole.assistant,
         content: result.content,
         reasoning: result.reasoning.isEmpty ? null : result.reasoning,
+        kind: planOnly ? 'plan' : 'normal',
+        segments: _streamSegments.isEmpty
+            ? null
+            : List<ChatSegment>.from(_streamSegments),
       );
       _messages.add(reply);
       _timeline.add(reply);
       _status = AiStatus.idle;
+      // 计划产出后自动退出计划模式，等待用户确认执行
+      if (planOnly) _planMode = false;
     } catch (e) {
       _isStreaming = false;
       _streamingText = '';
@@ -419,12 +474,13 @@ class AiProvider extends ChangeNotifier {
       _error = '$e';
       _status = AiStatus.error;
     }
+    _streamSegments.clear();
     _safeNotify();
     if (llm.builtin) {
       // 内置模型按 token 扣积分，调用结束后刷新余额
       await _account.refreshCredits();
     }
-    await _persistHistory();
+    _persistConversation();
   }
 
   /// 把当前文件的内容附加到消息中发送
@@ -540,7 +596,6 @@ class AiProvider extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
-    _pushTimer?.cancel();
     super.dispose();
   }
 }

@@ -363,7 +363,7 @@ class _EditorScreenState extends State<EditorScreen>
     }
   }
 
-  /// AGC 模式下的「新对话」：有记录时先确认
+  /// AGC 模式下的「新对话」：创建新会话（当前会话保留在对话记录中）
   Future<void> _newAgcChat() async {
     final ai = context.read<AiProvider>();
     if (ai.messages.isEmpty) return;
@@ -371,7 +371,7 @@ class _EditorScreenState extends State<EditorScreen>
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('开启新对话'),
-        content: const Text('当前对话记录将被清空，确定开始新对话吗？'),
+        content: const Text('当前对话会保存在「对话记录」中，确定开始新对话吗？'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
@@ -385,7 +385,7 @@ class _EditorScreenState extends State<EditorScreen>
       ),
     );
     if (confirmed == true) {
-      await ai.clear();
+      ai.startNewSession();
     }
   }
 
