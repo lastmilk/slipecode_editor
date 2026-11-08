@@ -19,6 +19,7 @@ import '../providers/terminal_provider.dart';
 import '../services/ai_extensions_service.dart';
 import '../services/conversation_service.dart';
 import '../services/external_mcp_manager.dart';
+import '../services/live_task_service.dart';
 import '../services/llm_service.dart';
 
 /// AI 助手状态
@@ -32,12 +33,16 @@ class _ResolvedLlm {
   final String name;
   final bool builtin;
 
+  /// 是否支持图片理解（自定义模型默认允许，由上游自行判断）
+  final bool supportsVision;
+
   const _ResolvedLlm({
     required this.apiBase,
     required this.apiKey,
     required this.model,
     required this.name,
     required this.builtin,
+    this.supportsVision = true,
   });
 }
 
@@ -150,6 +155,9 @@ class AiProvider extends ChangeNotifier {
   /// 当前是否使用内置模型
   bool get isUsingBuiltinModel => _resolveLlm()?.builtin ?? false;
 
+  /// 当前模型是否支持图片理解
+  bool get currentModelSupportsVision => _resolveLlm()?.supportsVision ?? true;
+
   /// Agent 可调用的 MCP 工具（用于 AGC 模式「MCP/Skills」面板展示）
   List<McpTool> get mcpTools => List.unmodifiable(_toolbox.tools);
 
@@ -177,6 +185,7 @@ class AiProvider extends ChangeNotifier {
             model: selected.id,
             name: selected.name,
             builtin: true,
+            supportsVision: selected.supportsVision,
           );
         }
       }
@@ -355,8 +364,18 @@ class AiProvider extends ChangeNotifier {
   }
 
   /// 发送一条用户消息，Agent 会自动调用工具完成任务（流式输出）
-  Future<void> sendMessage(String text) async {
-    if (text.trim().isEmpty) return;
+  ///
+  /// [images] 为图片附件（多模态输入）；[attachmentContext] 为文本附件内容，
+  /// 只发送给模型，不直接展示在对话气泡中。
+  Future<void> sendMessage(
+    String text, {
+    List<ChatImageAttachment> images = const [],
+    String attachmentContext = '',
+    List<String> attachmentNames = const [],
+  }) async {
+    if (text.trim().isEmpty && images.isEmpty && attachmentContext.isEmpty) {
+      return;
+    }
     await ensureCloudHistoryLoaded();
     // 合规：未同意《用户协议》与《隐私政策》→ 受限模式，AI 助手不可用
     if (_settings.settings.policyAcceptedVersion.isEmpty) {
@@ -375,12 +394,28 @@ class AiProvider extends ChangeNotifier {
       return;
     }
 
+    // 图片需要当前模型开启「图片理解」
+    if (images.isNotEmpty && !llm.supportsVision) {
+      _error = '当前模型不支持图片理解，请在模型配置中开启支持图片的模型';
+      _status = AiStatus.error;
+      _safeNotify();
+      return;
+    }
+
     final extraSkill = await _prepareExtensions();
 
     // 确保有当前会话（首条消息自动生成会话标题）
     ConversationService.instance.ensureCurrent(firstUserText: text);
 
-    final userMessage = ChatMessage(role: ChatRole.user, content: text);
+    final displayContent = attachmentNames.isEmpty
+        ? text
+        : '$text\n\n📎 ${attachmentNames.join('、')}';
+    final userMessage = ChatMessage(
+      role: ChatRole.user,
+      content: displayContent.trim(),
+      apiContent: attachmentContext.isEmpty ? null : '$text$attachmentContext',
+      images: images,
+    );
     _messages.add(userMessage);
     _timeline.add(userMessage);
     _steps.clear();
@@ -428,6 +463,20 @@ class AiProvider extends ChangeNotifier {
 
     final planOnly = _planMode;
 
+    // 任务实况通知（类灵动岛）：AI 执行期间可更新进度
+    final liveNotify = _s.liveNotifications;
+    LiveTaskService.instance.configure(enabled: liveNotify);
+    if (liveNotify) {
+      await LiveTaskService.ensurePermission();
+      await LiveTaskService.instance.start(
+        id: 'ai',
+        kind: 'ai',
+        title: 'SLIPE AI 正在执行',
+        text: '正在分析需求…',
+      );
+    }
+    var liveTextNotified = false;
+
     try {
       final result = await _agent.run(
         apiBase: llm.apiBase,
@@ -443,9 +492,37 @@ class AiProvider extends ChangeNotifier {
           }
           final batch = _streamSegments.last;
           if (!batch.steps.contains(step)) batch.steps.add(step);
+          if (liveNotify) {
+            final label = step.summary.isEmpty ? step.tool : step.summary;
+            unawaited(
+              LiveTaskService.instance.update(
+                id: 'ai',
+                kind: 'ai',
+                title: 'SLIPE AI 正在执行',
+                text: label,
+                progress: null,
+                indeterminate: true,
+              ),
+            );
+          }
           _safeNotify();
         },
-        onDelta: onDelta,
+        onDelta: (delta) {
+          onDelta(delta);
+          if (liveNotify && !liveTextNotified) {
+            liveTextNotified = true;
+            unawaited(
+              LiveTaskService.instance.update(
+                id: 'ai',
+                kind: 'ai',
+                title: 'SLIPE AI 正在执行',
+                text: '正在生成回复…',
+                progress: null,
+                indeterminate: true,
+              ),
+            );
+          }
+        },
         onReasoning: onReasoning,
         extraSystemPrompt: extraSkill,
         planOnly: planOnly,
@@ -467,12 +544,23 @@ class AiProvider extends ChangeNotifier {
       _status = AiStatus.idle;
       // 计划产出后自动退出计划模式，等待用户确认执行
       if (planOnly) _planMode = false;
+      if (liveNotify) {
+        unawaited(
+          LiveTaskService.instance.finish(
+            id: 'ai',
+            kind: 'ai',
+            title: 'SLIPE AI',
+            text: planOnly ? '计划已生成，等待确认' : '任务已完成',
+          ),
+        );
+      }
     } catch (e) {
       _isStreaming = false;
       _streamingText = '';
       _streamingReasoning = '';
       _error = '$e';
       _status = AiStatus.error;
+      if (liveNotify) unawaited(LiveTaskService.instance.stop('ai'));
     }
     _streamSegments.clear();
     _safeNotify();

@@ -2,17 +2,16 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
-import 'package:permission_handler/permission_handler.dart';
 
 import '../l10n/app_localizations.dart';
 import '../payloads/project_payload.dart';
-import '../services/build_notification_service.dart';
 import '../services/build_service.dart';
 import '../services/build_watch_service.dart';
 import '../services/git_host.dart';
 import '../services/gitee_go_templates.dart';
 import '../services/github_api_service.dart'
     show RepoFile, RunArtifact, WorkflowJob, WorkflowRun;
+import '../services/live_task_service.dart';
 import 'account_provider.dart';
 import 'git_sync_provider.dart';
 import 'gitee_provider.dart';
@@ -178,7 +177,7 @@ class BuildProvider extends ChangeNotifier {
     _startedAt = null;
     _finishedAt = null;
     _cancelRequested = false;
-    unawaited(BuildNotificationService.instance.stop());
+    unawaited(LiveTaskService.instance.stop('build'));
     _safeNotify();
   }
 
@@ -278,23 +277,50 @@ class BuildProvider extends ChangeNotifier {
     } finally {
       _finishedAt = DateTime.now();
       _currentTask = '';
-      if (BuildNotificationService.instance.isRunning) {
-        unawaited(BuildNotificationService.instance.stop());
+      if (_status == BuildStatus.success) {
+        unawaited(
+          LiveTaskService.instance.finish(
+            id: 'build',
+            kind: 'build',
+            title: '云端构建完成',
+            text: '构建成功',
+          ),
+        );
+      } else {
+        unawaited(LiveTaskService.instance.stop('build'));
       }
       _safeNotify();
     }
   }
 
-  /// 申请通知权限并启动构建保活前台服务
+  /// 申请通知权限并启动构建实况通知
   Future<void> _startKeepAlive(String text) async {
-    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
-      try {
-        await Permission.notification.request();
-      } catch (_) {
-        // 用户拒绝通知权限时前台服务仍会运行
+    final enabled = _settings?.settings.liveNotifications ?? true;
+    LiveTaskService.instance.configure(enabled: enabled);
+    if (!enabled) return;
+    await LiveTaskService.ensurePermission();
+    await LiveTaskService.instance.start(
+      id: 'build',
+      kind: 'build',
+      title: 'SLIPE 云端构建',
+      text: text,
+      progress: null,
+      indeterminate: true,
+    );
+  }
+
+  /// 按 workflow 步骤完成度估算构建进度（0-99）
+  int? _buildProgress() {
+    var total = 0;
+    var done = 0;
+    for (final job in _jobs) {
+      for (final step in job.steps) {
+        total++;
+        if (step.isCompleted) done++;
       }
     }
-    await BuildNotificationService.instance.start(text);
+    if (total == 0) return null;
+    return (done * 100 / total).round().clamp(0, 99);
   }
 
   String _stepSummary() {
@@ -309,13 +335,22 @@ class BuildProvider extends ChangeNotifier {
     return _currentTask.isEmpty ? t('build.task.inProgress') : _currentTask;
   }
 
-  /// 刷新 workflow 步骤并同步常驻通知文案
+  /// 刷新 workflow 步骤并同步实况通知文案与进度
   void _setJobs(List<WorkflowJob> jobs) {
     _jobs = jobs;
     final summary = _stepSummary();
     if (isRunning && summary.isNotEmpty) {
       _currentTask = summary;
-      unawaited(BuildNotificationService.instance.update(summary));
+      unawaited(
+        LiveTaskService.instance.update(
+          id: 'build',
+          kind: 'build',
+          title: 'SLIPE 云端构建',
+          text: summary,
+          progress: _buildProgress(),
+          indeterminate: _buildProgress() == null,
+        ),
+      );
     }
     _safeNotify();
   }

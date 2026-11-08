@@ -159,6 +159,54 @@
               </dl>
             </div>
           </div>
+          <div class="card" style="margin-top: 16px">
+            <div class="card-head">
+              <h3>模型调用统计</h3>
+              <span class="dim">按内置模型 / 线路聚合，用于观察路由与失败情况</span>
+            </div>
+            <el-table :data="stats.llm.models" stripe size="small" empty-text="暂无调用记录">
+              <el-table-column prop="name" label="模型" min-width="150" />
+              <el-table-column label="调用次数" width="110">
+                <template #default="{ row }">{{ fmt(row.calls) }}</template>
+              </el-table-column>
+              <el-table-column label="Token" width="130">
+                <template #default="{ row }">{{ fmt(row.tokens) }}</template>
+              </el-table-column>
+              <el-table-column label="失败" width="90">
+                <template #default="{ row }">
+                  <el-tag v-if="row.errors" type="danger" size="small">{{ row.errors }}</el-tag>
+                  <span v-else class="dim">0</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="最近调用" min-width="160">
+                <template #default="{ row }">{{ dateText(row.lastAt) }}</template>
+              </el-table-column>
+            </el-table>
+          </div>
+
+          <div class="card" style="margin-top: 16px">
+            <div class="card-head">
+              <h3>线路调用分布</h3>
+              <span class="dim">多组 BaseURL / APIKey 的智能路由结果</span>
+            </div>
+            <el-table :data="stats.llm.channels" stripe size="small" empty-text="暂无线路记录">
+              <el-table-column prop="modelName" label="模型" min-width="130" />
+              <el-table-column prop="channelName" label="线路" min-width="130" />
+              <el-table-column label="调用" width="90">
+                <template #default="{ row }">{{ fmt(row.calls) }}</template>
+              </el-table-column>
+              <el-table-column label="Token" width="120">
+                <template #default="{ row }">{{ fmt(row.tokens) }}</template>
+              </el-table-column>
+              <el-table-column label="失败" width="90">
+                <template #default="{ row }">
+                  <el-tag v-if="row.errors" type="danger" size="small">{{ row.errors }}</el-tag>
+                  <span v-else class="dim">0</span>
+                </template>
+              </el-table-column>
+              <el-table-column prop="lastError" label="最近错误" min-width="200" show-overflow-tooltip />
+            </el-table>
+          </div>
           <!-- CHUNK-2-END -->
         </section>
 
@@ -306,6 +354,61 @@
 
           <div class="card">
             <div class="card-head">
+              <h3>AI 附件上传限制</h3>
+              <el-tag :type="cfg.aiUploads.enabled ? 'success' : 'info'" size="small">
+                {{ cfg.aiUploads.enabled ? '已开启' : '已关闭' }}
+              </el-tag>
+            </div>
+            <el-form label-width="150px" class="cfg-form">
+              <el-form-item label="允许上传附件">
+                <el-switch v-model="cfg.aiUploads.enabled" active-text="开启" />
+              </el-form-item>
+              <el-form-item label="单次最大附件数">
+                <el-input-number v-model="cfg.aiUploads.maxFiles" :min="1" :max="20" />
+              </el-form-item>
+              <el-form-item label="单文件最大体积（MB）">
+                <el-input-number v-model="cfg.aiUploads.maxFileMb" :min="1" :max="100" />
+              </el-form-item>
+              <el-form-item label="单次总大小（MB）">
+                <el-input-number v-model="cfg.aiUploads.maxTotalMb" :min="1" :max="200" />
+              </el-form-item>
+              <el-form-item label="Zip 解压最大文件数">
+                <el-input-number v-model="cfg.aiUploads.maxUnzipFiles" :min="1" :max="500" />
+              </el-form-item>
+              <el-form-item label="Zip 解压总大小（MB）">
+                <el-input-number v-model="cfg.aiUploads.maxUnzipMb" :min="1" :max="500" />
+              </el-form-item>
+              <el-form-item>
+                <el-button type="primary" :loading="savingAiUploads" @click="saveAiUploads">
+                  保存附件限制
+                </el-button>
+                <span class="dim" style="margin-left: 8px">
+                  Zip 会在服务端解压到临时目录，读取文本后返回给模型
+                </span>
+              </el-form-item>
+            </el-form>
+          </div>
+
+          <div class="card">
+            <div class="card-head">
+              <h3>GitHub 专用 Hosts</h3>
+              <el-tag type="info" size="small">仅应用内部生效</el-tag>
+            </div>
+            <p class="dim" style="margin: 0 0 12px">
+              服务端每天从公共源拉取 hosts，客户端下载后仅用于应用内 HTTP 请求；
+              不修改系统 hosts，不涉及 VPN / 代理，系统浏览器中的 OAuth 不受影响。
+            </p>
+            <el-form label-width="150px" class="cfg-form">
+              <el-form-item>
+                <el-button :loading="refreshingHosts" @click="refreshGithubHosts">
+                  立即从源拉取
+                </el-button>
+              </el-form-item>
+            </el-form>
+          </div>
+
+          <div class="card">
+            <div class="card-head">
               <h3>管理员密码</h3>
               <el-tag :type="cfgInfo.admin.usingDefaultPassword ? 'warning' : 'success'" size="small">
                 {{ cfgInfo.admin.usingDefaultPassword ? '仍在使用默认密码，建议立即修改' : '已自定义' }}
@@ -342,7 +445,19 @@
             <el-table :data="models" stripe empty-text="暂无模型">
               <el-table-column prop="name" label="显示名称" min-width="140" />
               <el-table-column prop="model" label="上游模型" min-width="150" />
-              <el-table-column prop="apiBase" label="API Base" min-width="220" show-overflow-tooltip />
+              <el-table-column prop="apiBase" label="主线路 BaseURL" min-width="220" show-overflow-tooltip />
+              <el-table-column label="线路数" width="80">
+                <template #default="{ row }">
+                  {{ (row.channels && row.channels.length) || 1 }}
+                </template>
+              </el-table-column>
+              <el-table-column label="图片理解" width="90">
+                <template #default="{ row }">
+                  <el-tag :type="row.supportsVision ? 'success' : 'info'" size="small">
+                    {{ row.supportsVision ? '支持' : '不支持' }}
+                  </el-tag>
+                </template>
+              </el-table-column>
               <el-table-column prop="multiplier" label="倍率" width="80" />
               <el-table-column label="操作" width="130" fixed="right">
                 <template #default="{ row }">
@@ -878,16 +993,10 @@
     </el-dialog>
 
     <!-- 新增 / 编辑模型 -->
-    <el-dialog v-model="modelDialog" :title="modelForm.id ? '编辑模型' : '新增模型'" width="520px">
+    <el-dialog v-model="modelDialog" :title="modelForm.id ? '编辑模型' : '新增模型'" width="720px">
       <el-form label-width="100px">
         <el-form-item label="显示名称">
           <el-input v-model="modelForm.name" placeholder="例如 GPT-4o" />
-        </el-form-item>
-        <el-form-item label="API Base">
-          <el-input v-model="modelForm.apiBase" placeholder="https://api.openai.com/v1" />
-        </el-form-item>
-        <el-form-item label="API Key">
-          <el-input v-model="modelForm.apiKey" type="password" show-password placeholder="上游密钥" />
         </el-form-item>
         <el-form-item label="上游模型">
           <el-input v-model="modelForm.model" placeholder="gpt-4o-mini" />
@@ -896,9 +1005,50 @@
           <el-input-number v-model="modelForm.multiplier" :min="0.1" :step="0.1" :precision="1" />
           <span class="dim" style="margin-left: 8px">倍率越低越便宜，0.2 ≈ 5000 token/积分</span>
         </el-form-item>
+        <el-form-item label="图片理解">
+          <el-switch v-model="modelForm.supportsVision" active-text="支持图片输入" />
+          <span class="dim" style="margin-left: 8px">开启后允许用户上传图片；未开启时服务端会拒绝图片请求</span>
+        </el-form-item>
         <el-form-item label="模型简介">
           <el-input v-model="modelForm.description" maxlength="120" placeholder="展示在 App 模型选择器中，可选" />
         </el-form-item>
+
+        <el-divider content-position="left">
+          <span class="dim">线路（可配置多组 BaseURL / APIKey，自动故障切换）</span>
+        </el-divider>
+        <div v-for="(channel, index) in modelForm.channels" :key="index" class="channel-row">
+          <div class="channel-head">
+            <strong>线路 {{ index + 1 }}</strong>
+            <el-input
+              v-model="channel.name"
+              size="small"
+              placeholder="线路备注"
+              style="max-width: 180px"
+            />
+            <el-switch v-model="channel.enabled" size="small" active-text="启用" />
+            <el-button
+              link
+              type="danger"
+              size="small"
+              :disabled="modelForm.channels.length <= 1"
+              @click="removeModelChannel(index)"
+            >
+              删除
+            </el-button>
+          </div>
+          <el-input
+            v-model="channel.apiBase"
+            placeholder="https://api.stepfun.com/v1/chat/completions（也可填到 /v1，自动补全）"
+            style="margin-bottom: 8px"
+          />
+          <el-input
+            v-model="channel.apiKey"
+            type="password"
+            show-password
+            placeholder="该线路的 API Key"
+          />
+        </div>
+        <el-button size="small" @click="addModelChannel">+ 添加线路</el-button>
       </el-form>
       <template #footer>
         <el-button @click="modelDialog = false">取消</el-button>

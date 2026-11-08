@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import '../config/app_config.dart';
 import '../models/sync_repo.dart';
 import 'git_host.dart';
+import 'github_hosts_service.dart';
 
 class GitSyncException implements Exception {
   GitSyncException(this.message);
@@ -55,6 +56,68 @@ class GitClientService {
     return GitSyncOutcome(path: destPath, cloned: !existed);
   }
 
+  /// 解析 GitHub / Gitee 仓库 URL
+  ///
+  /// 支持：
+  /// - https://github.com/owner/repo
+  /// - https://github.com/owner/repo/tree/dev
+  /// - https://gitee.com/owner/repo.git
+  static SyncRepo? parseRepoUrl(String raw) {
+    var text = raw.trim();
+    if (text.isEmpty) return null;
+    text = text.replaceAll(RegExp(r'\.git$'), '');
+    final uri = Uri.tryParse(
+      text.contains('://') ? text : 'https://$text',
+    );
+    if (uri == null) return null;
+    final GitHost host;
+    switch (uri.host.toLowerCase()) {
+      case 'github.com':
+      case 'www.github.com':
+        host = GitHost.github;
+        break;
+      case 'gitee.com':
+      case 'www.gitee.com':
+        host = GitHost.gitee;
+        break;
+      default:
+        return null;
+    }
+    final segments = uri.pathSegments.where((s) => s.isNotEmpty).toList();
+    if (segments.length < 2) return null;
+    final owner = segments[0];
+    final repoName = segments[1];
+    var branch = '';
+    final treeIndex = segments.indexOf('tree');
+    if (treeIndex >= 0 && treeIndex + 1 < segments.length) {
+      branch = segments[treeIndex + 1];
+    }
+    return SyncRepo(
+      host: host,
+      fullName: '$owner/$repoName',
+      defaultBranch: branch,
+      htmlUrl: '${host.webUrl}/$owner/$repoName',
+      private: false,
+    );
+  }
+
+  /// 通过仓库 URL 直接拉取（未登录时走公开归档地址）
+  Future<GitSyncOutcome> syncFromUrl({
+    required String url,
+    required String destPath,
+    String token = '',
+  }) async {
+    final repo = parseRepoUrl(url);
+    if (repo == null) {
+      throw GitSyncException('无法识别该地址，请填写 GitHub / Gitee 仓库链接');
+    }
+    final bytes = await _downloadArchive(repo, token: token);
+    final archive = _decodeZip(bytes);
+    final existed = Directory(destPath).existsSync();
+    await _extractTo(archive, destPath, fullName: repo.fullName);
+    return GitSyncOutcome(path: destPath, cloned: !existed);
+  }
+
   // ---------------------------------------------------------------------------
   // 下载
   // ---------------------------------------------------------------------------
@@ -65,9 +128,26 @@ class GitClientService {
   }) async {
     final Uri uri;
     final Map<String, String> headers;
-    if (repo.host == GitHost.github) {
+    final branch = repo.defaultBranch;
+    if (token.isEmpty) {
+      // 未登录：使用公开归档地址（无需鉴权）
+      if (repo.host == GitHost.github) {
+        uri = Uri.parse(
+          'https://codeload.github.com/${repo.fullName}/zip/'
+          '${branch.isEmpty ? 'HEAD' : branch}',
+        );
+      } else {
+        uri = Uri.parse(
+          'https://gitee.com/${repo.fullName}/repository/archive/'
+          '${branch.isEmpty ? 'master' : branch}.zip',
+        );
+      }
+      headers = const {};
+    } else if (repo.host == GitHost.github) {
       uri = Uri.parse(
-        '${AppConfig.apiBase}/repos/${repo.fullName}/zipball/${repo.defaultBranch}',
+        branch.isEmpty
+            ? '${AppConfig.apiBase}/repos/${repo.fullName}/zipball'
+            : '${AppConfig.apiBase}/repos/${repo.fullName}/zipball/$branch',
       );
       headers = {
         'Authorization': 'Bearer $token',
@@ -80,18 +160,24 @@ class GitClientService {
           Uri.parse(
             '${AppConfig.giteeApiBase}/repos/${repo.fullName}/zipball',
           ).replace(
-            queryParameters: {'access_token': token, 'ref': repo.defaultBranch},
+            queryParameters: {
+              'access_token': token,
+              if (branch.isNotEmpty) 'ref': branch,
+            },
           );
       headers = const {};
     }
 
     final http.Response res;
+    final client = GithubHostsService.instance.newClient();
     try {
-      res = await http
+      res = await client
           .get(uri, headers: headers)
           .timeout(_downloadTimeout);
     } catch (e) {
       throw GitSyncException('网络请求失败：$e');
+    } finally {
+      client.close();
     }
     if (res.statusCode < 200 || res.statusCode >= 300) {
       throw GitSyncException(

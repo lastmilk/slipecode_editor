@@ -85,9 +85,9 @@
                 android:value="AI assistant floating ball overlay" />
         </service>
 
-        <!-- 云端构建保活前台服务（常驻通知） -->
+        <!-- 任务实况通知前台服务（AI 执行 / 云端构建的类灵动岛通知） -->
         <service
-            android:name=".BuildKeepAliveService"
+            android:name=".LiveTaskService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
     </application>

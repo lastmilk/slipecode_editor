@@ -5,6 +5,8 @@
 //  - SSE 流式响应（含 reasoning_content 思考过程透传）
 //  - tools / tool_choice 透传（Agent 工具调用）
 //  - 按上游 usage 扣积分；无 usage 时按字符数估算
+//  - 同一模型配置多组 BaseURL / APIKey，按健康状态智能路由与自动重试
+//  - apiBase 可填到 /v1（自动补 /chat/completions），也可直接填完整地址
 
 import {
   MIN_CALL_CREDITS,
@@ -32,8 +34,159 @@ function publicLlmModel(m) {
     description: m.description || '',
     multiplier: d.multiplier,
     tokensPerCredit: d.tokensPerCredit,
+    supportsVision: m.supportsVision === true,
     isDefault: false,
   };
+}
+
+/** 把 apiBase 解析为完整的 chat/completions 地址 */
+export function resolveChatUrl(apiBase) {
+  const base = String(apiBase || '').trim().replace(/\/+$/, '');
+  if (!base) return '';
+  if (/\/chat\/completions$/i.test(base)) return base;
+  if (/\/completions$/i.test(base)) return base;
+  return `${base}/chat/completions`;
+}
+
+/** 模型可用于调用的线路（兼容旧的单 apiBase 配置） */
+function modelChannels(config) {
+  const list = Array.isArray(config.channels)
+    ? config.channels.filter(
+        (c) => c && c.enabled !== false && resolveChatUrl(c.apiBase),
+      )
+    : [];
+  if (list.length > 0) {
+    return list.map((c, index) => ({
+      id: String(c.id || `ch_${index}`),
+      name: String(c.name || `线路 ${index + 1}`),
+      apiBase: String(c.apiBase),
+      apiKey: String(c.apiKey || ''),
+      weight: Number.isFinite(c.weight) ? Math.max(1, c.weight) : 1,
+    }));
+  }
+  if (resolveChatUrl(config.apiBase)) {
+    return [
+      {
+        id: 'default',
+        name: '默认线路',
+        apiBase: String(config.apiBase),
+        apiKey: String(config.apiKey || ''),
+        weight: 1,
+      },
+    ];
+  }
+  return [];
+}
+
+// 线路健康状态（内存态，重启后重置）：失败冷却 + 最近使用时间
+const channelHealth = new Map();
+
+function healthKey(modelId, channelId) {
+  return `${modelId}::${channelId}`;
+}
+
+function channelState(modelId, channelId) {
+  const key = healthKey(modelId, channelId);
+  if (!channelHealth.has(key)) {
+    channelHealth.set(key, {
+      fails: 0,
+      cooldownUntil: 0,
+      lastUsedAt: 0,
+      lastError: '',
+    });
+  }
+  return channelHealth.get(key);
+}
+
+/** 智能路由：优先未冷却、失败少、最近最少使用的线路 */
+function orderedChannels(config) {
+  const now = Date.now();
+  return modelChannels(config)
+    .map((channel) => ({ channel, state: channelState(config.id, channel.id) }))
+    .filter(({ state }) => state.cooldownUntil <= now)
+    .sort(
+      (a, b) =>
+        a.state.fails - b.state.fails ||
+        a.state.lastUsedAt - b.state.lastUsedAt ||
+        a.channel.weight - b.channel.weight,
+    )
+    .map(({ channel }) => channel);
+}
+
+function markChannelSuccess(config, channel, latencyMs) {
+  const state = channelState(config.id, channel.id);
+  state.fails = 0;
+  state.cooldownUntil = 0;
+  state.lastUsedAt = Date.now();
+  state.latencyMs = latencyMs;
+}
+
+function markChannelFailure(config, channel, error) {
+  const state = channelState(config.id, channel.id);
+  state.fails += 1;
+  state.lastUsedAt = Date.now();
+  state.lastError = String(error || '').slice(0, 200);
+  // 指数退避冷却：30s / 60s / 120s，最长 5 分钟
+  const cooldown = Math.min(300_000, 30_000 * 2 ** (state.fails - 1));
+  state.cooldownUntil = Date.now() + cooldown;
+  recordChannelStat(config, channel, { ok: false, error: state.lastError });
+}
+
+/** 按模型 / 线路维度累计调用统计 */
+function recordChannelStat(config, channel, { ok, tokens = 0, error = '' }) {
+  const db = getDb();
+  if (!db.stats.models || typeof db.stats.models !== 'object') {
+    db.stats.models = {};
+  }
+  if (!db.stats.channels || typeof db.stats.channels !== 'object') {
+    db.stats.channels = {};
+  }
+  const modelStat = db.stats.models[config.id] || {
+    name: config.name,
+    calls: 0,
+    tokens: 0,
+    errors: 0,
+    lastAt: 0,
+  };
+  const channelKey = healthKey(config.id, channel.id);
+  const channelStat = db.stats.channels[channelKey] || {
+    modelId: config.id,
+    modelName: config.name,
+    channelId: channel.id,
+    channelName: channel.name,
+    calls: 0,
+    tokens: 0,
+    errors: 0,
+    lastAt: 0,
+    lastError: '',
+  };
+  modelStat.name = config.name;
+  channelStat.channelName = channel.name;
+  modelStat.lastAt = Date.now();
+  channelStat.lastAt = Date.now();
+  if (ok) {
+    modelStat.calls += 1;
+    modelStat.tokens += tokens;
+    channelStat.calls += 1;
+    channelStat.tokens += tokens;
+  } else {
+    modelStat.errors += 1;
+    channelStat.errors += 1;
+    channelStat.lastError = error;
+  }
+  db.stats.models[config.id] = modelStat;
+  db.stats.channels[channelKey] = channelStat;
+}
+
+/** 判断消息中是否包含图片（多模态 content 数组） */
+function messagesContainImage(messages) {
+  for (const m of messages || []) {
+    if (!Array.isArray(m?.content)) continue;
+    for (const part of m.content) {
+      if (part && part.type === 'image_url') return true;
+    }
+  }
+  return false;
 }
 
 export async function handleLlmModels(req, res) {
@@ -86,14 +239,14 @@ function costForTokens(tokens, multiplier) {
   );
 }
 
-async function fetchUpstream(config, upstreamBody, signal) {
-  const url = `${String(config.apiBase).replace(/\/+$/, '')}/chat/completions`;
+async function fetchUpstream(channel, upstreamBody, signal) {
+  const url = resolveChatUrl(channel.apiBase);
   const send = (body) =>
     fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${config.apiKey}`,
+        Authorization: `Bearer ${channel.apiKey}`,
       },
       body: JSON.stringify(body),
       signal,
@@ -113,6 +266,41 @@ async function fetchUpstream(config, upstreamBody, signal) {
   return upstream;
 }
 
+/**
+ * 按线路健康状态依次尝试（最多 3 条）。
+ * 仅对网络错误 / 429 / 5xx 切换线路；4xx 参数错误直接返回给客户端。
+ */
+async function requestWithFailover(config, upstreamBody, signal) {
+  const channels = orderedChannels(config);
+  if (channels.length === 0) {
+    throw new Error('模型未配置可用的 BaseURL / APIKey');
+  }
+  let lastError = null;
+  for (const channel of channels.slice(0, 3)) {
+    const startedAt = Date.now();
+    try {
+      const upstream = await fetchUpstream(channel, upstreamBody, signal);
+      if (upstream.status === 429 || upstream.status >= 500) {
+        lastError = new Error(`上游 HTTP ${upstream.status}`);
+        markChannelFailure(config, channel, lastError.message);
+        try {
+          await upstream.body?.cancel();
+        } catch {
+          // 忽略取消失败
+        }
+        continue;
+      }
+      markChannelSuccess(config, channel, Date.now() - startedAt);
+      return { upstream, channel };
+    } catch (err) {
+      if (err?.name === 'AbortError' || err?.name === 'TimeoutError') throw err;
+      lastError = err;
+      markChannelFailure(config, channel, err);
+    }
+  }
+  throw lastError || new Error('所有线路均不可用');
+}
+
 export async function handleLlmChat(req, res) {
   const user = requireUser(req);
   const body = await readJson(req);
@@ -121,6 +309,12 @@ export async function handleLlmChat(req, res) {
   if (!config) return sendJson(res, 400, { error: '模型不存在或已下线' });
   if (!Array.isArray(body.messages) || body.messages.length === 0) {
     return sendJson(res, 400, { error: 'messages 不能为空' });
+  }
+  // 图片理解需在后台为模型勾选「支持图片理解」
+  if (messagesContainImage(body.messages) && config.supportsVision !== true) {
+    return sendJson(res, 400, {
+      error: '该模型未开启图片理解，请在后台为模型勾选「支持图片理解」',
+    });
   }
 
   const balance = getCredits(user);
@@ -147,14 +341,20 @@ export async function handleLlmChat(req, res) {
   const { multiplier } = modelDefaults(config);
 
   let upstream;
+  let channel;
   try {
-    upstream = await fetchUpstream(
+    const picked = await requestWithFailover(
       config,
       upstreamBody,
       AbortSignal.timeout(wantStream ? 300_000 : 120_000),
     );
-  } catch {
-    return sendJson(res, 502, { error: '无法连接上游模型服务' });
+    upstream = picked.upstream;
+    channel = picked.channel;
+  } catch (err) {
+    return sendJson(res, 502, {
+      error: '无法连接上游模型服务',
+      detail: String(err?.message || err).slice(0, 200),
+    });
   }
 
   if (!upstream.ok) {
@@ -164,6 +364,8 @@ export async function handleLlmChat(req, res) {
     } catch {
       detail = '';
     }
+    markChannelFailure(config, channel, `HTTP ${upstream.status}: ${detail}`);
+    await saveDb();
     return sendJson(res, 502, {
       error: '上游模型调用失败',
       upstreamStatus: upstream.status,
@@ -172,16 +374,33 @@ export async function handleLlmChat(req, res) {
   }
 
   if (wantStream) {
-    return proxyStream({ req, res, user, config, upstream, multiplier, messages: body.messages });
+    return proxyStream({
+      req,
+      res,
+      user,
+      config,
+      channel,
+      upstream,
+      multiplier,
+      messages: body.messages,
+    });
   }
-  return proxyJson({ res, user, config, upstream, multiplier, messages: body.messages });
+  return proxyJson({
+    res,
+    user,
+    config,
+    channel,
+    upstream,
+    multiplier,
+    messages: body.messages,
+  });
 }
 
 // ---------------------------------------------------------------------------
 // 普通响应
 // ---------------------------------------------------------------------------
 
-async function proxyJson({ res, user, config, upstream, multiplier, messages }) {
+async function proxyJson({ res, user, config, channel, upstream, multiplier, messages }) {
   let text;
   try {
     text = await upstream.text();
@@ -208,6 +427,7 @@ async function proxyJson({ res, user, config, upstream, multiplier, messages }) 
       : estimateTokens(messages, data);
   const cost = costForTokens(totalTokens, multiplier);
   applyCredits(user, -cost, 'llm_usage', `${config.name} · ${totalTokens} tokens`);
+  recordChannelStat(config, channel, { ok: true, tokens: totalTokens });
   bumpStat('llmCalls');
   bumpStat('tokensUsed', totalTokens);
   await saveDb();
@@ -220,7 +440,16 @@ async function proxyJson({ res, user, config, upstream, multiplier, messages }) 
 // SSE 流式响应
 // ---------------------------------------------------------------------------
 
-async function proxyStream({ req, res, user, config, upstream, multiplier, messages }) {
+async function proxyStream({
+  req,
+  res,
+  user,
+  config,
+  channel,
+  upstream,
+  multiplier,
+  messages,
+}) {
   res.writeHead(200, {
     'Content-Type': 'text/event-stream; charset=utf-8',
     'Cache-Control': 'no-cache, no-transform',
@@ -311,6 +540,7 @@ async function proxyStream({ req, res, user, config, upstream, multiplier, messa
       : promptTokens + completionTokens;
   const cost = costForTokens(totalTokens, multiplier);
   applyCredits(user, -cost, 'llm_usage', `${config.name} · ${totalTokens} tokens`);
+  recordChannelStat(config, channel, { ok: true, tokens: totalTokens });
   bumpStat('llmCalls');
   bumpStat('tokensUsed', totalTokens);
   await saveDb();

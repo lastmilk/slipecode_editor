@@ -21,6 +21,7 @@ import 'screens/home_screen.dart';
 import 'services/app_globals.dart';
 import 'services/ai_extensions_service.dart';
 import 'services/custom_payload_service.dart';
+import 'services/github_hosts_service.dart';
 import 'services/overlay_service.dart';
 import 'services/project_history_service.dart';
 import 'widgets/ai_quick_chat.dart';
@@ -39,6 +40,14 @@ Future<void> main() async {
 
   // 第三方 MCP / 外源 Skill 的本地配置（仅本机保存）
   await AiExtensionsService.instance.ensureLoaded();
+
+  // GitHub 专用 Hosts：先读本地缓存，过期时后台从服务端更新
+  // （仅作用于应用内 HTTP 请求，不涉及 VPN / 代理 / 系统 hosts）
+  unawaited(
+    GithubHostsService.instance.ensureLoaded(
+      enabled: settingsProvider.settings.githubHostsEnabled,
+    ),
+  );
 
   // 用户自定义 Payload：启动时注入 System / Block 注册表，
   // 保证设计稿编排器与 Loader 构建能立即看到自定义条目

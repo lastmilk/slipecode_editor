@@ -7,6 +7,30 @@ import '../models/chat_segment.dart';
 /// 聊天消息角色
 enum ChatRole { system, user, assistant, tool }
 
+/// 把 API Base 解析为完整的 chat/completions 地址
+///
+/// 兼容两种填法：
+/// - `https://api.stepfun.com/v1`（自动补 /chat/completions）
+/// - `https://api.stepfun.com/v1/chat/completions`（完整地址，原样使用）
+String resolveChatUrl(String apiBase) {
+  final base = apiBase.trim().replaceAll(RegExp(r'/+$'), '');
+  if (base.isEmpty) return base;
+  if (RegExp(r'/(chat/)?completions$', caseSensitive: false).hasMatch(base)) {
+    return base;
+  }
+  return '$base/chat/completions';
+}
+
+/// 用户消息附带的图片（多模态输入）
+class ChatImageAttachment {
+  const ChatImageAttachment({required this.name, required this.dataUrl});
+
+  final String name;
+
+  /// data:image/png;base64,...
+  final String dataUrl;
+}
+
 /// 单条聊天消息
 class ChatMessage {
   final ChatRole role;
@@ -30,6 +54,12 @@ class ChatMessage {
   /// assistant 消息的渲染分段（思考/正文/工具调用按时间顺序穿插），仅用于展示
   final List<ChatSegment>? segments;
 
+  /// 用户消息附带的图片（多模态输入，仅发送时使用）
+  final List<ChatImageAttachment> images;
+
+  /// 实际发送给模型的文本（附件内容较长时与展示文本分离）
+  final String? apiContent;
+
   const ChatMessage({
     required this.role,
     required this.content,
@@ -39,6 +69,8 @@ class ChatMessage {
     this.reasoning,
     this.kind = 'normal',
     this.segments,
+    this.images = const [],
+    this.apiContent,
   });
 
   factory ChatMessage.toolResult({
@@ -62,7 +94,17 @@ class ChatMessage {
         ChatRole.assistant => 'assistant',
         ChatRole.tool => 'tool',
       },
-      'content': content,
+      'content': images.isEmpty
+          ? (apiContent ?? content)
+          : [
+              if ((apiContent ?? content).trim().isNotEmpty)
+                {'type': 'text', 'text': apiContent ?? content},
+              for (final image in images)
+                {
+                  'type': 'image_url',
+                  'image_url': {'url': image.dataUrl},
+                },
+            ],
     };
     if (toolCallId != null) json['tool_call_id'] = toolCallId;
     if (name != null) json['name'] = name;
@@ -81,6 +123,7 @@ class ChatMessage {
         toolCallId: json['tool_call_id'] as String?,
         name: json['name'] as String?,
         reasoning: json['reasoning_content'] as String?,
+        apiContent: json['apiContent'] as String?,
       );
 }
 
@@ -168,8 +211,7 @@ class LlmService {
       throw const LlmException('未配置 LLM，请在偏好设置中填写 API 地址、Key 和模型');
     }
 
-    final base = apiBase.replaceAll(RegExp(r'/+$'), '');
-    final uri = Uri.parse('$base/chat/completions');
+    final uri = Uri.parse(resolveChatUrl(apiBase));
 
     final body = <String, dynamic>{
       'model': model,
@@ -250,8 +292,7 @@ class LlmService {
       throw const LlmException('未配置 LLM，请在偏好设置中填写 API 地址、Key 和模型');
     }
 
-    final base = apiBase.replaceAll(RegExp(r'/+$'), '');
-    final uri = Uri.parse('$base/chat/completions');
+    final uri = Uri.parse(resolveChatUrl(apiBase));
     final body = <String, dynamic>{
       'model': model,
       'messages': messages.map((m) => m.toJson()).toList(),

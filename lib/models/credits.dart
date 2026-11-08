@@ -7,6 +7,9 @@ class BuiltinLlmModel {
   final int tokensPerCredit;
   final bool isDefault;
 
+  /// 是否支持图片理解（后台勾选后允许上传图片）
+  final bool supportsVision;
+
   const BuiltinLlmModel({
     required this.id,
     required this.name,
@@ -14,6 +17,7 @@ class BuiltinLlmModel {
     this.multiplier = 1,
     this.tokensPerCredit = 1000,
     this.isDefault = false,
+    this.supportsVision = false,
   });
 
   factory BuiltinLlmModel.fromJson(Map<String, dynamic> json) {
@@ -24,6 +28,7 @@ class BuiltinLlmModel {
       multiplier: (json['multiplier'] as num?)?.toDouble() ?? 1,
       tokensPerCredit: (json['tokensPerCredit'] as num?)?.toInt() ?? 1000,
       isDefault: json['isDefault'] == true,
+      supportsVision: json['supportsVision'] == true,
     );
   }
 }

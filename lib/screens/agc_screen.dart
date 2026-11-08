@@ -12,6 +12,7 @@ import '../providers/ai_provider.dart';
 import '../providers/editor_provider.dart';
 import '../providers/project_provider.dart';
 import '../services/ai_change_journal.dart';
+import '../services/ai_attachment_service.dart';
 import '../services/ai_extensions_service.dart';
 import '../services/conversation_service.dart';
 import '../services/llm_service.dart';
@@ -40,6 +41,12 @@ class _AgcScreenState extends State<AgcScreen> {
 
   /// 输入以「/」开头时为指令匹配关键字（不含 '/'），否则为 null
   String? _slashQuery;
+
+  /// 待发送的图片附件
+  final List<ChatImageAttachment> _pendingImages = [];
+
+  /// 待发送的文本附件
+  final List<AiTextAttachment> _pendingFiles = [];
 
   @override
   void initState() {
@@ -95,15 +102,109 @@ class _AgcScreenState extends State<AgcScreen> {
 
   Future<void> _send([String? preset]) async {
     final text = (preset ?? _inputController.text).trim();
-    if (text.isEmpty) return;
+    if (text.isEmpty && _pendingImages.isEmpty && _pendingFiles.isEmpty) {
+      return;
+    }
     // 直接发送「/」指令时同样生效（如用户未点选面板，直接输入 /plan 回车）
     if (text == '/plan') {
       _runSlashCommand(text);
       return;
     }
+    final images = List<ChatImageAttachment>.from(_pendingImages);
+    final files = List<AiTextAttachment>.from(_pendingFiles);
+    final attachmentContext = AiAttachmentService.composeContext(files);
+    final attachmentNames = [
+      ...images.map((e) => e.name),
+      ...files.map((e) => e.name),
+    ];
     _inputController.clear();
-    await context.read<AiProvider>().sendMessage(text);
+    setState(() {
+      _pendingImages.clear();
+      _pendingFiles.clear();
+    });
+    await context.read<AiProvider>().sendMessage(
+      text.isEmpty ? '请分析我上传的附件' : text,
+      images: images,
+      attachmentContext: attachmentContext,
+      attachmentNames: attachmentNames,
+    );
     _scrollToBottom();
+  }
+
+  /// 选择附件类型（图片 / 文件）
+  Future<void> _showAttachmentSheet() async {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final image = await showModalBottomSheet<bool>(
+      context: context,
+      backgroundColor: isDark ? const Color(0xFF26262B) : Colors.white,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.image_outlined),
+              title: const Text('上传图片'),
+              subtitle: const Text('需要当前模型支持图片理解'),
+              onTap: () => Navigator.of(sheetContext).pop(true),
+            ),
+            ListTile(
+              leading: const Icon(Icons.attach_file),
+              title: const Text('上传文件'),
+              subtitle: const Text('文本文件直接读取，Zip 会解压后读取文本'),
+              onTap: () => Navigator.of(sheetContext).pop(false),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (image == null || !mounted) return;
+    if (image) {
+      await _pickImages();
+    } else {
+      await _pickFiles();
+    }
+  }
+
+  /// 选择图片附件
+  Future<void> _pickImages() async {
+    final ai = context.read<AiProvider>();
+    if (!ai.currentModelSupportsVision) {
+      _showSnack('当前模型不支持图片理解，请在设置中切换到支持图片的模型');
+      return;
+    }
+    final account = context.read<AccountProvider>();
+    await AiAttachmentService.instance.ensureLimits(token: account.token);
+    final result = await AiAttachmentService.instance.pickImages();
+    if (!mounted) return;
+    if (result.images.isNotEmpty) {
+      setState(() => _pendingImages.addAll(result.images));
+    }
+    if (result.skipped.isNotEmpty) {
+      _showSnack('部分图片未添加：${result.skipped.join('；')}');
+    }
+  }
+
+  /// 选择文件附件
+  Future<void> _pickFiles() async {
+    final account = context.read<AccountProvider>();
+    await AiAttachmentService.instance.ensureLimits(token: account.token);
+    final result = await AiAttachmentService.instance.pickFiles(
+      token: account.token,
+    );
+    if (!mounted) return;
+    if (result.files.isNotEmpty) {
+      setState(() => _pendingFiles.addAll(result.files));
+    }
+    if (result.skipped.isNotEmpty) {
+      _showSnack('部分文件未添加：${result.skipped.take(3).join('；')}');
+    }
+  }
+
+  void _showSnack(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), duration: const Duration(seconds: 3)),
+    );
   }
 
   @override
@@ -211,13 +312,52 @@ class _AgcScreenState extends State<AgcScreen> {
             onSelect: _runSlashCommand,
           ),
 
+        // 已选附件
+        if (_pendingImages.isNotEmpty || _pendingFiles.isNotEmpty)
+          _buildAttachmentChips(),
+
         // 输入栏
         _AgcInputBar(
           controller: _inputController,
           busy: ai.isThinking,
           onSend: _send,
+          onAttach: ai.isThinking ? null : _showAttachmentSheet,
         ),
       ],
+    );
+  }
+
+  /// 待发送附件列表（可逐个移除）
+  Widget _buildAttachmentChips() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
+      child: Wrap(
+        spacing: 6,
+        runSpacing: 4,
+        children: [
+          for (var i = 0; i < _pendingImages.length; i++)
+            InputChip(
+              avatar: const Icon(Icons.image_outlined, size: 14),
+              label: Text(
+                _pendingImages[i].name,
+                style: const TextStyle(fontSize: 11),
+              ),
+              visualDensity: VisualDensity.compact,
+              onDeleted: () => setState(() => _pendingImages.removeAt(i)),
+            ),
+          for (var i = 0; i < _pendingFiles.length; i++)
+            InputChip(
+              avatar: const Icon(Icons.description_outlined, size: 14),
+              label: Text(
+                _pendingFiles[i].name,
+                style: const TextStyle(fontSize: 11),
+              ),
+              visualDensity: VisualDensity.compact,
+              onDeleted: () => setState(() => _pendingFiles.removeAt(i)),
+            ),
+        ],
+      ),
     );
   }
 
@@ -1202,11 +1342,15 @@ class _AgcInputBar extends StatelessWidget {
     required this.controller,
     required this.busy,
     required this.onSend,
+    this.onAttach,
   });
 
   final TextEditingController controller;
   final bool busy;
   final VoidCallback onSend;
+
+  /// 选择附件（图片 / 文件）；为 null 时隐藏入口
+  final VoidCallback? onAttach;
 
   @override
   Widget build(BuildContext context) {
@@ -1236,6 +1380,16 @@ class _AgcInputBar extends StatelessWidget {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
+              if (onAttach != null)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 2),
+                  child: IconButton(
+                    visualDensity: VisualDensity.compact,
+                    onPressed: busy ? null : onAttach,
+                    icon: const Icon(Icons.attach_file, size: 19),
+                    tooltip: '上传图片或文件',
+                  ),
+                ),
               Expanded(
                 child: TextField(
                   controller: controller,

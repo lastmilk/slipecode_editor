@@ -64,6 +64,12 @@ import {
   handleAdminDeleteActivationCode,
 } from './routes/billing.js';
 import { handleLlmChat, handleLlmModels } from './routes/llm.js';
+import { handleAiLimits, handleAiUnzip } from './routes/ai_files.js';
+import {
+  handleAdminRefreshGithubHosts,
+  handleGetGithubHosts,
+  startGithubHostsSync,
+} from './routes/github_hosts.js';
 import {
   handleCheckin,
   handleDeleteWallpaper,
@@ -179,6 +185,14 @@ const ROUTES = {
   'GET /api/llm/models': handleLlmModels,
   'POST /api/llm/chat': handleLlmChat,
   'POST /api/llm/chat/completions': handleLlmChat,
+
+  // AI 附件（Zip 云端解压 / 上传限制）
+  'GET /api/ai/limits': handleAiLimits,
+  'POST /api/ai/files/unzip': handleAiUnzip,
+
+  // GitHub 专用 Hosts（应用内使用，不影响系统网络）
+  'GET /api/github-hosts': handleGetGithubHosts,
+  'POST /api/admin/github-hosts/refresh': handleAdminRefreshGithubHosts,
 
   // 社区 Payload（列表公开；发布 / 下载需登录）
   'POST /api/community/publish': handlePublishPackage,
@@ -433,6 +447,7 @@ const server = createServer(async (req, res) => {
 });
 
 await loadDb();
+startGithubHostsSync();
 server.listen(PORT, () => {
   console.log(`SLIPE backend listening on http://localhost:${PORT}`);
   console.log('  API      : https://api.lineregre.com');

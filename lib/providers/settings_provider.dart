@@ -229,6 +229,18 @@ class SettingsProvider extends ChangeNotifier {
     await _save();
   }
 
+  /// 是否启用任务实况通知（类灵动岛）
+  Future<void> setLiveNotifications(bool value) async {
+    _settings = _settings.copyWith(liveNotifications: value);
+    await _save();
+  }
+
+  /// 是否启用 GitHub 专用 Hosts
+  Future<void> setGithubHostsEnabled(bool value) async {
+    _settings = _settings.copyWith(githubHostsEnabled: value);
+    await _save();
+  }
+
   /// 云同步网络策略：wifi / any / never
   Future<void> setSyncNetwork(String policy) async {
     _settings = _settings.copyWith(syncNetwork: policy);

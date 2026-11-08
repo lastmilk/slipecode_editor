@@ -128,6 +128,12 @@ class AppSettings {
   /// 是否启用系统级悬浮球（Android，需要悬浮窗权限；iOS 不支持）
   final bool systemOverlayEnabled;
 
+  /// 是否启用任务实况通知（类灵动岛：AI 执行 / 云端构建进度）
+  final bool liveNotifications;
+
+  /// 是否启用 GitHub 专用 Hosts（仅应用内 HTTP 请求，不涉及 VPN / 代理）
+  final bool githubHostsEnabled;
+
   // ---------------------------------------------------------------------------
   // 代码补全 / 音量键
   // ---------------------------------------------------------------------------
@@ -187,6 +193,8 @@ class AppSettings {
     this.backgroundImageOpacity = 0.15,
     this.aiFloatingBallEnabled = true,
     this.systemOverlayEnabled = false,
+    this.liveNotifications = true,
+    this.githubHostsEnabled = true,
     this.completionEnabled = true,
     this.volumeKeyCompletionEnabled = true,
     this.homeTitle = 'SLIPE',
@@ -239,6 +247,8 @@ class AppSettings {
     double? backgroundImageOpacity,
     bool? aiFloatingBallEnabled,
     bool? systemOverlayEnabled,
+    bool? liveNotifications,
+    bool? githubHostsEnabled,
     bool? completionEnabled,
     bool? volumeKeyCompletionEnabled,
     String? homeTitle,
@@ -280,6 +290,8 @@ class AppSettings {
       aiFloatingBallEnabled:
           aiFloatingBallEnabled ?? this.aiFloatingBallEnabled,
       systemOverlayEnabled: systemOverlayEnabled ?? this.systemOverlayEnabled,
+      liveNotifications: liveNotifications ?? this.liveNotifications,
+      githubHostsEnabled: githubHostsEnabled ?? this.githubHostsEnabled,
       completionEnabled: completionEnabled ?? this.completionEnabled,
       volumeKeyCompletionEnabled:
           volumeKeyCompletionEnabled ?? this.volumeKeyCompletionEnabled,
@@ -330,6 +342,8 @@ class AppSettings {
       'backgroundImageOpacity': backgroundImageOpacity,
       'aiFloatingBallEnabled': aiFloatingBallEnabled,
       'systemOverlayEnabled': systemOverlayEnabled,
+      'liveNotifications': liveNotifications,
+      'githubHostsEnabled': githubHostsEnabled,
       'completionEnabled': completionEnabled,
       'volumeKeyCompletionEnabled': volumeKeyCompletionEnabled,
       'homeTitle': homeTitle,
@@ -435,6 +449,10 @@ class AppSettings {
       systemOverlayEnabled:
           json['systemOverlayEnabled'] as bool? ??
           defaults.systemOverlayEnabled,
+      liveNotifications:
+          json['liveNotifications'] as bool? ?? defaults.liveNotifications,
+      githubHostsEnabled:
+          json['githubHostsEnabled'] as bool? ?? defaults.githubHostsEnabled,
       completionEnabled:
           json['completionEnabled'] as bool? ?? defaults.completionEnabled,
       volumeKeyCompletionEnabled:

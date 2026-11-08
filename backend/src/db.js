@@ -167,6 +167,15 @@ const DEFAULT_DB = {
     portal: { qqGroup: '' },
     // 用户服务协议 / 隐私政策（公开只读，管理端可编辑）
     policies: DEFAULT_POLICIES,
+    // AI 附件上传限制（图片 / 文件 / 云解压）
+    aiUploads: {
+      enabled: true,
+      maxFiles: 5,
+      maxFileMb: 10,
+      maxTotalMb: 30,
+      maxUnzipFiles: 50,
+      maxUnzipMb: 50,
+    },
   },
   stats: {
     totals: {
@@ -179,7 +188,13 @@ const DEFAULT_DB = {
       tokensUsed: 0,
     },
     daily: {},
+    // 按模型维度：{ [modelId]: { name, calls, tokens, errors, lastAt } }
+    models: {},
+    // 按线路维度：{ [modelId::channelId]: { modelId, channelId, calls, tokens, errors, lastAt, lastError } }
+    channels: {},
   },
+  // GitHub 专用 Hosts（服务端每日从公共源拉取，客户端下载到本地）
+  githubHosts: null,
 };
 
 let db = structuredClone(DEFAULT_DB);
@@ -219,6 +234,10 @@ export async function loadDb() {
         : [],
       config: mergeConfig(parsed.config),
       stats: mergeStats(parsed.stats),
+      githubHosts:
+        parsed.githubHosts && typeof parsed.githubHosts === 'object'
+          ? parsed.githubHosts
+          : null,
     };
   } catch (err) {
     if (err.code !== 'ENOENT') throw err;
@@ -239,6 +258,7 @@ function mergeConfig(raw) {
       userAgreement: { ...base.policies.userAgreement, ...(raw.policies?.userAgreement || {}) },
       privacyPolicy: { ...base.policies.privacyPolicy, ...(raw.policies?.privacyPolicy || {}) },
     },
+    aiUploads: { ...base.aiUploads, ...(raw.aiUploads || {}) },
   };
 }
 
@@ -248,6 +268,8 @@ function mergeStats(raw) {
   return {
     totals: { ...base.totals, ...(raw.totals || {}) },
     daily: raw.daily && typeof raw.daily === 'object' ? raw.daily : {},
+    models: raw.models && typeof raw.models === 'object' ? raw.models : {},
+    channels: raw.channels && typeof raw.channels === 'object' ? raw.channels : {},
   };
 }
 

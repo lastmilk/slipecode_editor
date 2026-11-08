@@ -80,6 +80,14 @@ export async function handleAdminStats(req, res) {
       tokensUsed: todayStats.tokensUsed || 0,
     },
     daily: dailySeries(14),
+    llm: {
+      models: Object.entries(db.stats.models || {})
+        .map(([id, s]) => ({ id, ...s }))
+        .sort((a, b) => (b.calls || 0) - (a.calls || 0)),
+      channels: Object.values(db.stats.channels || {}).sort(
+        (a, b) => (b.calls || 0) - (a.calls || 0),
+      ),
+    },
     users: {
       count: users.length,
       newToday: users.filter((u) => (u.createdAt || '').slice(0, 10) === today).length,
@@ -153,6 +161,9 @@ export async function handleAdminGetConfig(req, res) {
     portal: {
       qqGroup: String(getDb().config?.portal?.qqGroup || ''),
     },
+    aiUploads: {
+      ...(getDb().config?.aiUploads || {}),
+    },
   });
 }
 
@@ -201,6 +212,23 @@ export async function handleAdminPutConfig(req, res) {
     if (typeof body.portal.qqGroup === 'string') {
       config.portal.qqGroup = body.portal.qqGroup.trim().slice(0, 32);
     }
+  }
+
+  if (body.aiUploads && typeof body.aiUploads === 'object') {
+    const limits = body.aiUploads;
+    const num = (value, min, max, fallback) => {
+      const n = Number(value);
+      if (!Number.isFinite(n)) return fallback;
+      return Math.min(max, Math.max(min, Math.round(n)));
+    };
+    config.aiUploads = {
+      enabled: limits.enabled !== false,
+      maxFiles: num(limits.maxFiles, 1, 20, 5),
+      maxFileMb: num(limits.maxFileMb, 1, 100, 10),
+      maxTotalMb: num(limits.maxTotalMb, 1, 200, 30),
+      maxUnzipFiles: num(limits.maxUnzipFiles, 1, 500, 50),
+      maxUnzipMb: num(limits.maxUnzipMb, 1, 500, 50),
+    };
   }
 
   if (typeof body.adminPassword === 'string' && body.adminPassword) {
@@ -329,7 +357,24 @@ function readModelFields(body) {
     apiKey: String(body.apiKey ?? '').trim(),
     model: String(body.model ?? '').trim(),
     description: String(body.description ?? '').trim().slice(0, 120),
+    supportsVision: body.supportsVision === true,
   };
+}
+
+/** 规范化多线路配置：每条线路 = 一个 BaseURL + APIKey 组合 */
+function normalizeChannels(raw) {
+  if (!Array.isArray(raw)) return null;
+  return raw
+    .filter((c) => c && String(c.apiBase || '').trim())
+    .slice(0, 10)
+    .map((c, index) => ({
+      id: String(c.id || '').trim() || `ch_${randomBytes(4).toString('hex')}`,
+      name: String(c.name || '').trim() || `线路 ${index + 1}`,
+      apiBase: String(c.apiBase).trim(),
+      apiKey: String(c.apiKey || '').trim(),
+      weight: Number.isFinite(Number(c.weight)) ? Math.max(1, Number(c.weight)) : 1,
+      enabled: c.enabled !== false,
+    }));
 }
 
 function validateMultiplier(value) {
@@ -344,15 +389,31 @@ export async function handleAdminCreateModel(req, res) {
   requireAdmin(req);
   const body = await readJson(req);
   const fields = readModelFields(body);
-  if (!fields.name || !fields.apiBase || !fields.apiKey || !fields.model) {
-    return sendJson(res, 400, { error: 'name / apiBase / apiKey / model 均不能为空' });
+  const channels = normalizeChannels(body.channels);
+  const hasChannels = Array.isArray(channels) && channels.length > 0;
+  if (!fields.name || !fields.model) {
+    return sendJson(res, 400, { error: 'name / model 不能为空' });
+  }
+  if (!hasChannels && (!fields.apiBase || !fields.apiKey)) {
+    return sendJson(res, 400, {
+      error: '至少配置一条线路（BaseURL + APIKey）',
+    });
+  }
+  if (hasChannels) {
+    fields.apiBase = channels[0].apiBase;
+    fields.apiKey = channels[0].apiKey;
   }
   const multiplier =
     body.multiplier === undefined ? 1 : validateMultiplier(body.multiplier);
   if (multiplier === null) {
     return sendJson(res, 400, { error: 'multiplier 必须是大于 0 的数字' });
   }
-  const item = { id: `m_${randomBytes(6).toString('hex')}`, ...fields, multiplier };
+  const item = {
+    id: `m_${randomBytes(6).toString('hex')}`,
+    ...fields,
+    multiplier,
+    channels: hasChannels ? channels : [],
+  };
   getDb().llmModels.push(item);
   await saveDb();
   sendJson(res, 201, { model: item });
@@ -364,13 +425,36 @@ export async function handleAdminUpdateModel(req, res, id) {
   if (!item) return sendJson(res, 404, { error: '模型不存在' });
   const body = await readJson(req);
   const fields = readModelFields(body);
-  for (const key of ['name', 'apiBase', 'apiKey', 'model']) {
+  for (const key of ['name', 'model']) {
     if (body[key] !== undefined) {
       if (!fields[key]) return sendJson(res, 400, { error: `${key} 不能为空` });
       item[key] = fields[key];
     }
   }
+  if (body.apiBase !== undefined) {
+    if (!fields.apiBase) return sendJson(res, 400, { error: 'apiBase 不能为空' });
+    item.apiBase = fields.apiBase;
+  }
+  if (body.apiKey !== undefined) {
+    if (!fields.apiKey) return sendJson(res, 400, { error: 'apiKey 不能为空' });
+    item.apiKey = fields.apiKey;
+  }
   if (body.description !== undefined) item.description = fields.description;
+  if (body.supportsVision !== undefined) {
+    item.supportsVision = body.supportsVision === true;
+  }
+  if (body.channels !== undefined) {
+    const channels = normalizeChannels(body.channels);
+    if (channels === null) {
+      return sendJson(res, 400, { error: 'channels 必须是数组' });
+    }
+    item.channels = channels;
+    // 兼容旧字段：以第一条线路作为默认
+    if (channels.length > 0) {
+      item.apiBase = channels[0].apiBase;
+      item.apiKey = channels[0].apiKey;
+    }
+  }
   if (body.multiplier !== undefined) {
     const multiplier = validateMultiplier(body.multiplier);
     if (multiplier === null) {

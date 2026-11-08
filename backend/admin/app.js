@@ -6,6 +6,7 @@ const EMPTY_STATS = {
   totals: { registers: 0, logins: 0, smsSent: 0, captchaPass: 0, captchaFail: 0, llmCalls: 0, tokensUsed: 0 },
   today: { registers: 0, logins: 0, smsSent: 0, llmCalls: 0, tokensUsed: 0 },
   daily: [],
+  llm: { models: [], channels: [] },
   users: { count: 0, newToday: 0, activeToday: 0, credits: 0 },
   content: { llmModels: 0, projects: 0, chatHistories: 0, settings: 0 },
   config: {
@@ -72,6 +73,14 @@ const app = Vue.createApp({
         geetest: { captchaId: '', captchaKey: '', enforce: true },
         aliyun: { accessKeyId: '', accessKeySecret: '', signName: '', templateCode: '' },
         portal: { qqGroup: '' },
+        aiUploads: {
+          enabled: true,
+          maxFiles: 5,
+          maxFileMb: 10,
+          maxTotalMb: 30,
+          maxUnzipFiles: 50,
+          maxUnzipMb: 50,
+        },
       },
       cfgInfo: {
         geetest: { captchaKeyMasked: '' },
@@ -84,6 +93,8 @@ const app = Vue.createApp({
       savingAli: false,
       savingPwd: false,
       savingPortal: false,
+      savingAiUploads: false,
+      refreshingHosts: false,
 
       docs: [],
       loadingDocs: false,
@@ -115,7 +126,17 @@ const app = Vue.createApp({
       models: [],
       loadingModels: false,
       modelDialog: false,
-      modelForm: { id: '', name: '', apiBase: '', apiKey: '', model: '', multiplier: 1 },
+      modelForm: {
+        id: '',
+        name: '',
+        apiBase: '',
+        apiKey: '',
+        model: '',
+        multiplier: 1,
+        description: '',
+        supportsVision: false,
+        channels: [],
+      },
       savingModel: false,
 
       pwdDialog: false,
@@ -328,6 +349,7 @@ const app = Vue.createApp({
           templateCode: data.aliyun.templateCode || '',
         };
         this.cfg.portal = { qqGroup: (data.portal && data.portal.qqGroup) || '' };
+        if (data.aiUploads) this.cfg.aiUploads = { ...this.cfg.aiUploads, ...data.aiUploads };
       } catch (err) {
         this.handleError(err);
       } finally {
@@ -466,26 +488,81 @@ const app = Vue.createApp({
 
     openModelDialog(row) {
       this.modelForm = row
-        ? { id: row.id, name: row.name, apiBase: row.apiBase, apiKey: row.apiKey, model: row.model, multiplier: row.multiplier || 1, description: row.description || '' }
-        : { id: '', name: '', apiBase: '', apiKey: '', model: '', multiplier: 1, description: '' };
+        ? {
+            id: row.id,
+            name: row.name,
+            apiBase: row.apiBase,
+            apiKey: row.apiKey,
+            model: row.model,
+            multiplier: row.multiplier || 1,
+            description: row.description || '',
+            supportsVision: row.supportsVision === true,
+            channels: Array.isArray(row.channels) && row.channels.length
+              ? row.channels.map((c) => ({
+                  id: c.id || '',
+                  name: c.name || '',
+                  apiBase: c.apiBase || '',
+                  apiKey: c.apiKey || '',
+                  weight: c.weight || 1,
+                  enabled: c.enabled !== false,
+                }))
+              : [{ id: '', name: '线路 1', apiBase: row.apiBase || '', apiKey: row.apiKey || '', weight: 1, enabled: true }],
+          }
+        : {
+            id: '',
+            name: '',
+            apiBase: '',
+            apiKey: '',
+            model: '',
+            multiplier: 1,
+            description: '',
+            supportsVision: false,
+            channels: [{ id: '', name: '线路 1', apiBase: '', apiKey: '', weight: 1, enabled: true }],
+          };
       this.modelDialog = true;
+    },
+
+    addModelChannel() {
+      this.modelForm.channels.push({
+        id: '',
+        name: `线路 ${this.modelForm.channels.length + 1}`,
+        apiBase: '',
+        apiKey: '',
+        weight: 1,
+        enabled: true,
+      });
+    },
+
+    removeModelChannel(index) {
+      this.modelForm.channels.splice(index, 1);
     },
 
     async saveModel() {
       const form = this.modelForm;
-      if (!form.name || !form.apiBase || !form.apiKey || !form.model) {
-        ElementPlus.ElMessage.warning('名称 / API Base / API Key / 模型均不能为空');
+      const channels = (form.channels || []).filter((c) => String(c.apiBase || '').trim());
+      if (!form.name || !form.model) {
+        ElementPlus.ElMessage.warning('名称 / 上游模型不能为空');
         return;
       }
+      if (channels.length === 0 && (!form.apiBase || !form.apiKey)) {
+        ElementPlus.ElMessage.warning('至少配置一条线路（BaseURL + APIKey）');
+        return;
+      }
+      const payload = {
+        ...form,
+        apiBase: channels[0] ? channels[0].apiBase : form.apiBase,
+        apiKey: channels[0] ? channels[0].apiKey : form.apiKey,
+        channels,
+      };
       this.savingModel = true;
       try {
         if (form.id) {
           await request(`/api/admin/llm/models/${encodeURIComponent(form.id)}`, {
             method: 'PUT',
-            body: { ...form },
+            body: payload,
           });
         } else {
-          await request('/api/admin/llm/models', { method: 'POST', body: { ...form } });
+          await request('/api/admin/llm/models', { method: 'POST', body: payload });
         }
         ElementPlus.ElMessage.success('已保存');
         this.modelDialog = false;
@@ -982,6 +1059,34 @@ const app = Vue.createApp({
         this.handleError(err);
       } finally {
         this.savingPortal = false;
+      }
+    },
+
+    async saveAiUploads() {
+      this.savingAiUploads = true;
+      try {
+        await request('/api/admin/config', {
+          method: 'PUT',
+          body: { aiUploads: { ...this.cfg.aiUploads } },
+        });
+        ElementPlus.ElMessage.success('AI 附件限制已保存');
+        await this.loadConfig();
+      } catch (err) {
+        this.handleError(err);
+      } finally {
+        this.savingAiUploads = false;
+      }
+    },
+
+    async refreshGithubHosts() {
+      this.refreshingHosts = true;
+      try {
+        const data = await request('/api/admin/github-hosts/refresh', { method: 'POST' });
+        ElementPlus.ElMessage.success(`Hosts 已更新（${data.bytes || 0} 字节）`);
+      } catch (err) {
+        this.handleError(err);
+      } finally {
+        this.refreshingHosts = false;
       }
     },
   },

@@ -16,6 +16,8 @@ import '../services/ai_extensions_service.dart';
 import '../services/docs_service.dart';
 import '../services/external_mcp_manager.dart';
 import '../services/git_host.dart';
+import '../services/github_hosts_service.dart';
+import '../services/live_task_service.dart';
 import '../services/llm_presets.dart';
 import '../services/security_service.dart';
 import '../widgets/ai_floating_ball.dart';
@@ -597,7 +599,7 @@ class _SettingsScreenState extends State<SettingsScreen>
           ),
         ),
         _Entry(
-          'iOS 构建 macos runner',
+          'ios 构建 macos runner',
           const ListTile(
             contentPadding: EdgeInsets.zero,
             title: Text('iOS 构建'),
@@ -607,6 +609,31 @@ class _SettingsScreenState extends State<SettingsScreen>
             ),
             leading: Icon(Icons.apple),
           ),
+        ),
+      ]),
+      _SectionData('GitHub Hosts', [
+        _Entry(
+          'github hosts 加速 dns 自定义 hosts',
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('使用 GitHub 专用 Hosts'),
+            subtitle: const Text(
+              '仅作用于应用内对 GitHub 的请求（自定义 DNS，不修改系统 hosts、'
+              '不申请 VPN / 代理权限）；系统浏览器中的 OAuth 授权不受影响',
+            ),
+            value: settings.githubHostsEnabled,
+            onChanged: (value) {
+              sp.setGithubHostsEnabled(value);
+              GithubHostsService.instance.setEnabled(value);
+              if (value && !GithubHostsService.instance.hasHosts) {
+                GithubHostsService.instance.refresh();
+              }
+            },
+          ),
+        ),
+        _Entry(
+          'github hosts 更新 刷新 状态',
+          const _GithubHostsStatus(),
         ),
       ]),
     ];
@@ -858,6 +885,25 @@ class _SettingsScreenState extends State<SettingsScreen>
               style: TextStyle(fontSize: 11, color: Colors.grey, height: 1.4),
             ),
           ),
+        ),
+      ]),
+      _SectionData('任务实况通知', [
+        _Entry(
+          '实况通知 灵动岛 原子通知 焦点通知 超级岛 live update',
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('任务实况通知'),
+            subtitle: const Text(
+              'AI 执行任务与云端构建期间显示类灵动岛通知，支持 ColorOS 实况通知、'
+              'HyperOS 焦点通知 / 超级岛、OriginOS 原子通知，其余设备使用原生进度通知',
+            ),
+            value: settings.liveNotifications,
+            onChanged: sp.setLiveNotifications,
+          ),
+        ),
+        _Entry(
+          '实况通知 适配状态 厂商',
+          const _LiveNotificationStatus(),
         ),
       ]),
       _SectionData('第三方 MCP', [
@@ -1647,7 +1693,10 @@ class _ProfileEditDialogState extends State<_ProfileEditDialog> {
                 hintText: 'https://api.openai.com/v1',
                 isDense: true,
                 border: const OutlineInputBorder(),
-                helperText: isCloud ? '云端模型地址由账号后端自动决定' : null,
+                helperText: isCloud
+                    ? '云端模型地址由账号后端自动决定'
+                    : '可填到 /v1，也可直接填完整地址（如 https://api.stepfun.com/v1/chat/completions）',
+                helperMaxLines: 2,
               ),
             ),
             const SizedBox(height: 12),
@@ -2285,6 +2334,111 @@ class _ImportedSkillsCard extends StatelessWidget {
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
             child: const Text('关闭'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// GitHub Hosts 状态与手动刷新
+class _GithubHostsStatus extends StatefulWidget {
+  const _GithubHostsStatus();
+
+  @override
+  State<_GithubHostsStatus> createState() => _GithubHostsStatusState();
+}
+
+class _GithubHostsStatusState extends State<_GithubHostsStatus> {
+  bool _refreshing = false;
+
+  String get _statusText {
+    final service = GithubHostsService.instance;
+    if (!service.hasHosts) return '尚未下载 Hosts';
+    final time = service.fetchedAt;
+    final timeText = time == null
+        ? ''
+        : ' · ${time.month}/${time.day} ${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
+    return '已加载 ${service.hostCount} 条记录$timeText';
+  }
+
+  Future<void> _refresh() async {
+    setState(() => _refreshing = true);
+    final ok = await GithubHostsService.instance.refresh();
+    if (!mounted) return;
+    setState(() => _refreshing = false);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(ok ? 'GitHub Hosts 已更新' : '更新失败，请检查服务端是否可用'),
+        backgroundColor: ok ? Colors.green : Colors.orange,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: const Icon(Icons.dns_outlined),
+      title: const Text('Hosts 状态'),
+      subtitle: Text(_statusText),
+      trailing: _refreshing
+          ? const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : TextButton(onPressed: _refresh, child: const Text('立即更新')),
+    );
+  }
+}
+
+/// 实况通知适配状态：展示当前设备支持的灵动岛形态
+class _LiveNotificationStatus extends StatefulWidget {
+  const _LiveNotificationStatus();
+
+  @override
+  State<_LiveNotificationStatus> createState() => _LiveNotificationStatusState();
+}
+
+class _LiveNotificationStatusState extends State<_LiveNotificationStatus> {
+  Map<String, dynamic>? _caps;
+
+  @override
+  void initState() {
+    super.initState();
+    LiveTaskService.instance.capabilities().then((caps) {
+      if (mounted) setState(() => _caps = caps);
+    });
+  }
+
+  String get _label {
+    final caps = _caps;
+    if (caps == null || caps.isEmpty) {
+      return Platform.isAndroid ? '正在检测…' : '仅 Android 支持';
+    }
+    if (caps['miuiFocus'] == true) return '已适配：小米焦点通知 / 超级岛';
+    if (caps['vivoSuperx'] == true) return '已适配：vivo 原子通知 / 原子岛';
+    if (caps['progressStyle'] == true) return '已适配：Android 原生实况通知';
+    if (caps['oppoLive'] == true) return 'ColorOS：使用系统实况通知（需系统支持）';
+    return '使用标准可更新进度通知';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final caps = _caps;
+    final sdk = caps?['sdkInt'];
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        children: [
+          const Icon(Icons.circle, size: 8, color: Colors.green),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              sdk == null ? _label : '$_label（Android API $sdk）',
+              style: const TextStyle(fontSize: 11, color: Colors.grey),
+            ),
           ),
         ],
       ),

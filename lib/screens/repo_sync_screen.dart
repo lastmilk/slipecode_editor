@@ -203,6 +203,106 @@ class _RepoSyncScreenState extends State<RepoSyncScreen> {
     );
   }
 
+  /// 通过仓库 URL 直接拉取外部仓库（公开仓库无需登录）
+  Future<void> _importFromUrl() async {
+    final controller = TextEditingController();
+    final url = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('从 URL 导入仓库'),
+        content: SizedBox(
+          width: 460,
+          child: TextField(
+            controller: controller,
+            autofocus: true,
+            decoration: const InputDecoration(
+              labelText: '仓库地址',
+              hintText: 'https://github.com/owner/repo',
+              helperText: '支持 GitHub / Gitee 仓库链接，可带 /tree/分支',
+              helperMaxLines: 2,
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(controller.text.trim()),
+            child: const Text('导入'),
+          ),
+        ],
+      ),
+    );
+    if (url == null || url.isEmpty) return;
+    if (!mounted) return;
+    final repo = GitClientService.parseRepoUrl(url);
+    if (repo == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('无法识别该地址，请填写 GitHub / Gitee 仓库链接')),
+      );
+      return;
+    }
+    final root = _projectsRoot;
+    if (root == null || _syncing) return;
+
+    final github = context.read<GitHubProvider>();
+    final gitee = context.read<GiteeProvider>();
+    final token = repo.host == GitHost.github
+        ? (github.token ?? '')
+        : (gitee.token ?? '');
+
+    setState(() {
+      _syncing = true;
+      _syncingLabel = '正在拉取 ${repo.host.label} · ${repo.fullName}';
+    });
+    try {
+      final dest = GitClientService.instance.resolveDestPath(root, repo);
+      final outcome = await GitClientService.instance.syncFromUrl(
+        url: url,
+        destPath: dest,
+        token: token,
+      );
+      await ProjectHistoryService.instance.touch(
+        outcome.path,
+        name: repo.name,
+      );
+      if (repo.host == GitHost.github) {
+        await github.linkRepo(outcome.path, repo.fullName);
+      } else {
+        await gitee.linkRepo(outcome.path, repo.fullName);
+      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            outcome.cloned
+                ? '已导入 ${repo.fullName} 到本地项目'
+                : '已更新 ${repo.fullName}',
+          ),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('导入失败：$e'),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _syncing = false;
+          _syncingLabel = null;
+        });
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final github = context.watch<GitHubProvider>();
@@ -213,6 +313,11 @@ class _RepoSyncScreenState extends State<RepoSyncScreen> {
       appBar: AppBar(
         title: const Text('同步仓库'),
         actions: [
+          IconButton(
+            tooltip: '从 URL 导入仓库',
+            onPressed: _loading || _syncing ? null : _importFromUrl,
+            icon: const Icon(Icons.link),
+          ),
           IconButton(
             tooltip: '刷新仓库列表',
             onPressed: _loading || _syncing ? null : _reload,

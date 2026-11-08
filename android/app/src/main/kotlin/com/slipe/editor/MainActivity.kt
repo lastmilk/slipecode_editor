@@ -14,7 +14,7 @@ class MainActivity : FlutterFragmentActivity() {
     private val channelName = "slipe/container"
     private val keyEventChannelName = "slipe/keyevent"
     private val overlayChannelName = "slipe/overlay"
-    private val buildWatchChannelName = "slipe/build_watch"
+    private val liveTaskChannelName = "slipe/live_task"
 
     /// 点击系统悬浮球后待处理的「打开 AI 对话」请求（冷启动时由 Dart 主动消费）
     private var pendingOpenAiChat = false
@@ -212,35 +212,54 @@ class MainActivity : FlutterFragmentActivity() {
                 }
             }
 
-        // 云端构建保活通知：构建期间以前台服务常驻通知保持进程存活
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, buildWatchChannelName)
+        // 任务实况通知（AI 执行 / 云端构建）：类灵动岛的常驻可更新通知
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, liveTaskChannelName)
             .setMethodCallHandler { call, result ->
-                val text = call.argument<String>("text") ?: "云端构建进行中"
+                val id = call.argument<String>("id") ?: ""
+                val kind = call.argument<String>("kind") ?: "task"
+                val title = call.argument<String>("title") ?: "SLIPE"
+                val text = call.argument<String>("text") ?: ""
+                val progress = call.argument<Int>("progress")
+                val indeterminate = call.argument<Boolean>("indeterminate") ?: true
+                val done = call.argument<Boolean>("done") ?: false
                 when (call.method) {
                     "start" -> {
                         try {
-                            BuildKeepAliveService.start(this, text)
+                            LiveTaskService.start(
+                                this, id, kind, title, text, progress, indeterminate, done
+                            )
                             result.success(true)
                         } catch (e: Exception) {
-                            result.error("build_notify_failed", e.message, null)
+                            result.error("live_task_failed", e.message, null)
                         }
                     }
                     "update" -> {
                         try {
-                            BuildKeepAliveService.update(this, text)
+                            LiveTaskService.update(
+                                this, id, kind, title, text, progress, indeterminate, done
+                            )
                             result.success(true)
                         } catch (e: Exception) {
-                            result.error("build_notify_failed", e.message, null)
+                            result.error("live_task_failed", e.message, null)
                         }
                     }
                     "stop" -> {
                         try {
-                            BuildKeepAliveService.stop(this)
+                            LiveTaskService.stop(this, id)
                             result.success(true)
                         } catch (e: Exception) {
-                            result.error("build_notify_failed", e.message, null)
+                            result.error("live_task_failed", e.message, null)
                         }
                     }
+                    "stopAll" -> {
+                        try {
+                            LiveTaskService.stopAll(this)
+                            result.success(true)
+                        } catch (e: Exception) {
+                            result.error("live_task_failed", e.message, null)
+                        }
+                    }
+                    "capabilities" -> result.success(LiveTaskService.capabilities(this))
                     else -> result.notImplemented()
                 }
             }

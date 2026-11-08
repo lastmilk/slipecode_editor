@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 
 import '../config/app_config.dart';
 import 'github_auth_service.dart';
+import 'github_hosts_service.dart';
 
 /// 已授权的 GitHub 用户信息
 class GitHubUser {
@@ -259,7 +260,9 @@ class GitHubApiService {
   GitHubApiService(this._token);
 
   final String _token;
-  final http.Client _client = http.Client();
+
+  /// 使用应用内 GitHub Hosts（若开启）创建客户端
+  late final http.Client _client = GithubHostsService.instance.newClient();
 
   Map<String, String> get _headers => {
     'Authorization': 'Bearer $_token',
@@ -679,7 +682,13 @@ class GitHubApiService {
     if (location == null) {
       throw const HttpExceptionWithBody('下载产物失败：缺少重定向地址', '');
     }
-    final zipRes = await http.get(Uri.parse(location));
+    final downloadClient = GithubHostsService.instance.newClient();
+    final http.Response zipRes;
+    try {
+      zipRes = await downloadClient.get(Uri.parse(location));
+    } finally {
+      downloadClient.close();
+    }
     if (zipRes.statusCode != 200) {
       throw HttpExceptionWithBody('下载产物失败（HTTP ${zipRes.statusCode}）', '');
     }

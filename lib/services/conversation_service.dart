@@ -114,6 +114,8 @@ class ConversationService extends ChangeNotifier {
   static Map<String, dynamic> messageToJson(ChatMessage m) => {
         'role': m.role == ChatRole.assistant ? 'assistant' : 'user',
         'content': m.content,
+        if (m.apiContent != null && m.apiContent != m.content)
+          'apiContent': m.apiContent,
         if (m.reasoning != null && m.reasoning!.isNotEmpty)
           'reasoning': m.reasoning,
         if (m.kind != 'normal') 'kind': m.kind,
@@ -124,12 +126,14 @@ class ConversationService extends ChangeNotifier {
 
   static ChatMessage messageFromJson(Map<String, dynamic> json) {
     final reasoning = (json['reasoning'] ?? '').toString();
+    final apiContent = (json['apiContent'] ?? '').toString();
     return ChatMessage(
       role: json['role'] == 'assistant' ? ChatRole.assistant : ChatRole.user,
       content: (json['content'] ?? '').toString(),
       reasoning: reasoning.isEmpty ? null : reasoning,
       kind: (json['kind'] ?? 'normal').toString(),
       segments: ChatSegment.listFromJson(json['segments']),
+      apiContent: apiContent.isEmpty ? null : apiContent,
     );
   }
 

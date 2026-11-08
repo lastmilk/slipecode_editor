@@ -386,6 +386,36 @@ class AccountService {
   }
 
   // ---------------------------------------------------------------------------
+  // AI 附件（上传限制 / Zip 云端解压）
+  // ---------------------------------------------------------------------------
+
+  /// 获取 AI 附件上传限制（管理员可配置）
+  Future<Map<String, dynamic>> fetchAiLimits(String token) async {
+    _ensureConfigured();
+    final res = await _client
+        .get(_u('/api/ai/limits'), headers: _headers(token))
+        .timeout(const Duration(seconds: 15));
+    return _decode(res, '获取附件限制失败');
+  }
+
+  /// 上传 Zip 并在服务端解压到临时目录，返回可阅读的文件列表
+  Future<Map<String, dynamic>> unzipAiFiles(
+    String token, {
+    required String name,
+    required String dataBase64,
+  }) async {
+    _ensureConfigured();
+    final res = await _client
+        .post(
+          _u('/api/ai/files/unzip'),
+          headers: _headers(token),
+          body: jsonEncode({'name': name, 'dataBase64': dataBase64}),
+        )
+        .timeout(const Duration(seconds: 90));
+    return _decode(res, '云端解压失败');
+  }
+
+  // ---------------------------------------------------------------------------
   // 头像 / 壁纸
   // ---------------------------------------------------------------------------
 
