@@ -104,6 +104,33 @@ class BuildService {
     return triggeredAt;
   }
 
+  /// 等待 GitHub 为新触发的构建创建运行记录（不等待完成）
+  Future<WorkflowRun> waitForRunStarted(
+    GitHubApiService api,
+    String repoFullName,
+    DateTime triggeredAt, {
+    String branch = 'main',
+    bool Function()? isCancelled,
+    Duration timeout = const Duration(minutes: 3),
+  }) async {
+    final deadline = DateTime.now().add(timeout);
+    WorkflowRun? run;
+    while (run == null) {
+      _throwIfCancelled(isCancelled);
+      if (DateTime.now().isAfter(deadline)) {
+        throw TimeoutException('等待构建运行创建超时');
+      }
+      await Future.delayed(const Duration(seconds: 3));
+      run = await api.latestRunSince(
+        repoFullName,
+        workflowFile,
+        triggeredAt,
+        branch: branch,
+      );
+    }
+    return run;
+  }
+
   /// 等待触发后出现的新运行并轮询至完成。
   ///
   /// [onUpdate] 每次运行状态变化时回调（用于日志）。
@@ -122,39 +149,33 @@ class BuildService {
     final deadline = DateTime.now().add(timeout);
 
     // 等待 GitHub 生成 run 记录
-    WorkflowRun? run;
-    while (run == null) {
-      _throwIfCancelled(isCancelled);
-      if (DateTime.now().isAfter(deadline)) {
-        throw TimeoutException('等待构建运行创建超时');
-      }
-      await Future.delayed(const Duration(seconds: 3));
-      run = await api.latestRunSince(
-        repoFullName,
-        workflowFile,
-        triggeredAt,
-        branch: branch,
-      );
-    }
+    final run = await waitForRunStarted(
+      api,
+      repoFullName,
+      triggeredAt,
+      branch: branch,
+      isCancelled: isCancelled,
+    );
     onUpdate?.call(run);
 
     // 轮询至完成（同时刷新 Job / 步骤进度）
-    var lastStatus = run.status;
+    var current = run;
+    var lastStatus = current.status;
     var jobsFetched = false;
-    while (!run!.isCompleted) {
+    while (!current.isCompleted) {
       _throwIfCancelled(isCancelled);
       if (DateTime.now().isAfter(deadline)) {
         throw TimeoutException('构建超时（>${timeout.inMinutes} 分钟）');
       }
       await Future.delayed(const Duration(seconds: 4));
-      run = await api.getRun(repoFullName, run.id);
-      if (run.status != lastStatus) {
-        lastStatus = run.status;
-        onUpdate?.call(run);
+      current = await api.getRun(repoFullName, current.id);
+      if (current.status != lastStatus) {
+        lastStatus = current.status;
+        onUpdate?.call(current);
       }
       if (onJobs != null) {
         try {
-          onJobs(await api.listJobs(repoFullName, run.id));
+          onJobs(await api.listJobs(repoFullName, current.id));
           jobsFetched = true;
         } catch (_) {
           // 步骤接口偶发失败不影响整体轮询
@@ -163,10 +184,10 @@ class BuildService {
     }
     if (onJobs != null && !jobsFetched) {
       try {
-        onJobs(await api.listJobs(repoFullName, run.id));
+        onJobs(await api.listJobs(repoFullName, current.id));
       } catch (_) {}
     }
-    return run;
+    return current;
   }
 
   /// 下载产物 zip 并解压出 APK/AAB 到 `项目目录/build/github/`

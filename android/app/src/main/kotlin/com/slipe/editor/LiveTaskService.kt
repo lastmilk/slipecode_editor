@@ -302,12 +302,37 @@ class LiveTaskService : Service() {
             .setSubText(if (state.kind == "build") "云端构建" else "AI 执行中")
 
         applyProgressStyle(nBuilder, state)
+
+        // ColorOS 流体云 / Android 16 Live Updates 准入要求：
+        // 1) 通知必须 ongoing 且主动申请 promoted ongoing
+        // 2) 必须提供 shortCriticalText（状态栏胶囊只读这个字段）
+        // 3) 使用 ProgressStyle 等富样式
+        val shortText = state.text.take(24).ifEmpty { state.title.take(16) }
+        // 1) 状态栏胶囊文本：API 36 用官方方法，低版本写入系统扩展字段兜底
         if (Build.VERSION.SDK_INT >= 36) {
             try {
-                nBuilder.setShortCriticalText(state.text.take(30))
+                nBuilder.setShortCriticalText(shortText)
             } catch (_: Throwable) {
-                // 低版本 SystemUI 不支持时忽略
+                // 个别 ROM 未实现时忽略
             }
+        }
+        nBuilder.addExtras(
+            Bundle().apply {
+                putCharSequence("android.shortCriticalText", shortText)
+                // 2) 主动申请 promoted ongoing（部分 ROM 通过扩展字段读取）
+                putBoolean("android.requestPromotedOngoing", true)
+            }
+        )
+        // 3) 官方 API：申请成为 promoted ongoing（实况通知）
+        try {
+            nBuilder.javaClass
+                .getMethod(
+                    "setRequestPromotedOngoing",
+                    Boolean::class.javaPrimitiveType
+                )
+                .invoke(nBuilder, true)
+        } catch (_: Throwable) {
+            // 低版本没有该 API，依赖上面的扩展字段
         }
         applyVendorExtras(nBuilder, state)
         return nBuilder.build()
@@ -316,26 +341,25 @@ class LiveTaskService : Service() {
     /** Android 16 原生 Live Updates（ProgressStyle），反射调用以避免低版本编译/运行问题 */
     private fun applyProgressStyle(builder: Notification.Builder, state: TaskState) {
         val progress = state.progress
+        if (progress == null) {
+            // 不确定进度：使用普通转圈进度条（ProgressStyle 需要明确的进度值）
+            builder.setProgress(0, 0, true)
+            return
+        }
         if (Build.VERSION.SDK_INT >= 36) {
             try {
                 val styleClass = Class.forName("android.app.Notification\$ProgressStyle")
                 val style = styleClass.getDeclaredConstructor().newInstance()
-                if (progress != null) {
-                    styleClass
-                        .getMethod("setProgress", Int::class.javaPrimitiveType)
-                        .invoke(style, progress.coerceIn(0, 100))
-                }
+                styleClass
+                    .getMethod("setProgress", Int::class.javaPrimitiveType)
+                    .invoke(style, progress.coerceIn(0, 100))
                 builder.setStyle(style as Notification.Style)
                 return
             } catch (e: Throwable) {
                 Log.w(TAG, "ProgressStyle unavailable, fallback", e)
             }
         }
-        if (progress != null) {
-            builder.setProgress(100, progress.coerceIn(0, 100), false)
-        } else {
-            builder.setProgress(0, 0, true)
-        }
+        builder.setProgress(100, progress.coerceIn(0, 100), false)
     }
 
     /** 各厂商实况/灵动岛扩展字段 */

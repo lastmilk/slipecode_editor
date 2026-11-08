@@ -79,7 +79,13 @@ class BuildProvider extends ChangeNotifier {
   bool _cancelRequested = false;
   bool _disposed = false;
 
+  /// 是否处于构建初始化阶段（同步代码 / 触发 workflow）
+  bool _initializing = false;
+
   BuildStatus get status => _status;
+
+  /// 初始化中：界面用遮罩弹窗提示，初始化完成后展示实际构建进程
+  bool get isInitializing => _initializing;
 
   /// 当前构建类型（当前载荷不支持时自动回退到第一个可用类型）
   BuildType get type {
@@ -233,6 +239,7 @@ class BuildProvider extends ChangeNotifier {
     }
 
     _status = BuildStatus.running;
+    _initializing = true;
     _currentTask = t('build.task.cloudBuild', {'type': _type.label});
     _reset();
     _append(t('build.log.start', {'type': _type.label, 'ci': host.ciName}));
@@ -241,26 +248,18 @@ class BuildProvider extends ChangeNotifier {
     await _startKeepAlive(t('build.task.preparing'));
 
     try {
-      // 1. 同步本地未提交改动
+      // 1. 构建前全量比对本地与远程，自动补推所有差异文件
       _currentTask = t('build.task.syncing');
       _append(t('build.log.syncTo', {'repo': link.repo}));
-      if (_gitSync.pendingCount > 0) {
-        _append(
-          t('build.log.pendingFiles', {
-            'count': '${_gitSync.pendingCount}',
+      final ok = await _gitSync.ensureUpToDate(projectDir: projectDir);
+      if (!ok) {
+        throw StateError(
+          t('build.syncFailed', {
+            'error': _gitSync.error ?? t('build.unknown'),
           }),
         );
-        final ok = await _gitSync.syncNow();
-        if (!ok) {
-          throw StateError(
-            t('build.syncFailed', {
-              'error': _gitSync.error ?? t('build.unknown'),
-            }),
-          );
-        }
-      } else {
-        _append(t('build.log.noPending'));
       }
+      _append(t('build.log.noPending'));
 
       if (host == GitHost.github) {
         await _runGithubBuild(link.repo, projectDir);
@@ -275,6 +274,7 @@ class BuildProvider extends ChangeNotifier {
         _fail('$e');
       }
     } finally {
+      _initializing = false;
       _finishedAt = DateTime.now();
       _currentTask = '';
       if (_status == BuildStatus.success) {
@@ -383,36 +383,86 @@ class BuildProvider extends ChangeNotifier {
     _append(t('build.log.dispatched'));
 
     _currentTask = t('build.task.building');
-    final run = await BuildService.instance.waitForCompletion(
+    // 等待 GitHub 创建 run 记录（初始化阶段）
+    final run = await BuildService.instance.waitForRunStarted(
       api,
       repo,
       triggeredAt,
       isCancelled: () => _cancelRequested,
-      onUpdate: (run) {
-        _runUrl = run.htmlUrl;
-        _runId = run.id;
-        _append(
-          t('build.log.runStatus', {
-            'number': '${run.runNumber}',
-            'status': run.status,
-          }),
-        );
-        // 登录用户把监听注册到服务端（退出 IDE 后继续同步）
-        unawaited(_registerServerWatch(repo, run));
-        _safeNotify();
-      },
-      onJobs: _setJobs,
     );
     _runUrl = run.htmlUrl;
     _runId = run.id;
+    _append(
+      t('build.log.runStatus', {
+        'number': '${run.runNumber}',
+        'status': run.status,
+      }),
+    );
+    // 初始化完成：关闭遮罩弹窗，开始展示实际构建进程
+    _initializing = false;
+    _safeNotify();
+
+    // 注册服务端监听：软件运行期间改为轮询服务端进度，实现跨端一致的实时同步
+    await _registerServerWatch(repo, run);
+    WorkflowRun finalRun = run;
+    BuildWatch? watch;
+    if (_watchId.isNotEmpty) {
+      _append('已切换服务端进度同步（每 4 秒轮询）');
+      watch = await _pollServerWatch(run);
+      if (watch != null) {
+        finalRun = WorkflowRun(
+          id: run.id,
+          name: run.name,
+          status: watch.status,
+          conclusion: watch.conclusion,
+          htmlUrl: watch.htmlUrl.isEmpty ? run.htmlUrl : watch.htmlUrl,
+          createdAt: run.createdAt,
+          runNumber: run.runNumber,
+          headBranch: run.headBranch,
+        );
+        if (watch.jobs.isNotEmpty) _setJobs(watch.jobs);
+        _runUrl = finalRun.htmlUrl;
+      }
+    }
+    if (watch == null) {
+      // 未登录 / 服务端不可用：回退为直连 GitHub 轮询
+      _append('服务端进度不可用，回退为直连 GitHub 轮询');
+      finalRun = await BuildService.instance.waitForCompletion(
+        api,
+        repo,
+        triggeredAt,
+        isCancelled: () => _cancelRequested,
+        onUpdate: (current) {
+          _runUrl = current.htmlUrl;
+          _runId = current.id;
+          _append(
+            t('build.log.runStatus', {
+              'number': '${current.runNumber}',
+              'status': current.status,
+            }),
+          );
+          unawaited(_registerServerWatch(repo, current));
+          _safeNotify();
+        },
+        onJobs: _setJobs,
+      );
+    }
+
+    _runUrl = finalRun.htmlUrl;
+    _runId = finalRun.id;
     _append(t('build.log.runFinished',
-        {'conclusion': run.conclusion ?? 'unknown'}));
+        {'conclusion': finalRun.conclusion ?? 'unknown'}));
     _append('    $runUrl');
 
-    if (run.conclusion != 'success') {
+    if (finalRun.conclusion != 'success') {
+      if (finalRun.conclusion == 'cancelled' || _cancelRequested) {
+        _status = BuildStatus.cancelled;
+        _append(t('build.log.buildCancelled'));
+        return;
+      }
       _fail(
         t('build.error.notSuccessfulGithub', {
-          'conclusion': run.conclusion ?? 'unknown',
+          'conclusion': finalRun.conclusion ?? 'unknown',
         }),
       );
       return;
@@ -441,7 +491,7 @@ class BuildProvider extends ChangeNotifier {
       _append(t('build.log.relayFallback'));
     }
 
-    final artifacts = await api.listArtifacts(repo, run.id);
+    final artifacts = await api.listArtifacts(repo, finalRun.id);
     final usable = artifactsForType(artifacts: artifacts, type: _type);
     if (usable == null) {
       _fail(t('build.error.noArtifact'));
@@ -483,6 +533,62 @@ class BuildProvider extends ChangeNotifier {
       _watchId = watch.id;
       _append(t('build.log.watchRegistered'));
     }
+  }
+
+  /// 软件运行期间轮询服务端构建进度（实时同步 Job / Step / 状态）
+  ///
+  /// 连续 6 次查询失败（约 24 秒）时返回 null，由调用方回退为直连 GitHub。
+  Future<BuildWatch?> _pollServerWatch(WorkflowRun run) async {
+    final account = _account;
+    if (account == null || !account.isSignedIn) return null;
+    final accountToken = account.token!;
+    final deadline = DateTime.now().add(const Duration(minutes: 30));
+    var failures = 0;
+    var lastStatus = '';
+    var lastJobsSignature = '';
+
+    while (DateTime.now().isBefore(deadline)) {
+      if (_cancelRequested) return null;
+      final watch = await BuildWatchService.instance.fetch(
+        accountToken: accountToken,
+        id: _watchId,
+      );
+      if (watch == null) {
+        failures += 1;
+        if (failures >= 6) return null;
+        await Future.delayed(const Duration(seconds: 4));
+        continue;
+      }
+      failures = 0;
+      if (watch.status != lastStatus) {
+        lastStatus = watch.status;
+        _append(
+          t('build.log.runStatus', {
+            'number': '${run.runNumber}',
+            'status': watch.status,
+          }),
+        );
+      }
+      if (watch.jobs.isNotEmpty) {
+        final signature = watch.jobs
+            .map(
+              (job) => '${job.name}:${job.status}:'
+                  '${job.steps.map((s) => '${s.name}-${s.status}').join(',')}',
+            )
+            .join('|');
+        if (signature != lastJobsSignature) {
+          lastJobsSignature = signature;
+          _setJobs(watch.jobs);
+        }
+      }
+      if (watch.error.isNotEmpty) {
+        _append(t('build.log.relayDownloadFailed', {'error': watch.error}));
+        return watch;
+      }
+      if (watch.isCompleted) return watch;
+      await Future.delayed(const Duration(seconds: 4));
+    }
+    return null;
   }
 
   /// 等待服务端把产物下载完成，再取回本地
@@ -670,6 +776,7 @@ class BuildProvider extends ChangeNotifier {
     );
 
     _runUrl = GitHost.gitee.ciUrl(repo);
+    _initializing = false;
     _status = BuildStatus.success;
     _append(t('build.log.pipelineTriggered'));
     _append('    $_runUrl');

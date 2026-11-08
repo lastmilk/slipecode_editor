@@ -253,6 +253,36 @@ class GiteeApiService {
     return null;
   }
 
+  /// 批量读取文件当前 blob sha（path → sha），用于本地与远程比对
+  ///
+  /// Gitee 没有递归 tree 接口，只能按文件查询；这里做小并发以控制耗时。
+  Future<Map<String, String>> remoteBlobShas(
+    String fullName,
+    String branch,
+    List<String> paths,
+  ) async {
+    final result = <String, String>{};
+    const batchSize = 6;
+    for (var i = 0; i < paths.length; i += batchSize) {
+      final end = (i + batchSize).clamp(0, paths.length);
+      final batch = paths.sublist(i, end);
+      final entries = await Future.wait(
+        batch.map((path) async {
+          try {
+            return MapEntry(path, await _fileSha(fullName, path, branch));
+          } catch (_) {
+            return MapEntry<String, String?>(path, null);
+          }
+        }),
+      );
+      for (final entry in entries) {
+        final sha = entry.value;
+        if (sha != null) result[entry.key] = sha;
+      }
+    }
+    return result;
+  }
+
   // ---------------------------------------------------------------------------
   // 文件推送（Contents API）
   // ---------------------------------------------------------------------------

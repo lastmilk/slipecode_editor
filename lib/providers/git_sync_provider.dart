@@ -1,8 +1,11 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/ai_change_journal.dart';
 import '../services/github_api_service.dart' show RepoFile;
@@ -165,6 +168,9 @@ class GitSyncProvider extends ChangeNotifier {
       };
 
       _pending.removeAll(files);
+      await _updateManifest(link, {
+        for (final file in repoFiles) file.path: _blobSha(file.bytes),
+      });
       _lastSyncAt = DateTime.now();
       _lastCommitUrl = result.commitUrl;
       _status = _pending.isEmpty ? GitSyncStatus.success : GitSyncStatus.pending;
@@ -174,6 +180,160 @@ class GitSyncProvider extends ChangeNotifier {
       if (_pending.isNotEmpty) {
         _timer = Timer(const Duration(seconds: 1), syncNow);
       }
+      return true;
+    } catch (e) {
+      _error = '$e';
+      _status = GitSyncStatus.error;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // 构建前全量比对（本地 ↔ 远程）
+  // ---------------------------------------------------------------------------
+
+  static const String _manifestPrefix = 'slipe_sync_manifest_v1_';
+
+  /// git blob SHA-1：`sha1("blob {长度}\0" + content)`
+  ///
+  /// GitHub / Gitee 的 tree / contents 接口返回的 sha 均为该算法。
+  static String _blobSha(List<int> bytes) {
+    final header = utf8.encode('blob ${bytes.length}\u0000');
+    return sha1.convert([...header, ...bytes]).toString();
+  }
+
+  String _manifestKey(GitLink link) =>
+      '$_manifestPrefix${link.host.id}_${link.repo.replaceAll('/', '__')}';
+
+  Future<Map<String, String>> _loadManifest(GitLink link) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_manifestKey(link));
+      if (raw == null || raw.isEmpty) return {};
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return {};
+      return decoded.map((k, v) => MapEntry(k.toString(), v.toString()));
+    } catch (_) {
+      return {};
+    }
+  }
+
+  Future<void> _updateManifest(
+    GitLink link,
+    Map<String, String> entries,
+  ) async {
+    if (entries.isEmpty) return;
+    try {
+      final manifest = await _loadManifest(link);
+      manifest.addAll(entries);
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_manifestKey(link), jsonEncode(manifest));
+    } catch (e) {
+      debugPrint('保存同步清单失败：$e');
+    }
+  }
+
+  Future<Map<String, String>> _fetchRemoteShas(
+    GitLink link,
+    List<RepoFile> local,
+  ) async {
+    switch (link.host) {
+      case GitHost.github:
+        return await _github.api!.remoteBlobShas(link.repo, 'main');
+      case GitHost.gitee:
+        return await _gitee.api!.remoteBlobShas(
+          link.repo,
+          'master',
+          local.map((file) => file.path).toList(),
+        );
+    }
+  }
+
+  /// 构建前确保远程仓库与本地完全一致。
+  ///
+  /// 不依赖「已标记待推送」的文件列表：扫描整个项目，
+  /// 与上次同步清单（或远端 tree）比对，把新增 / 修改 / 删除冲突都推上去。
+  Future<bool> ensureUpToDate({
+    required String projectDir,
+    bool approveAiChanges = true,
+  }) async {
+    if (_status == GitSyncStatus.syncing) {
+      // 等待正在进行的自动同步结束，避免与构建推送交错
+      for (var i = 0; i < 30 && _status == GitSyncStatus.syncing; i++) {
+        await Future.delayed(const Duration(seconds: 1));
+      }
+      if (_status == GitSyncStatus.syncing) return false;
+    }
+    final link = linkFor(projectDir);
+    if (link == null || !_hostSignedIn(link.host)) return false;
+    final api = link.host == GitHost.github ? _github.api : _gitee.api;
+    if (api == null) return false;
+
+    _timer?.cancel();
+    _status = GitSyncStatus.syncing;
+    _error = null;
+    notifyListeners();
+
+    try {
+      // 用户点击构建即视为确认当前落盘的 AI 改动
+      if (approveAiChanges && AiChangeJournal.instance.hasPending) {
+        AiChangeJournal.instance.approveAll();
+      }
+
+      final local = await ProjectSnapshot.collect(projectDir);
+      final manifest = await _loadManifest(link);
+      // GitHub 每次都用远端 tree 做基准（请求成本低且能发现其他设备的提交）；
+      // Gitee 逐文件查询成本高，优先使用本地同步清单，首次构建时回源。
+      final Map<String, String> baseline;
+      if (link.host == GitHost.github || manifest.isEmpty) {
+        baseline = await _fetchRemoteShas(link, local);
+      } else {
+        baseline = manifest;
+      }
+
+      final changed = <RepoFile>[];
+      for (final file in local) {
+        final sha = _blobSha(file.bytes);
+        if (baseline[file.path] != sha) changed.add(file);
+      }
+      if (changed.isEmpty) {
+        _pending.clear();
+        _lastSyncAt = DateTime.now();
+        _status = GitSyncStatus.success;
+        notifyListeners();
+        return true;
+      }
+
+      final branch = link.host == GitHost.github ? 'main' : 'master';
+      for (var i = 0; i < changed.length; i += maxFilesPerPush) {
+        final end = (i + maxFilesPerPush).clamp(0, changed.length);
+        final batch = changed.sublist(i, end);
+        final result = switch (link.host) {
+          GitHost.github => await _github.api!.pushFiles(
+              link.repo,
+              batch,
+              message: 'chore: sync ${batch.length} file(s) before build',
+              branch: branch,
+            ),
+          GitHost.gitee => await _gitee.api!.pushFiles(
+              link.repo,
+              batch,
+              message: 'chore: sync ${batch.length} file(s) before build',
+              branch: branch,
+            ),
+        };
+        _lastCommitUrl = result.commitUrl;
+        await _updateManifest(link, {
+          for (final file in batch) file.path: _blobSha(file.bytes),
+        });
+      }
+
+      _pending.clear();
+      _lastSyncAt = DateTime.now();
+      _status = GitSyncStatus.success;
+      _error = '';
+      notifyListeners();
       return true;
     } catch (e) {
       _error = '$e';

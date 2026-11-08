@@ -247,6 +247,46 @@ class _BuildScreenState extends State<BuildScreen> {
     );
   }
 
+  /// 启动构建：初始化阶段显示遮罩弹窗，run 创建后自动关闭并展示实际构建进程
+  Future<void> _startBuild(String projectPath) async {
+    final build = context.read<BuildProvider>();
+    final navigator = Navigator.of(context, rootNavigator: true);
+    var closed = false;
+    void closeDialog() {
+      if (closed) return;
+      closed = true;
+      navigator.pop();
+    }
+
+    unawaited(
+      showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => _BuildInitDialog(provider: build),
+      ).whenComplete(() => closed = true),
+    );
+
+    unawaited(
+      build.startBuild(projectDir: projectPath).then((_) {
+        if (!mounted) return;
+        if (build.status == BuildStatus.failed && build.error.isNotEmpty) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(build.error),
+              backgroundColor: Colors.redAccent,
+            ),
+          );
+        }
+      }).whenComplete(closeDialog),
+    );
+
+    // 初始化完成（run 已创建）后自动关闭弹窗
+    while (mounted && build.isInitializing) {
+      await Future.delayed(const Duration(milliseconds: 250));
+    }
+    if (mounted) closeDialog();
+  }
+
   @override
   Widget build(BuildContext context) {
     final build = context.watch<BuildProvider>();
@@ -270,47 +310,20 @@ class _BuildScreenState extends State<BuildScreen> {
         !_repoSetupRunning;
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text(t('build.title')),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.clear_all),
-            tooltip: t('build.clearLogs'),
-            onPressed: build.clearLogs,
-          ),
-        ],
-      ),
-      body: Column(
-        children: [
-          Expanded(
-            child: ListView(
-              padding: const EdgeInsets.all(16),
-              children: _buildCloudSection(
-                isDark,
-                build,
-                github,
-                gitee,
-                sync,
-                link,
-                signedIn,
-                canBuild,
-                projectPath,
-              ),
-            ),
-          ),
-
-          // 日志区域
-          SizedBox(
-            height: 240,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-              child: LogConsole(
-                lines: build.logs,
-                emptyText: t('build.logsEmpty'),
-              ),
-            ),
-          ),
-        ],
+      appBar: AppBar(title: Text(t('build.title'))),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: _buildCloudSection(
+          isDark,
+          build,
+          github,
+          gitee,
+          sync,
+          link,
+          signedIn,
+          canBuild,
+          projectPath,
+        ),
       ),
     );
   }
@@ -470,6 +483,24 @@ class _BuildScreenState extends State<BuildScreen> {
       ),
       const SizedBox(height: 16),
 
+      // 构建失败提示
+      if (!build.isRunning && build.error.isNotEmpty) ...[
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: Colors.red.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: Colors.red.withValues(alpha: 0.3)),
+          ),
+          child: Text(
+            build.error,
+            style: const TextStyle(fontSize: 12, color: Colors.redAccent),
+          ),
+        ),
+        const SizedBox(height: 12),
+      ],
+
       // 构建类型
       Row(
         children: [
@@ -523,7 +554,7 @@ class _BuildScreenState extends State<BuildScreen> {
           Expanded(
             child: FilledButton.icon(
               onPressed: canBuild
-                  ? () => build.startBuild(projectDir: projectPath!)
+                  ? () => _startBuild(projectPath!)
                   : null,
               icon: const Icon(Icons.cloud_upload),
               label: Text(
@@ -1022,6 +1053,66 @@ class _ArtifactCard extends StatelessWidget {
             ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// 构建初始化遮罩弹窗
+///
+/// 代码同步 + 触发云端构建期间展示，run 创建后由调用方自动关闭，
+/// 之后页面展示实际的 Job / Step 构建进程。
+class _BuildInitDialog extends StatelessWidget {
+  const _BuildInitDialog({required this.provider});
+
+  final BuildProvider provider;
+
+  @override
+  Widget build(BuildContext context) {
+    return PopScope(
+      canPop: false,
+      child: AlertDialog(
+        content: AnimatedBuilder(
+          animation: provider,
+          builder: (context, _) {
+            final task = provider.currentTask;
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SizedBox(
+                  width: 34,
+                  height: 34,
+                  child: CircularProgressIndicator(strokeWidth: 3),
+                ),
+                const SizedBox(height: 18),
+                const Text(
+                  '正在初始化构建，请勿退出应用…',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                ),
+                if (task.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    task,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
+                ],
+                const SizedBox(height: 6),
+                const Text(
+                  '正在比对并同步代码、触发云端构建',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 11, color: Colors.grey),
+                ),
+                const SizedBox(height: 12),
+                TextButton(
+                  onPressed: provider.cancel,
+                  child: const Text('取消构建'),
+                ),
+              ],
+            );
+          },
+        ),
       ),
     );
   }

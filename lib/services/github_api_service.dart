@@ -442,6 +442,37 @@ class GitHubApiService {
     return true;
   }
 
+  /// 读取分支最新 tree 中所有文件的 git blob sha（path → sha）
+  ///
+  /// 用于构建前比对本地与远程，避免「本地已改但未推送」。
+  Future<Map<String, String>> remoteBlobShas(
+    String fullName,
+    String branch,
+  ) async {
+    final result = <String, String>{};
+    final refRes = await _client
+        .get(_u('/repos/$fullName/git/ref/heads/$branch'), headers: _headers)
+        .timeout(_timeout);
+    if (refRes.statusCode != 200) return result;
+    final ref = jsonDecode(refRes.body) as Map<String, dynamic>;
+    final headSha = (ref['object'] as Map<String, dynamic>)['sha'] as String;
+    final commit = await _getJson('/repos/$fullName/git/commits/$headSha');
+    final treeSha = (commit['tree'] as Map<String, dynamic>)['sha'] as String;
+    final tree = await _getJson(
+      '/repos/$fullName/git/trees/$treeSha',
+      {'recursive': '1'},
+    );
+    final entries = tree['tree'];
+    if (entries is List) {
+      for (final item in entries) {
+        if (item is Map && item['type'] == 'blob') {
+          result['${item['path']}'] = '${item['sha']}';
+        }
+      }
+    }
+    return result;
+  }
+
   // ---------------------------------------------------------------------------
   // Git Data API 推送（无需本地 git）
   // ---------------------------------------------------------------------------
