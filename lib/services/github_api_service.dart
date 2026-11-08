@@ -12,12 +12,20 @@ class GitHubUser {
   final String? name;
   final String? avatarUrl;
   final String htmlUrl;
+  final String? bio;
+  final int? publicRepos;
+  final int? followers;
+  final int? following;
 
   const GitHubUser({
     required this.login,
     this.name,
     this.avatarUrl,
     required this.htmlUrl,
+    this.bio,
+    this.publicRepos,
+    this.followers,
+    this.following,
   });
 
   factory GitHubUser.fromJson(Map<String, dynamic> json) => GitHubUser(
@@ -25,6 +33,38 @@ class GitHubUser {
     name: json['name'] as String?,
     avatarUrl: json['avatar_url'] as String?,
     htmlUrl: json['html_url'] as String? ?? '',
+    bio: json['bio'] as String?,
+    publicRepos: (json['public_repos'] as num?)?.toInt(),
+    followers: (json['followers'] as num?)?.toInt(),
+    following: (json['following'] as num?)?.toInt(),
+  );
+}
+
+/// GitHub Actions 用量（/user/billing/actions）
+class ActionsBilling {
+  /// 本计费周期已使用的分钟数
+  final double totalMinutesUsed;
+
+  /// 付费分钟数
+  final double totalPaidMinutesUsed;
+
+  /// 套餐包含的免费分钟数
+  final double includedMinutes;
+
+  const ActionsBilling({
+    required this.totalMinutesUsed,
+    required this.totalPaidMinutesUsed,
+    required this.includedMinutes,
+  });
+
+  /// 剩余免费分钟数（可能为负，表示已超额）
+  double get remainingMinutes => includedMinutes - totalMinutesUsed;
+
+  factory ActionsBilling.fromJson(Map<String, dynamic> json) => ActionsBilling(
+    totalMinutesUsed: (json['total_minutes_used'] as num?)?.toDouble() ?? 0,
+    totalPaidMinutesUsed:
+        (json['total_paid_minutes_used'] as num?)?.toDouble() ?? 0,
+    includedMinutes: (json['included_minutes'] as num?)?.toDouble() ?? 0,
   );
 }
 
@@ -311,6 +351,15 @@ class GitHubApiService {
   Future<GitHubUser> getAuthenticatedUser() async {
     final json = await _getJson('/user');
     return GitHubUser.fromJson(json);
+  }
+
+  /// 获取当前用户的 GitHub Actions 用量（剩余分钟数 = 包含 - 已用）
+  ///
+  /// 注意：该接口要求 token 具备读取账单的权限，
+  /// 权限不足时会抛出异常，调用方应兜底为「无法获取」。
+  Future<ActionsBilling> getActionsBilling() async {
+    final json = await _getJson('/user/billing/actions');
+    return ActionsBilling.fromJson(json);
   }
 
   /// 列出通过 SLIPE 创建的 GitHub 仓库（按创建描述识别）

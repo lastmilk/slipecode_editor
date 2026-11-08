@@ -161,6 +161,8 @@ class AccountProvider extends ChangeNotifier {
     _user = null;
     _status = AccountStatus.signedOut;
     _lastSyncAt = null;
+    // 退出账号后不再保留账号头像（避免首页仍显示已退出账号的头像）
+    await _settings.clearAvatar();
     _safeNotify();
   }
 

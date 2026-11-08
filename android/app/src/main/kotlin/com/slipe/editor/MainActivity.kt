@@ -15,7 +15,6 @@ class MainActivity : FlutterFragmentActivity() {
     private val keyEventChannelName = "slipe/keyevent"
     private val overlayChannelName = "slipe/overlay"
     private val buildWatchChannelName = "slipe/build_watch"
-    private val gitChannelName = "slipe/git"
 
     /// 点击系统悬浮球后待处理的「打开 AI 对话」请求（冷启动时由 Dart 主动消费）
     private var pendingOpenAiChat = false
@@ -208,43 +207,6 @@ class MainActivity : FlutterFragmentActivity() {
                         pendingOpenAiChat = false
                         pendingAiPrompt = null
                         pendingAiProject = null
-                    }
-                    else -> result.notImplemented()
-                }
-            }
-
-        // 本地 Git 拉取通道：Android 端使用 JGit 执行 clone / pull
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, gitChannelName)
-            .setMethodCallHandler { call, result ->
-                when (call.method) {
-                    "cloneOrPull" -> {
-                        val url = call.argument<String>("url")
-                        val destPath = call.argument<String>("destPath")
-                        val branch = call.argument<String>("branch") ?: "main"
-                        val username = call.argument<String>("username") ?: "oauth2"
-                        val token = call.argument<String>("token") ?: ""
-                        if (url == null || url.isBlank() ||
-                            destPath == null || destPath.isBlank()
-                        ) {
-                            result.error("bad_args", "url 或 destPath 为空", null)
-                        } else {
-                            GitClient.cloneOrPull(
-                                url = url,
-                                destPath = destPath,
-                                branch = branch,
-                                username = username,
-                                token = token,
-                                callback = { payload, error ->
-                                    runOnUiThread {
-                                        if (error != null) {
-                                            result.error("git_failed", error, null)
-                                        } else {
-                                            result.success(payload)
-                                        }
-                                    }
-                                }
-                            )
-                        }
                     }
                     else -> result.notImplemented()
                 }

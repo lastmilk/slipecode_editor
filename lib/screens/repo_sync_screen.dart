@@ -166,7 +166,6 @@ class _RepoSyncScreenState extends State<RepoSyncScreen> {
         final outcome = await GitClientService.instance.syncRepo(
           repo,
           destPath: dest,
-          username: GitClientService.instance.authUsername(repo.host),
           token: token,
         );
         // 记入项目历史，并绑定远程仓库，方便后续推送 / 构建

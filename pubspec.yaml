@@ -58,8 +58,6 @@ dependencies:
   # AI 对话 Markdown 渲染
   flutter_markdown: ^0.7.6
   markdown: ^7.2.2
-  # 本地仓库拉取（iOS / 桌面端使用 libgit2；Android 使用 JGit）
-  git2dart: ^0.5.6
   # 云同步网络策略（Wi-Fi / 任意网络）
   connectivity_plus: ^6.0.5
   # MP4 动态壁纸

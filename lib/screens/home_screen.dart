@@ -17,6 +17,7 @@ import '../services/loader_project_service.dart';
 import '../services/project_history_service.dart';
 import '../services/saying_service.dart';
 import '../widgets/app_background.dart';
+import '../widgets/github_user_drawer.dart';
 import '../widgets/typewriter_text.dart';
 import 'account_screen.dart';
 import 'community_screen.dart';
@@ -412,7 +413,12 @@ class _HomeScreenState extends State<HomeScreen>
     final showBackground =
         AppBackground.shouldShow(settings, isIdeScreen: false);
 
+    // GitHub 已登录时，点击底部栏 GitHub 头像可弹出用户抽屉
+    final githubSignedIn = context.watch<GitHubProvider>().isSignedIn;
+
     return Scaffold(
+      endDrawer: githubSignedIn ? const GitHubUserDrawer() : null,
+      endDrawerEnableOpenDragGesture: false,
       body: AppBackground.wrap(
         isIdeScreen: false,
         child: Container(
@@ -1094,6 +1100,10 @@ class _GitStatusBar extends StatelessWidget {
                     }),
                     onSignOut: github.signOut,
                     onCancel: github.cancelSignIn,
+                    // 已登录时点击头像区域弹出用户抽屉
+                    onTap: github.isSignedIn
+                        ? () => Scaffold.of(context).openEndDrawer()
+                        : null,
                   ),
                 ),
               ),
@@ -1143,6 +1153,7 @@ class _HostAuthTile extends StatelessWidget {
     required this.onCancel,
     this.login,
     this.avatarUrl,
+    this.onTap,
   });
 
   final IconData icon;
@@ -1156,6 +1167,9 @@ class _HostAuthTile extends StatelessWidget {
   final VoidCallback onCancel;
   final String? login;
   final String? avatarUrl;
+
+  /// 已登录状态下点击头像/信息区（如 GitHub 弹出用户抽屉）
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -1192,39 +1206,50 @@ class _HostAuthTile extends StatelessWidget {
       return _shell(
         Row(
           children: [
-            CircleAvatar(
-              radius: 13,
-              backgroundColor: color.withValues(alpha: 0.2),
-              backgroundImage: (avatarUrl ?? '').isNotEmpty
-                  ? NetworkImage(avatarUrl!)
-                  : null,
-              child: (avatarUrl ?? '').isEmpty
-                  ? Icon(icon, size: 14, color: color)
-                  : null,
-            ),
-            const SizedBox(width: 8),
+            // 头像与信息区可点击（如打开 GitHub 用户抽屉）
             Expanded(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '@${login ?? ''}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: onTap,
+                child: Row(
+                  children: [
+                    CircleAvatar(
+                      radius: 13,
+                      backgroundColor: color.withValues(alpha: 0.2),
+                      backgroundImage: (avatarUrl ?? '').isNotEmpty
+                          ? NetworkImage(avatarUrl!)
+                          : null,
+                      child: (avatarUrl ?? '').isEmpty
+                          ? Icon(icon, size: 14, color: color)
+                          : null,
                     ),
-                  ),
-                  Text(
-                    label,
-                    style: TextStyle(
-                      fontSize: 10,
-                      color: isDark ? Colors.white38 : Colors.black45,
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '@${login ?? ''}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          Text(
+                            label,
+                            style: TextStyle(
+                              fontSize: 10,
+                              color: isDark ? Colors.white38 : Colors.black45,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
             IconButton(
