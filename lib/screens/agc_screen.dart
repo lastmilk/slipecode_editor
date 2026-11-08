@@ -9,9 +9,10 @@ import '../l10n/app_localizations.dart';
 import '../providers/ai_provider.dart';
 import '../providers/editor_provider.dart';
 import '../providers/project_provider.dart';
-import '../providers/settings_provider.dart';
 import '../services/ai_change_journal.dart';
+import '../services/ai_extensions_service.dart';
 import '../services/llm_service.dart';
+import '../widgets/llm_model_bar.dart';
 import 'settings_screen.dart';
 
 /// AGC（AI Generated Code）模式主界面
@@ -76,7 +77,6 @@ class _AgcScreenState extends State<AgcScreen> {
   @override
   Widget build(BuildContext context) {
     final ai = context.watch<AiProvider>();
-    final settings = context.watch<SettingsProvider>().settings;
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     if (ai.isStreaming) {
@@ -87,8 +87,8 @@ class _AgcScreenState extends State<AgcScreen> {
 
     return Column(
       children: [
-        // 未配置 LLM 提示
-        if (!settings.isLlmConfigured) _buildConfigBanner(isDark),
+        // 未配置 LLM 提示（内置模型可用时不会提示）
+        if (!ai.isConfigured) _buildConfigBanner(isDark),
 
         // 对话区
         Expanded(
@@ -109,6 +109,9 @@ class _AgcScreenState extends State<AgcScreen> {
                             : ai.streamingText,
                         isDark: isDark,
                         streaming: true,
+                        reasoning: ai.streamingReasoning.isEmpty
+                            ? null
+                            : ai.streamingReasoning,
                       );
                     }
                     final item = ai.timeline[index];
@@ -126,6 +129,7 @@ class _AgcScreenState extends State<AgcScreen> {
                       content: msg.content,
                       isDark: isDark,
                       streaming: false,
+                      reasoning: msg.reasoning,
                     );
                   },
                 ),
@@ -151,6 +155,12 @@ class _AgcScreenState extends State<AgcScreen> {
 
         // AI 改动待确认条
         const _AgcPendingBanner(),
+
+        // 模型与积分栏
+        Padding(
+          padding: const EdgeInsets.fromLTRB(14, 2, 14, 0),
+          child: LlmModelBar(isDark: isDark),
+        ),
 
         // 输入栏
         _AgcInputBar(
@@ -338,11 +348,15 @@ class _AgcAiMessage extends StatelessWidget {
     required this.content,
     required this.isDark,
     required this.streaming,
+    this.reasoning,
   });
 
   final String content;
   final bool isDark;
   final bool streaming;
+
+  /// AI 思考过程（reasoning_content）
+  final String? reasoning;
 
   @override
   Widget build(BuildContext context) {
@@ -390,6 +404,12 @@ class _AgcAiMessage extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 6),
+          if (reasoning != null && reasoning!.isNotEmpty)
+            _AgcThinkingBlock(
+              text: reasoning!,
+              isDark: isDark,
+              streaming: streaming,
+            ),
           MarkdownBody(
             data: streaming ? '$content ▌' : content,
             selectable: true,
@@ -439,6 +459,96 @@ class _AgcAiMessage extends StatelessWidget {
       ),
       listBullet: TextStyle(fontSize: 14, color: textColor),
       a: const TextStyle(color: Color(0xFF448AFF)),
+    );
+  }
+}
+
+/// AI 思考过程：流式时自动展开，结束后可折叠查看
+class _AgcThinkingBlock extends StatefulWidget {
+  const _AgcThinkingBlock({
+    required this.text,
+    required this.isDark,
+    required this.streaming,
+  });
+
+  final String text;
+  final bool isDark;
+  final bool streaming;
+
+  @override
+  State<_AgcThinkingBlock> createState() => _AgcThinkingBlockState();
+}
+
+class _AgcThinkingBlockState extends State<_AgcThinkingBlock> {
+  late bool _expanded = widget.streaming;
+
+  @override
+  void didUpdateWidget(covariant _AgcThinkingBlock oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.streaming && !widget.streaming) {
+      _expanded = false;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = widget.isDark;
+    final borderColor = isDark ? Colors.white12 : const Color(0xFFE4E7EC);
+    final hintColor = isDark ? Colors.white54 : Colors.black54;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: isDark
+            ? Colors.white.withValues(alpha: 0.04)
+            : Colors.black.withValues(alpha: 0.03),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: borderColor),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          InkWell(
+            borderRadius: BorderRadius.circular(8),
+            onTap: () => setState(() => _expanded = !_expanded),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              child: Row(
+                children: [
+                  Icon(Icons.psychology_outlined, size: 13, color: hintColor),
+                  const SizedBox(width: 5),
+                  Text(
+                    widget.streaming ? '思考中…' : '思考过程',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500,
+                      color: hintColor,
+                    ),
+                  ),
+                  const Spacer(),
+                  Icon(
+                    _expanded ? Icons.expand_less : Icons.expand_more,
+                    size: 15,
+                    color: hintColor,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (_expanded)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 0, 10, 8),
+              child: Text(
+                widget.text,
+                style: TextStyle(
+                  fontSize: 11.5,
+                  height: 1.5,
+                  color: isDark ? Colors.white60 : Colors.black54,
+                ),
+              ),
+            ),
+        ],
+      ),
     );
   }
 }
@@ -1010,71 +1120,181 @@ class AgcToolsPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ai = context.watch<AiProvider>();
+    final ext = AiExtensionsService.instance;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final tools = ai.mcpTools;
 
-    return ListView(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      children: [
-        _SectionHeader(title: 'Skills', isDark: isDark),
-        ListTile(
-          dense: true,
-          leading: Container(
-            width: 28,
-            height: 28,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(8),
-              gradient: const LinearGradient(
-                colors: [Color(0xFF7C4DFF), Color(0xFF448AFF)],
+    return ListenableBuilder(
+      listenable: ext,
+      builder: (context, _) {
+        final servers = ext.servers;
+        final skills = ext.skills;
+        return ListView(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          children: [
+            _SectionHeader(title: 'Skills', isDark: isDark),
+            ListTile(
+              dense: true,
+              leading: Container(
+                width: 28,
+                height: 28,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(8),
+                  gradient: const LinearGradient(
+                    colors: [Color(0xFF7C4DFF), Color(0xFF448AFF)],
+                  ),
+                ),
+                child: const Icon(
+                  Icons.psychology_outlined,
+                  size: 16,
+                  color: Colors.white,
+                ),
+              ),
+              title: const Text(
+                'SLIPE Agent Skill',
+                style: TextStyle(fontSize: 13),
+              ),
+              subtitle: const Text(
+                '内置 Agent 工作规范与工具使用说明',
+                style: TextStyle(fontSize: 11),
+              ),
+              trailing: const Icon(Icons.chevron_right, size: 18),
+              onTap: () => _showSkill(context),
+            ),
+            const SizedBox(height: 8),
+            _SectionHeader(
+              title: '导入的 Skills（${skills.length}）',
+              isDark: isDark,
+            ),
+            if (skills.isEmpty)
+              _emptyHint('未导入外部 Skill，可在设置中导入')
+            else
+              ...skills.map(
+                (skill) => ListTile(
+                  dense: true,
+                  leading: Icon(
+                    Icons.auto_stories_outlined,
+                    size: 18,
+                    color: skill.enabled
+                        ? (isDark ? Colors.white70 : Colors.black54)
+                        : (isDark ? Colors.white24 : Colors.black26),
+                  ),
+                  title: Text(
+                    skill.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: skill.enabled ? null : Colors.grey,
+                    ),
+                  ),
+                  subtitle: Text(
+                    skill.enabled ? '已启用' : '已停用',
+                    style: const TextStyle(fontSize: 11),
+                  ),
+                ),
+              ),
+            ListTile(
+              dense: true,
+              leading: const Icon(Icons.add_circle_outline, size: 18),
+              title: const Text('导入 / 管理 Skill', style: TextStyle(fontSize: 12)),
+              onTap: () => _openSettings(context),
+            ),
+            const SizedBox(height: 8),
+            _SectionHeader(
+              title: '第三方 MCP（${servers.length}）',
+              isDark: isDark,
+            ),
+            if (servers.isEmpty)
+              _emptyHint('未配置第三方 MCP，可在设置中导入或添加')
+            else
+              ...servers.map(
+                (server) => ListTile(
+                  dense: true,
+                  leading: Icon(
+                    Icons.dns_outlined,
+                    size: 18,
+                    color: server.enabled
+                        ? (isDark ? Colors.white70 : Colors.black54)
+                        : (isDark ? Colors.white24 : Colors.black26),
+                  ),
+                  title: Text(
+                    server.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: server.enabled ? null : Colors.grey,
+                    ),
+                  ),
+                  subtitle: Text(
+                    '${server.transport.toUpperCase()} · ${server.endpointLabel}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 11),
+                  ),
+                ),
+              ),
+            ListTile(
+              dense: true,
+              leading: const Icon(Icons.add_circle_outline, size: 18),
+              title: const Text('管理 MCP 服务器', style: TextStyle(fontSize: 12)),
+              onTap: () => _openSettings(context),
+            ),
+            const SizedBox(height: 8),
+            _SectionHeader(
+              title: 'MCP 工具（${tools.length}）',
+              isDark: isDark,
+            ),
+            ...tools.map(
+              (tool) => ListTile(
+                dense: true,
+                leading: Container(
+                  width: 28,
+                  height: 28,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(8),
+                    color: isDark
+                        ? Colors.white.withValues(alpha: 0.08)
+                        : Colors.black.withValues(alpha: 0.05),
+                  ),
+                  child: Icon(
+                    _toolIcon(tool.name),
+                    size: 15,
+                    color: isDark ? Colors.white70 : Colors.black54,
+                  ),
+                ),
+                title: Text(
+                  tool.name,
+                  style: const TextStyle(fontSize: 12, fontFamily: 'monospace'),
+                ),
+                subtitle: Text(
+                  tool.description,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 11),
+                ),
               ),
             ),
-            child: const Icon(
-              Icons.psychology_outlined,
-              size: 16,
-              color: Colors.white,
-            ),
-          ),
-          title: const Text('SLIPE Agent Skill', style: TextStyle(fontSize: 13)),
-          subtitle: const Text(
-            '内置 Agent 工作规范与工具使用说明',
-            style: TextStyle(fontSize: 11),
-          ),
-          trailing: const Icon(Icons.chevron_right, size: 18),
-          onTap: () => _showSkill(context),
-        ),
-        const SizedBox(height: 8),
-        _SectionHeader(title: 'MCP 工具（${tools.length}）', isDark: isDark),
-        ...tools.map(
-          (tool) => ListTile(
-            dense: true,
-            leading: Container(
-              width: 28,
-              height: 28,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(8),
-                color: isDark
-                    ? Colors.white.withValues(alpha: 0.08)
-                    : Colors.black.withValues(alpha: 0.05),
-              ),
-              child: Icon(
-                _toolIcon(tool.name),
-                size: 15,
-                color: isDark ? Colors.white70 : Colors.black54,
-              ),
-            ),
-            title: Text(
-              tool.name,
-              style: const TextStyle(fontSize: 12, fontFamily: 'monospace'),
-            ),
-            subtitle: Text(
-              tool.description,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 11),
-            ),
-          ),
-        ),
-      ],
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _emptyHint(String text) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 2, 14, 6),
+      child: Text(
+        text,
+        style: const TextStyle(fontSize: 11, color: Colors.grey),
+      ),
+    );
+  }
+
+  void _openSettings(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const SettingsScreen()),
     );
   }
 
