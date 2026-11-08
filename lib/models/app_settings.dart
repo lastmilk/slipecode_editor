@@ -81,6 +81,12 @@ class AppSettings {
   /// 当前激活的模型 id
   final String activeLlmId;
 
+  /// 是否使用 SLIPE 内置模型（登录后可用，默认开启）
+  final bool llmUseBuiltin;
+
+  /// 当前选择的内置模型 id（为空时使用后端下发的默认模型）
+  final String builtinLlmId;
+
   /// 是否把模型配置（含 API Key）同步到云端
   final bool llmCloudSync;
 
@@ -170,6 +176,8 @@ class AppSettings {
     this.llmModel = 'gpt-4o-mini',
     this.llmProfiles = const [],
     this.activeLlmId = '',
+    this.llmUseBuiltin = true,
+    this.builtinLlmId = '',
     this.llmCloudSync = false,
     this.chatCloudSync = false,
     this.syncNetwork = 'wifi',
@@ -220,6 +228,8 @@ class AppSettings {
     String? llmModel,
     List<LlmProfile>? llmProfiles,
     String? activeLlmId,
+    bool? llmUseBuiltin,
+    String? builtinLlmId,
     bool? llmCloudSync,
     bool? chatCloudSync,
     String? syncNetwork,
@@ -256,6 +266,8 @@ class AppSettings {
       llmModel: llmModel ?? this.llmModel,
       llmProfiles: llmProfiles ?? this.llmProfiles,
       activeLlmId: activeLlmId ?? this.activeLlmId,
+      llmUseBuiltin: llmUseBuiltin ?? this.llmUseBuiltin,
+      builtinLlmId: builtinLlmId ?? this.builtinLlmId,
       llmCloudSync: llmCloudSync ?? this.llmCloudSync,
       chatCloudSync: chatCloudSync ?? this.chatCloudSync,
       syncNetwork: syncNetwork ?? this.syncNetwork,
@@ -307,6 +319,8 @@ class AppSettings {
           .map((profile) => profile.toJson(includeKey: includeSecrets))
           .toList(),
       'activeLlmId': activeLlmId,
+      'llmUseBuiltin': llmUseBuiltin,
+      'builtinLlmId': builtinLlmId,
       'llmCloudSync': llmCloudSync,
       'chatCloudSync': chatCloudSync,
       'syncNetwork': syncNetwork,
@@ -397,6 +411,8 @@ class AppSettings {
       llmModel: json['llmModel'] as String? ?? defaults.llmModel,
       llmProfiles: profiles,
       activeLlmId: activeLlmId,
+      llmUseBuiltin: json['llmUseBuiltin'] as bool? ?? defaults.llmUseBuiltin,
+      builtinLlmId: json['builtinLlmId'] as String? ?? defaults.builtinLlmId,
       llmCloudSync: json['llmCloudSync'] as bool? ?? defaults.llmCloudSync,
       chatCloudSync: json['chatCloudSync'] as bool? ?? defaults.chatCloudSync,
       syncNetwork: json['syncNetwork'] as String? ?? defaults.syncNetwork,

@@ -198,7 +198,22 @@ class SettingsProvider extends ChangeNotifier {
   /// 切换当前使用的模型
   Future<void> setActiveLlm(String id) async {
     if (!_settings.llmProfiles.any((item) => item.id == id)) return;
-    _settings = _settings.copyWith(activeLlmId: id);
+    _settings = _settings.copyWith(activeLlmId: id, llmUseBuiltin: false);
+    await _save();
+  }
+
+  /// 切换使用 SLIPE 内置模型
+  Future<void> setUseBuiltinLlm(bool value) async {
+    _settings = _settings.copyWith(llmUseBuiltin: value);
+    await _save();
+  }
+
+  /// 选择某个内置模型（自动切换到内置模型模式）
+  Future<void> setBuiltinLlm(String id) async {
+    _settings = _settings.copyWith(
+      llmUseBuiltin: true,
+      builtinLlmId: id,
+    );
     await _save();
   }
 

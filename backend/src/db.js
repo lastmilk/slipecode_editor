@@ -154,6 +154,8 @@ const DEFAULT_DB = {
   release: null,
   // 社区 Payload 包（用户发布，需管理端审核通过后公开）
   community: [],
+  // 积分激活码（管理端生成，用户兑换）
+  activationCodes: [],
   // 运行期配置（优先级高于环境变量，便于在管理端热更新）
   config: {
     geetest: {},
@@ -206,6 +208,9 @@ export async function loadDb() {
       release:
         parsed.release && typeof parsed.release === 'object' ? parsed.release : null,
       community: Array.isArray(parsed.community) ? parsed.community : [],
+      activationCodes: Array.isArray(parsed.activationCodes)
+        ? parsed.activationCodes
+        : [],
       config: mergeConfig(parsed.config),
       stats: mergeStats(parsed.stats),
     };

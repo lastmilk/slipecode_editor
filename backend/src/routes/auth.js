@@ -2,7 +2,7 @@
 
 import { randomBytes } from 'node:crypto';
 
-import { PASSWORD_MIN, PHONE_PATTERN } from '../config.js';
+import { INITIAL_CREDITS, PASSWORD_MIN, PHONE_PATTERN } from '../config.js';
 import { bumpStat, getDb, saveDb } from '../db.js';
 import { httpError, readJson, remoteIp, sendJson } from '../http.js';
 import {
@@ -88,6 +88,7 @@ export async function handleRegister(req, res) {
     return sendJson(res, 400, { error: '短信验证码不正确或已过期' });
   }
 
+  const now = new Date().toISOString();
   const user = {
     id: `u_${randomBytes(8).toString('hex')}`,
     email,
@@ -96,10 +97,19 @@ export async function handleRegister(req, res) {
     avatarUrl: '',
     wallpaper: null,
     passwordHash: hashPassword(password),
-    credits: 0,
+    credits: INITIAL_CREDITS,
+    creditLogs: [
+      {
+        ts: now,
+        type: 'register_bonus',
+        amount: INITIAL_CREDITS,
+        balance: INITIAL_CREDITS,
+        note: '注册赠送额度',
+      },
+    ],
     lastCheckinDate: null,
-    createdAt: new Date().toISOString(),
-    lastLoginAt: new Date().toISOString(),
+    createdAt: now,
+    lastLoginAt: now,
   };
   db.users.push(user);
   bumpStat('registers');

@@ -22,8 +22,62 @@ export const PASSWORD_MIN = 8;
 export const HTTP_TIMEOUT_MS = 8000;
 
 export const CHECKIN_REWARD = 100;
-/** 积分计价：1 积分 = 2000 token */
-export const TOKENS_PER_CREDIT = 2000;
+/** 注册赠送积分（一次性免费额度） */
+export const INITIAL_CREDITS = 500;
+/**
+ * 积分计价基准：1 积分 = 1000 token（倍率 1.0 的模型）。
+ * 实际可用 token = TOKENS_PER_CREDIT / 模型倍率：
+ *   DeepSeek Flash（0.2）≈ 5000 token/积分
+ *   StepFun（0.8）      ≈ 1250 token/积分
+ */
+export const TOKENS_PER_CREDIT = 1000;
+/** 单次调用最少扣 1 积分，避免高频小额请求白嫖 */
+export const MIN_CALL_CREDITS = 1;
+/** 请求前要求的最低余额（不足则直接 402，避免透支） */
+export const MIN_BALANCE_FOR_CALL = 1;
+
+/**
+ * 商业化充值套餐（与激活码面额对应）。
+ * 激活码只承载积分，套餐仅用于展示与运营口径。
+ */
+export const CREDIT_PLANS = [
+  {
+    id: 'trial',
+    name: '体验包',
+    credits: 1000,
+    price: 9.9,
+    description: '约 220 次 DeepSeek Flash 对话（按 2 万 token/次估算）',
+    badge: '',
+  },
+  {
+    id: 'standard',
+    name: '标准包',
+    credits: 3000,
+    price: 29.9,
+    description: '约 660 次对话，适合日常开发与学习',
+    badge: '推荐',
+  },
+  {
+    id: 'pro',
+    name: '专业包',
+    credits: 10000,
+    price: 89,
+    description: '约 2200 次对话，适合重度编程与长上下文任务',
+    badge: '最划算',
+  },
+  {
+    id: 'team',
+    name: '团队包',
+    credits: 30000,
+    price: 249,
+    description: '适合小团队共用，可拆分为多张激活码分发',
+    badge: '',
+  },
+];
+
+export function creditPlanById(id) {
+  return CREDIT_PLANS.find((p) => p.id === String(id || '')) || null;
+}
 
 export const PHONE_PATTERN = /^1[3-9]\d{9}$/;
 

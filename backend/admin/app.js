@@ -129,6 +129,25 @@ const app = Vue.createApp({
       creditsUser: null,
       creditsDelta: 100,
       savingCredits: false,
+
+      codes: [],
+      codeTotal: 0,
+      codePage: 1,
+      codePageSize: 20,
+      codeStatus: '',
+      codeQuery: '',
+      codeSummary: { total: 0, unused: 0, used: 0, creditsIssued: 0, creditsRedeemed: 0 },
+      loadingCodes: false,
+      codeDialog: false,
+      codeForm: { credits: 1000, planId: 'standard', count: 5, expiresAt: null, note: '' },
+      generatedCodes: [],
+      savingCode: false,
+      creditPlans: [
+        { id: 'trial', name: '体验包', credits: 1000, price: 9.9 },
+        { id: 'standard', name: '标准包', credits: 3000, price: 29.9 },
+        { id: 'pro', name: '专业包', credits: 10000, price: 89 },
+        { id: 'team', name: '团队包', credits: 30000, price: 249 },
+      ],
     };
   },
 
@@ -243,6 +262,7 @@ const app = Vue.createApp({
       this.tab = tab;
       if (tab === 'overview') this.loadStats();
       if (tab === 'users') this.loadUsers();
+      if (tab === 'activation') this.loadCodes();
       if (tab === 'config') this.loadConfig();
       if (tab === 'llm') this.loadModels();
       if (tab === 'docs') this.loadDocs();
@@ -446,8 +466,8 @@ const app = Vue.createApp({
 
     openModelDialog(row) {
       this.modelForm = row
-        ? { id: row.id, name: row.name, apiBase: row.apiBase, apiKey: row.apiKey, model: row.model, multiplier: row.multiplier || 1 }
-        : { id: '', name: '', apiBase: '', apiKey: '', model: '', multiplier: 1 };
+        ? { id: row.id, name: row.name, apiBase: row.apiBase, apiKey: row.apiKey, model: row.model, multiplier: row.multiplier || 1, description: row.description || '' }
+        : { id: '', name: '', apiBase: '', apiKey: '', model: '', multiplier: 1, description: '' };
       this.modelDialog = true;
     },
 
@@ -494,6 +514,115 @@ const app = Vue.createApp({
       } catch (err) {
         this.handleError(err);
       }
+    },
+
+    codeStatusText(row) {
+      if (row.usedAt) return '已使用';
+      if (row.disabled) return '已停用';
+      return '未使用';
+    },
+    codeStatusType(row) {
+      if (row.usedAt) return 'success';
+      if (row.disabled) return 'info';
+      return 'warning';
+    },
+    async loadCodes() {
+      this.loadingCodes = true;
+      try {
+        const params = new URLSearchParams({
+          page: String(this.codePage),
+          pageSize: String(this.codePageSize),
+        });
+        if (this.codeStatus) params.set('status', this.codeStatus);
+        if (this.codeQuery.trim()) params.set('q', this.codeQuery.trim());
+        const data = await request(`/api/admin/activation-codes?${params.toString()}`);
+        this.codes = data.codes || [];
+        this.codeTotal = data.total || 0;
+        if (data.summary) this.codeSummary = data.summary;
+      } catch (err) {
+        this.handleError(err);
+      } finally {
+        this.loadingCodes = false;
+      }
+    },
+    onCodePageChange(page) {
+      this.codePage = page;
+      this.loadCodes();
+    },
+    openCodeDialog() {
+      this.codeForm = { credits: 1000, planId: 'standard', count: 5, expiresAt: null, note: '' };
+      this.generatedCodes = [];
+      this.codeDialog = true;
+    },
+    async generateCodes() {
+      const form = this.codeForm;
+      if (!form.credits || form.credits <= 0) {
+        ElementPlus.ElMessage.warning('请填写有效积分面额');
+        return;
+      }
+      this.savingCode = true;
+      try {
+        const data = await request('/api/admin/activation-codes', {
+          method: 'POST',
+          body: {
+            credits: Number(form.credits),
+            count: Number(form.count) || 1,
+            planId: form.planId || '',
+            expiresAt: form.expiresAt || null,
+            note: form.note || '',
+          },
+        });
+        this.generatedCodes = (data.codes || []).map((c) => c.code);
+        ElementPlus.ElMessage.success(`已生成 ${this.generatedCodes.length} 张激活码`);
+        this.codePage = 1;
+        await this.loadCodes();
+      } catch (err) {
+        this.handleError(err);
+      } finally {
+        this.savingCode = false;
+      }
+    },
+    async toggleCode(row) {
+      try {
+        await request(`/api/admin/activation-codes/${encodeURIComponent(row.id)}/toggle`, {
+          method: 'POST',
+        });
+        ElementPlus.ElMessage.success(row.disabled ? '已启用' : '已停用');
+        await this.loadCodes();
+      } catch (err) {
+        this.handleError(err);
+      }
+    },
+    async removeCode(row) {
+      try {
+        await ElementPlus.ElMessageBox.confirm(`确定删除激活码 ${row.code}？`, '删除确认', {
+          type: 'warning',
+          confirmButtonText: '删除',
+          cancelButtonText: '取消',
+        });
+      } catch {
+        return;
+      }
+      try {
+        await request(`/api/admin/activation-codes/${encodeURIComponent(row.id)}`, {
+          method: 'DELETE',
+        });
+        ElementPlus.ElMessage.success('已删除');
+        await this.loadCodes();
+      } catch (err) {
+        this.handleError(err);
+      }
+    },
+    async copyText(text) {
+      try {
+        await navigator.clipboard.writeText(text);
+        ElementPlus.ElMessage.success('已复制');
+      } catch {
+        ElementPlus.ElMessage.warning('复制失败，请手动选择文本');
+      }
+    },
+    copyAllCodes() {
+      this.copyText(this.generatedCodes.join('\n'));
     },
     async loadDocs() {
       this.loadingDocs = true;

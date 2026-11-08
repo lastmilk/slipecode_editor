@@ -10,6 +10,7 @@ import '../providers/project_provider.dart';
 import '../providers/terminal_provider.dart';
 import '../services/ai_change_journal.dart';
 import '../services/dart_class_template.dart';
+import '../services/external_mcp_manager.dart';
 import '../services/file_service.dart';
 
 /// 一次工具调用的展示记录
@@ -82,6 +83,9 @@ class McpToolbox {
   /// 终端能力（仅桌面端本地 shell 可用时由 Agent 使用）
   final TerminalProvider? terminal;
 
+  /// 用户自行配置的第三方 MCP 服务器（可以为空）
+  ExternalMcpManager? externalManager;
+
   final FileService _fs = FileService();
 
   /// AI 改动默认直接落盘，但会登记到台账，用户可事后撤回
@@ -90,10 +94,13 @@ class McpToolbox {
   /// 供 LLM 使用的工具定义
   ///
   /// 终端工具仅在桌面端（本地 shell 可用）时暴露给模型。
-  List<Map<String, dynamic>> get definitions => tools
-      .where((tool) => tool.name != 'run_terminal_command' || _terminalReady)
-      .map((tool) => tool.toDefinition())
-      .toList();
+  List<Map<String, dynamic>> get definitions => [
+        ...tools
+            .where((tool) =>
+                tool.name != 'run_terminal_command' || _terminalReady)
+            .map((tool) => tool.toDefinition()),
+        ...?externalManager?.definitions,
+      ];
 
   bool get _terminalReady => terminal?.available ?? false;
 
@@ -101,6 +108,11 @@ class McpToolbox {
 
   /// 执行一次工具调用，返回给模型看的文本结果
   Future<String> execute(String name, Map<String, dynamic> args) async {
+    if (name.startsWith(ExternalMcpManager.toolPrefix)) {
+      final manager = externalManager;
+      if (manager == null) return '错误：第三方 MCP 未初始化';
+      return manager.execute(name, args);
+    }
     final tool = tools.where((t) => t.name == name).firstOrNull;
     if (tool == null) return '错误：未知工具 $name';
     try {

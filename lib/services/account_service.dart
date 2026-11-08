@@ -5,6 +5,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 
 import '../config/app_config.dart';
+import '../models/credits.dart';
 import 'backend_http.dart';
 
 /// SLIPE 账号用户
@@ -22,6 +23,9 @@ class AccountUser {
   /// 云端壁纸版本号（为空表示未上传）
   final String wallpaperVersion;
 
+  /// 积分余额
+  final int credits;
+
   const AccountUser({
     required this.id,
     required this.email,
@@ -29,6 +33,7 @@ class AccountUser {
     this.phone = '',
     this.avatarUrl = '',
     this.wallpaperVersion = '',
+    this.credits = 0,
   });
 
   factory AccountUser.fromJson(Map<String, dynamic> json) => AccountUser(
@@ -40,6 +45,7 @@ class AccountUser {
         phone: json['phone'] as String? ?? '',
         avatarUrl: json['avatarUrl'] as String? ?? '',
         wallpaperVersion: json['wallpaperVersion'] as String? ?? '',
+        credits: (json['credits'] as num?)?.toInt() ?? 0,
       );
 
   Map<String, dynamic> toJson() => {
@@ -49,7 +55,28 @@ class AccountUser {
         'phone': phone,
         'avatarUrl': avatarUrl,
         'wallpaperVersion': wallpaperVersion,
+        'credits': credits,
       };
+
+  AccountUser copyWith({
+    String? id,
+    String? email,
+    String? displayName,
+    String? phone,
+    String? avatarUrl,
+    String? wallpaperVersion,
+    int? credits,
+  }) {
+    return AccountUser(
+      id: id ?? this.id,
+      email: email ?? this.email,
+      displayName: displayName ?? this.displayName,
+      phone: phone ?? this.phone,
+      avatarUrl: avatarUrl ?? this.avatarUrl,
+      wallpaperVersion: wallpaperVersion ?? this.wallpaperVersion,
+      credits: credits ?? this.credits,
+    );
+  }
 }
 
 /// 账号接口异常
@@ -357,18 +384,112 @@ class AccountService {
     await _decode(res, '删除云端壁纸失败');
   }
 
-  /// 云端 LLM 模型列表（SLIPE 云端模型预置使用）
-  Future<List<Map<String, dynamic>>> fetchLlmModels(String token) async {
+  /// 内置 LLM 模型列表（SLIPE 内置模型）
+  Future<({List<BuiltinLlmModel> models, String defaultId})> fetchLlmModels(
+    String token,
+  ) async {
     _ensureConfigured();
     final res = await _client
         .get(_u('/api/llm/models'), headers: _headers(token))
         .timeout(const Duration(seconds: 20));
-    final data = await _decode(res, '获取云端模型失败');
+    final data = await _decode(res, '获取内置模型失败');
     final list = data['models'];
+    final models = list is List
+        ? list
+            .whereType<Map>()
+            .map((e) => BuiltinLlmModel.fromJson(Map<String, dynamic>.from(e)))
+            .toList()
+        : <BuiltinLlmModel>[];
+    return (
+      models: models,
+      defaultId: (data['defaultModelId'] ?? '').toString(),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // 积分 / 充值
+  // ---------------------------------------------------------------------------
+
+  Future<({int credits, bool checkedInToday})> fetchCredits(String token) async {
+    _ensureConfigured();
+    final res = await _client
+        .get(_u('/api/credits'), headers: _headers(token))
+        .timeout(const Duration(seconds: 20));
+    final data = await _decode(res, '获取积分失败');
+    return (
+      credits: (data['credits'] as num?)?.toInt() ?? 0,
+      checkedInToday: data['checkedInToday'] == true,
+    );
+  }
+
+  Future<({bool ok, String message, int credits})> checkin(String token) async {
+    _ensureConfigured();
+    final res = await _client
+        .post(_u('/api/checkin'), headers: _headers(token))
+        .timeout(const Duration(seconds: 20));
+    final data = await _decode(res, '签到失败');
+    return (
+      ok: data['ok'] == true,
+      message: (data['message'] ?? '').toString(),
+      credits: (data['credits'] as num?)?.toInt() ?? 0,
+    );
+  }
+
+  Future<({bool ok, String message, int credits, int amount})>
+      redeemActivationCode(String token, String code) async {
+    _ensureConfigured();
+    final res = await _client
+        .post(
+          _u('/api/billing/redeem'),
+          headers: _headers(token),
+          body: jsonEncode({'code': code.trim()}),
+        )
+        .timeout(const Duration(seconds: 20));
+    final data = await _decode(res, '兑换失败');
+    return (
+      ok: data['ok'] == true,
+      message: (data['message'] ?? '').toString(),
+      credits: (data['credits'] as num?)?.toInt() ?? 0,
+      amount: (data['amount'] as num?)?.toInt() ?? 0,
+    );
+  }
+
+  Future<List<CreditLogEntry>> fetchCreditLogs(String token) async {
+    _ensureConfigured();
+    final res = await _client
+        .get(_u('/api/credits/logs'), headers: _headers(token))
+        .timeout(const Duration(seconds: 20));
+    final data = await _decode(res, '获取积分明细失败');
+    final list = data['logs'];
     if (list is List) {
-      return list.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+      return list
+          .whereType<Map>()
+          .map((e) => CreditLogEntry.fromJson(Map<String, dynamic>.from(e)))
+          .toList();
     }
     return const [];
+  }
+
+  Future<BillingInfo> fetchBillingPlans() async {
+    _ensureConfigured();
+    final res = await _client
+        .get(_u('/api/billing/plans'))
+        .timeout(const Duration(seconds: 20));
+    final data = await _decode(res, '获取充值套餐失败');
+    final list = data['plans'];
+    final plans = list is List
+        ? list
+            .whereType<Map>()
+            .map((e) => CreditPlan.fromJson(Map<String, dynamic>.from(e)))
+            .toList()
+        : <CreditPlan>[];
+    final pricing = data['pricing'];
+    return BillingInfo(
+      plans: plans,
+      pricing: pricing is Map<String, dynamic>
+          ? BillingPricing.fromJson(pricing)
+          : const BillingPricing(),
+    );
   }
 
   (String, AccountUser) _sessionFrom(Map<String, dynamic> data, String what) {

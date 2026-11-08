@@ -182,6 +182,40 @@ export function getCredits(user) {
   return Number.isFinite(user.credits) ? user.credits : 0;
 }
 
+/**
+ * 统一积分变动入口：写余额 + 记流水。
+ * @param {object} user 用户对象
+ * @param {number} delta 变动值（正数入账，负数扣费）
+ * @param {string} type 流水类型：register_bonus / checkin / redeem / llm_usage / admin_adjust
+ * @param {string} note 备注
+ */
+export function applyCredits(user, delta, type, note = '') {
+  const amount = Math.trunc(Number(delta) || 0);
+  if (!amount) return getCredits(user);
+  const before = getCredits(user);
+  const after = Math.max(0, before + amount);
+  user.credits = after;
+  if (!Array.isArray(user.creditLogs)) user.creditLogs = [];
+  user.creditLogs.push({
+    ts: new Date().toISOString(),
+    type,
+    amount: after - before,
+    balance: after,
+    note,
+  });
+  // 只保留最近 200 条，避免单用户数据无限膨胀
+  if (user.creditLogs.length > 200) {
+    user.creditLogs.splice(0, user.creditLogs.length - 200);
+  }
+  return after;
+}
+
+export async function handleGetCreditLogs(req, res) {
+  const user = requireUser(req);
+  const logs = Array.isArray(user.creditLogs) ? user.creditLogs.slice(-50).reverse() : [];
+  sendJson(res, 200, { credits: getCredits(user), logs });
+}
+
 export async function handleCheckin(req, res) {
   const user = requireUser(req);
   const today = todayStr();
@@ -193,8 +227,8 @@ export async function handleCheckin(req, res) {
       checkedInToday: true,
     });
   }
-  user.credits = getCredits(user) + CHECKIN_REWARD;
   user.lastCheckinDate = today;
+  applyCredits(user, CHECKIN_REWARD, 'checkin', '每日签到');
   await saveDb();
   sendJson(res, 200, {
     ok: true,

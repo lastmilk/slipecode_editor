@@ -4,8 +4,11 @@ import 'package:flutter/foundation.dart';
 
 import '../agent/agent_service.dart';
 import '../agent/mcp_tools.dart';
+import '../config/app_config.dart';
 import '../l10n/app_localizations.dart';
 import '../models/app_settings.dart';
+import '../models/credits.dart';
+import '../models/llm_profile.dart';
 import '../providers/account_provider.dart';
 import '../providers/build_provider.dart';
 import '../providers/editor_provider.dart';
@@ -13,12 +16,31 @@ import '../providers/project_provider.dart';
 import '../providers/settings_provider.dart';
 import '../providers/terminal_provider.dart';
 import '../services/account_service.dart';
+import '../services/ai_extensions_service.dart';
 import '../services/chat_history_service.dart';
+import '../services/external_mcp_manager.dart';
 import '../services/llm_service.dart';
 import '../services/network_policy.dart';
 
 /// AI 助手状态
 enum AiStatus { idle, thinking, error }
+
+/// 当前实际生效的模型（内置模型或用户自定义模型）
+class _ResolvedLlm {
+  final String apiBase;
+  final String apiKey;
+  final String model;
+  final String name;
+  final bool builtin;
+
+  const _ResolvedLlm({
+    required this.apiBase,
+    required this.apiKey,
+    required this.model,
+    required this.name,
+    required this.builtin,
+  });
+}
 
 /// AI 助手 Provider
 ///
@@ -67,6 +89,7 @@ class AiProvider extends ChangeNotifier {
   // 流式输出
   bool _isStreaming = false;
   String _streamingText = '';
+  String _streamingReasoning = '';
   DateTime _lastStreamNotify = DateTime.now();
 
   // 对话记录
@@ -100,19 +123,99 @@ class AiProvider extends ChangeNotifier {
   /// 当前流式接收中的文本
   String get streamingText => _streamingText;
 
+  /// 当前流式接收中的思考过程（DeepSeek / StepFun 等推理模型）
+  String get streamingReasoning => _streamingReasoning;
+
   /// VibeCoding 是否正在执行（编辑器需锁定）
   bool get vibeBusy => _vibeBusy;
 
   /// VibeCoding 期间的模型输出（Agent 面板展示「思考过程」）
   String get vibeThinking => _vibeThinking;
 
-  /// 是否已配置 LLM
-  bool get isConfigured => _settings.settings.isLlmConfigured;
+  /// 是否可用（内置模型需登录；自定义模型需完整配置）
+  bool get isConfigured => _resolveLlm() != null;
+
+  /// 当前模型展示名称
+  String get currentModelName => _resolveLlm()?.name ?? '未选择模型';
+
+  /// 当前是否使用内置模型
+  bool get isUsingBuiltinModel => _resolveLlm()?.builtin ?? false;
 
   /// Agent 可调用的 MCP 工具（用于 AGC 模式「MCP/Skills」面板展示）
   List<McpTool> get mcpTools => List.unmodifiable(_toolbox.tools);
 
   AppSettings get _s => _settings.settings;
+
+  /// 解析当前实际生效的模型
+  ///
+  /// 优先使用 SLIPE 内置模型（登录后）；不可用时回退到用户自定义模型。
+  _ResolvedLlm? _resolveLlm() {
+    final s = _s;
+    if (s.llmUseBuiltin) {
+      final base = AppConfig.accountBackendBase;
+      final token = _account.token;
+      if (_account.isSignedIn && token != null && base.isNotEmpty) {
+        final models = _account.builtinModels;
+        if (models.isNotEmpty) {
+          final wanted = s.builtinLlmId.isNotEmpty
+              ? s.builtinLlmId
+              : _account.defaultBuiltinModelId;
+          final selected = models.where((m) => m.id == wanted).firstOrNull ??
+              models.first;
+          return _ResolvedLlm(
+            apiBase: '$base/api/llm',
+            apiKey: token,
+            model: selected.id,
+            name: selected.name,
+            builtin: true,
+          );
+        }
+      }
+    }
+    final llm = s.activeLlm;
+    if (llm != null && llm.isConfigured) {
+      return _ResolvedLlm(
+        apiBase: llm.normalizedApiBase,
+        apiKey: llm.apiKey,
+        model: llm.model,
+        name: llm.name,
+        builtin: false,
+      );
+    }
+    return null;
+  }
+
+  /// 为内置模型选择/刷新模型列表（供 UI 调用）
+  Future<void> ensureBuiltinModels() async {
+    if (!_settings.settings.llmUseBuiltin || !_account.isSignedIn) return;
+    if (_account.builtinModels.isEmpty) {
+      await _account.refreshBuiltinModels();
+    }
+  }
+
+  /// 用户切换模型
+  Future<void> selectBuiltinModel(BuiltinLlmModel model) async {
+    await _settings.setBuiltinLlm(model.id);
+    _safeNotify();
+  }
+
+  Future<void> selectCustomModel(LlmProfile profile) async {
+    await _settings.setActiveLlm(profile.id);
+    _safeNotify();
+  }
+
+  /// 加载用户配置的第三方 MCP 与外源 Skill
+  Future<String> _prepareExtensions() async {
+    final extensions = AiExtensionsService.instance;
+    await extensions.ensureLoaded();
+    try {
+      _toolbox.externalManager = ExternalMcpManager.instance;
+      await ExternalMcpManager.instance.configure(extensions.enabledServers);
+    } catch (e) {
+      debugPrint('第三方 MCP 初始化失败：$e');
+    }
+    return extensions.enabledSkillsText;
+  }
 
   void _safeNotify() {
     if (!_disposed) notifyListeners();
@@ -177,9 +280,11 @@ class AiProvider extends ChangeNotifier {
       for (final item in records) {
         final content = (item['content'] ?? '').toString();
         if (content.isEmpty) continue;
+        final reasoning = (item['reasoning'] ?? '').toString();
         final message = ChatMessage(
           role: item['role'] == 'assistant' ? ChatRole.assistant : ChatRole.user,
           content: content,
+          reasoning: reasoning.isEmpty ? null : reasoning,
         );
         _messages.add(message);
         _timeline.add(message);
@@ -201,6 +306,8 @@ class AiProvider extends ChangeNotifier {
       records.add({
         'role': message.role == ChatRole.assistant ? 'assistant' : 'user',
         'content': message.content,
+        if (message.reasoning != null && message.reasoning!.isNotEmpty)
+          'reasoning': message.reasoning,
         'ts': now,
       });
     }
@@ -232,20 +339,17 @@ class AiProvider extends ChangeNotifier {
       _safeNotify();
       return;
     }
-    if (!isConfigured) {
+    // 首次使用内置模型时先拉取模型列表（默认 DeepSeek Flash）
+    await ensureBuiltinModels();
+    final llm = _resolveLlm();
+    if (llm == null) {
       _error = t('ai.error.llmNotConfigured');
       _status = AiStatus.error;
       _safeNotify();
       return;
     }
 
-    final llm = _s.activeLlm;
-    if (llm == null || !llm.isConfigured) {
-      _error = t('ai.error.llmNotConfigured');
-      _status = AiStatus.error;
-      _safeNotify();
-      return;
-    }
+    final extraSkill = await _prepareExtensions();
 
     final userMessage = ChatMessage(role: ChatRole.user, content: text);
     _messages.add(userMessage);
@@ -255,6 +359,7 @@ class AiProvider extends ChangeNotifier {
     _error = null;
     _isStreaming = true;
     _streamingText = '';
+    _streamingReasoning = '';
     _safeNotify();
 
     // 只带最近 20 条，避免 token 爆炸
@@ -272,9 +377,18 @@ class AiProvider extends ChangeNotifier {
       }
     }
 
+    void onReasoning(String delta) {
+      _streamingReasoning += delta;
+      final now = DateTime.now();
+      if (now.difference(_lastStreamNotify).inMilliseconds > 80) {
+        _lastStreamNotify = now;
+        _safeNotify();
+      }
+    }
+
     try {
       final result = await _agent.run(
-        apiBase: llm.normalizedApiBase,
+        apiBase: llm.apiBase,
         apiKey: llm.apiKey,
         model: llm.model,
         history: List<ChatMessage>.from(history),
@@ -284,12 +398,16 @@ class AiProvider extends ChangeNotifier {
           _safeNotify();
         },
         onDelta: onDelta,
+        onReasoning: onReasoning,
+        extraSystemPrompt: extraSkill,
       );
       _isStreaming = false;
       _streamingText = '';
+      _streamingReasoning = '';
       final reply = ChatMessage(
         role: ChatRole.assistant,
         content: result.content,
+        reasoning: result.reasoning.isEmpty ? null : result.reasoning,
       );
       _messages.add(reply);
       _timeline.add(reply);
@@ -297,10 +415,15 @@ class AiProvider extends ChangeNotifier {
     } catch (e) {
       _isStreaming = false;
       _streamingText = '';
+      _streamingReasoning = '';
       _error = '$e';
       _status = AiStatus.error;
     }
     _safeNotify();
+    if (llm.builtin) {
+      // 内置模型按 token 扣积分，调用结束后刷新余额
+      await _account.refreshCredits();
+    }
     await _persistHistory();
   }
 
@@ -334,13 +457,16 @@ class AiProvider extends ChangeNotifier {
     required int lineEnd,
   }) async {
     if (_vibeBusy) return;
-    final llm = _s.activeLlm;
-    if (llm == null || !llm.isConfigured) {
+    await ensureBuiltinModels();
+    final llm = _resolveLlm();
+    if (llm == null) {
       _error = t('ai.error.llmNotConfiguredVibe');
       _status = AiStatus.error;
       _safeNotify();
       return;
     }
+
+    final extraSkill = await _prepareExtensions();
 
     _vibeBusy = true;
     _vibeCancelled = false;
@@ -361,7 +487,7 @@ class AiProvider extends ChangeNotifier {
 
       // 2) 交给 Agent 用工具实现需求
       final result = await _agent.run(
-        apiBase: llm.normalizedApiBase,
+        apiBase: llm.apiBase,
         apiKey: llm.apiKey,
         model: llm.model,
         history: [
@@ -381,6 +507,11 @@ class AiProvider extends ChangeNotifier {
           _vibeThinking += delta;
           _safeNotify();
         },
+        onReasoning: (delta) {
+          _vibeThinking += delta;
+          _safeNotify();
+        },
+        extraSystemPrompt: extraSkill,
         isCancelled: () => _vibeCancelled,
       );
 
@@ -393,6 +524,9 @@ class AiProvider extends ChangeNotifier {
     } finally {
       _vibeBusy = false;
       _safeNotify();
+    }
+    if (llm.builtin) {
+      await _account.refreshCredits();
     }
   }
 

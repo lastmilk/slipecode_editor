@@ -23,7 +23,7 @@ import {
   throttleAdminLogin,
   verifyAdminPassword,
 } from '../security.js';
-import { getCredits } from './me.js';
+import { getCredits, applyCredits } from './me.js';
 
 const STARTED_AT = Date.now();
 
@@ -91,6 +91,7 @@ export async function handleAdminStats(req, res) {
       projects: Object.keys(db.projects).length,
       chatHistories: Object.keys(db.chatHistory).length,
       settings: Object.keys(db.settings).length,
+      activationCodes: (db.activationCodes || []).length,
     },
     config: {
       geetest: (() => {
@@ -272,6 +273,10 @@ export async function handleAdminUserDetail(req, res, userId) {
           }
         : null,
       passwordHashPresent: Boolean(user.passwordHash),
+      credits: getCredits(user),
+      creditLogs: Array.isArray(user.creditLogs)
+        ? user.creditLogs.slice(-20).reverse()
+        : [],
     },
     settings: settings
       ? { keys: Object.keys(settings), updatedAt: settings.updatedAt || '' }
@@ -298,7 +303,12 @@ export async function handleAdminUserCredits(req, res, userId) {
   }
   const user = getDb().users.find((u) => u.id === userId);
   if (!user) return sendJson(res, 404, { error: '用户不存在' });
-  user.credits = getCredits(user) + delta;
+  applyCredits(
+    user,
+    delta,
+    'admin_adjust',
+    String(body.note || '管理端调整').slice(0, 80),
+  );
   await saveDb();
   sendJson(res, 200, { ok: true, id: user.id, credits: user.credits });
 }
@@ -318,6 +328,7 @@ function readModelFields(body) {
     apiBase: String(body.apiBase ?? '').trim(),
     apiKey: String(body.apiKey ?? '').trim(),
     model: String(body.model ?? '').trim(),
+    description: String(body.description ?? '').trim().slice(0, 120),
   };
 }
 
@@ -359,6 +370,7 @@ export async function handleAdminUpdateModel(req, res, id) {
       item[key] = fields[key];
     }
   }
+  if (body.description !== undefined) item.description = fields.description;
   if (body.multiplier !== undefined) {
     const multiplier = validateMultiplier(body.multiplier);
     if (multiplier === null) {

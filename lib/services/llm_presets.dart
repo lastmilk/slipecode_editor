@@ -1,4 +1,3 @@
-import '../config/app_config.dart';
 import '../models/llm_profile.dart';
 
 /// 预置模型服务商
@@ -6,13 +5,13 @@ class LlmPreset {
   final String id;
   final String name;
 
-  /// API 基础地址；SLIPE 云端在 [LlmPresets.apiBaseFor] 中动态解析
+  /// API 基础地址（SLIPE 内置模型由服务端下发，不走预置）
   final String apiBase;
 
   /// 候选模型
   final List<String> models;
 
-  /// 是否依赖登录（SLIPE 云端模型）
+  /// 是否依赖账号登录（保留字段，当前预置均无需登录）
   final bool requiresLogin;
 
   /// 一句话说明（设置页展示）
@@ -96,14 +95,6 @@ class LlmPresets {
       note: '无需 API Key，需本机运行 Ollama',
     ),
     LlmPreset(
-      id: 'slipcloud',
-      name: 'SLIPE 云端',
-      apiBase: '',
-      models: [],
-      requiresLogin: true,
-      note: '登录后使用账号积分调用，模型列表由云端下发',
-    ),
-    LlmPreset(
       id: 'custom',
       name: '自定义',
       apiBase: '',
@@ -120,12 +111,6 @@ class LlmPresets {
     return null;
   }
 
-  /// 解析实际 API 地址（SLIPE 云端依赖账号后端地址）
-  static String apiBaseFor(LlmPreset preset) {
-    if (preset.id == 'slipcloud') {
-      final base = AppConfig.accountBackendBase;
-      return base.isEmpty ? '' : '$base/api/llm';
-    }
-    return preset.apiBase;
-  }
+  /// 解析实际 API 地址
+  static String apiBaseFor(LlmPreset preset) => preset.apiBase;
 }

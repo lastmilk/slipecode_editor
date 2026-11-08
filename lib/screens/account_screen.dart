@@ -389,6 +389,36 @@ class _AccountScreenState extends State<AccountScreen> {
               ),
             ),
           ),
+          if (_registerMode) ...[
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.amber.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                children: [
+                  const Icon(
+                    Icons.card_giftcard,
+                    size: 16,
+                    color: Colors.amber,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      '注册即赠送 500 积分，可直接使用内置大模型（默认 DeepSeek Flash）',
+                      style: TextStyle(
+                        fontSize: 11,
+                        height: 1.4,
+                        color: isDark ? Colors.white70 : Colors.black87,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
           const SizedBox(height: 24),
           if (_registerMode) ...[
             TextFormField(

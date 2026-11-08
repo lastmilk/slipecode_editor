@@ -6,11 +6,13 @@ import 'package:provider/provider.dart';
 
 import '../agent/mcp_tools.dart';
 import '../l10n/app_localizations.dart';
+import '../providers/account_provider.dart';
 import '../providers/ai_provider.dart';
 import '../providers/editor_provider.dart';
 import '../providers/settings_provider.dart';
 import '../services/ai_change_journal.dart';
 import '../services/llm_service.dart';
+import '../widgets/credits_sheet.dart';
 import 'settings_screen.dart';
 
 /// AI 助手对话面板
@@ -69,7 +71,7 @@ class _AiChatScreenState extends State<AiChatScreen> {
   @override
   Widget build(BuildContext context) {
     final ai = context.watch<AiProvider>();
-    final settings = context.watch<SettingsProvider>().settings;
+    final account = context.watch<AccountProvider>();
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     // 流式输出时保持滚动到底部
@@ -112,6 +114,43 @@ class _AiChatScreenState extends State<AiChatScreen> {
                   ),
                 ),
               ),
+              if (account.isSignedIn)
+                Padding(
+                  padding: const EdgeInsets.only(right: 4),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(20),
+                    onTap: () => showCreditsSheet(context),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.amber.withValues(alpha: 0.14),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(
+                            Icons.savings_outlined,
+                            size: 14,
+                            color: Colors.amber,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            '${account.credits}',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.amber,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
               IconButton(
                 icon: const Icon(Icons.clear_all, size: 18),
                 tooltip: t('ai.clearChat'),
@@ -129,7 +168,7 @@ class _AiChatScreenState extends State<AiChatScreen> {
         ),
 
         // 配置提示
-        if (!settings.isLlmConfigured)
+        if (!ai.isConfigured)
           Container(
             width: double.infinity,
             padding: const EdgeInsets.all(12),
@@ -192,6 +231,9 @@ class _AiChatScreenState extends State<AiChatScreen> {
                         content: ai.streamingText.isEmpty
                             ? t('ai.thinking')
                             : ai.streamingText,
+                        reasoning: ai.streamingReasoning.isEmpty
+                            ? null
+                            : ai.streamingReasoning,
                         isUser: false,
                         isDark: isDark,
                         streaming: true,
@@ -205,6 +247,7 @@ class _AiChatScreenState extends State<AiChatScreen> {
                     final msg = item as ChatMessage;
                     return _MessageBubble(
                       content: msg.content,
+                      reasoning: msg.reasoning,
                       isUser: msg.role == ChatRole.user,
                       isDark: isDark,
                       streaming: false,
@@ -224,9 +267,27 @@ class _AiChatScreenState extends State<AiChatScreen> {
                 color: Colors.red.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(6),
               ),
-              child: Text(
-                ai.error!,
-                style: TextStyle(fontSize: 12, color: Colors.red.shade700),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      ai.error!,
+                      style: TextStyle(fontSize: 12, color: Colors.red.shade700),
+                    ),
+                  ),
+                  if (ai.error!.contains('积分'))
+                    TextButton(
+                      onPressed: () => showCreditsSheet(context),
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        minimumSize: const Size(0, 28),
+                      ),
+                      child: const Text(
+                        '去充值',
+                        style: TextStyle(fontSize: 12),
+                      ),
+                    ),
+                ],
               ),
             ),
           ),
@@ -247,48 +308,297 @@ class _AiChatScreenState extends State<AiChatScreen> {
               ),
             ),
           ),
-          child: Row(
+          child: Column(
             children: [
-              Expanded(
-                child: TextField(
-                  controller: _inputController,
-                  maxLines: null,
-                  keyboardType: TextInputType.multiline,
-                  decoration: InputDecoration(
-                    hintText: ai.isThinking
-                        ? t('ai.thinkingHint')
-                        : t('ai.inputHint'),
-                    isDense: true,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 10,
+              _ModelBar(isDark: isDark),
+              const SizedBox(height: 6),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _inputController,
+                      maxLines: null,
+                      keyboardType: TextInputType.multiline,
+                      decoration: InputDecoration(
+                        hintText: ai.isThinking
+                            ? t('ai.thinkingHint')
+                            : t('ai.inputHint'),
+                        isDense: true,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 10,
+                        ),
+                      ),
+                      enabled: !ai.isThinking,
+                      onSubmitted: (_) => _send(),
                     ),
                   ),
-                  enabled: !ai.isThinking,
-                  onSubmitted: (_) => _send(),
-                ),
-              ),
-              const SizedBox(width: 8),
-              IconButton.filled(
-                onPressed: ai.isThinking ? null : _send,
-                icon: ai.isThinking
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white,
-                        ),
-                      )
-                    : const Icon(Icons.send, size: 18),
+                  const SizedBox(width: 8),
+                  IconButton.filled(
+                    onPressed: ai.isThinking ? null : _send,
+                    icon: ai.isThinking
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Icon(Icons.send, size: 18),
+                  ),
+                ],
               ),
             ],
           ),
         ),
       ],
+    );
+  }
+}
+
+/// 对话框底部的模型选择栏
+///
+/// 登录用户默认使用 SLIPE 内置模型（DeepSeek Flash），
+/// 也可切换到设置里配置的自有模型。
+class _ModelBar extends StatelessWidget {
+  const _ModelBar({required this.isDark});
+
+  final bool isDark;
+
+  @override
+  Widget build(BuildContext context) {
+    final ai = context.watch<AiProvider>();
+    final account = context.watch<AccountProvider>();
+    final primary = Theme.of(context).colorScheme.primary;
+
+    return Row(
+      children: [
+        Flexible(
+          child: InkWell(
+            borderRadius: BorderRadius.circular(14),
+            onTap: () => _showModelSheet(context),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF2D2D30) : Colors.white,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: isDark ? Colors.white12 : const Color(0xFFE0E4E8),
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    ai.isUsingBuiltinModel
+                        ? Icons.auto_awesome
+                        : Icons.tune,
+                    size: 13,
+                    color: primary,
+                  ),
+                  const SizedBox(width: 5),
+                  Flexible(
+                    child: Text(
+                      ai.currentModelName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 2),
+                  Icon(
+                    Icons.unfold_more,
+                    size: 13,
+                    color: isDark ? Colors.white38 : Colors.black38,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        const Spacer(),
+        if (account.isSignedIn)
+          InkWell(
+            borderRadius: BorderRadius.circular(14),
+            onTap: () => showCreditsSheet(context),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(
+                    Icons.savings_outlined,
+                    size: 13,
+                    color: Colors.amber,
+                  ),
+                  const SizedBox(width: 3),
+                  Text(
+                    '${account.credits} 积分',
+                    style: const TextStyle(fontSize: 11, color: Colors.amber),
+                  ),
+                ],
+              ),
+            ),
+          )
+        else
+          Text(
+            '未登录 · 仅可使用自定义模型',
+            style: TextStyle(
+              fontSize: 10,
+              color: isDark ? Colors.white38 : Colors.black45,
+            ),
+          ),
+      ],
+    );
+  }
+
+  Future<void> _showModelSheet(BuildContext context) async {
+    final ai = context.read<AiProvider>();
+    final account = context.read<AccountProvider>();
+    final settingsProvider = context.read<SettingsProvider>();
+    final settings = settingsProvider.settings;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final primary = Theme.of(context).colorScheme.primary;
+
+    if (account.isSignedIn && account.builtinModels.isEmpty) {
+      await account.refreshBuiltinModels();
+    }
+    if (!context.mounted) return;
+    final models = account.builtinModels;
+    final profiles = settings.llmProfiles;
+
+    final currentBuiltinId = settings.builtinLlmId.isEmpty
+        ? account.defaultBuiltinModelId
+        : settings.builtinLlmId;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: isDark ? const Color(0xFF232326) : Colors.white,
+      builder: (sheetContext) => SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+                child: Text(
+                  '选择模型',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: isDark ? Colors.white : Colors.black87,
+                  ),
+                ),
+              ),
+              if (account.isSignedIn) ...[
+                _sheetHeader('SLIPE 内置模型', isDark),
+                for (final model in models)
+                  ListTile(
+                    dense: true,
+                    leading: Icon(
+                      Icons.auto_awesome,
+                      size: 18,
+                      color: primary,
+                    ),
+                    title: Text(model.name),
+                    subtitle: Text(
+                      '${model.description.isEmpty ? '由 SLIPE 提供' : model.description}'
+                      ' · 倍率 ${model.multiplier}',
+                      style: const TextStyle(fontSize: 11),
+                    ),
+                    trailing: settings.llmUseBuiltin &&
+                            model.id == currentBuiltinId
+                        ? Icon(Icons.check_circle, size: 18, color: primary)
+                        : null,
+                    onTap: () async {
+                      await ai.selectBuiltinModel(model);
+                      if (sheetContext.mounted) {
+                        Navigator.of(sheetContext).pop();
+                      }
+                    },
+                  ),
+                if (models.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                    child: Text(
+                      '内置模型列表加载失败，请检查网络后重试',
+                      style: TextStyle(fontSize: 11, color: Colors.grey),
+                    ),
+                  ),
+              ] else
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                  child: Text(
+                    '登录 SLIPE 账号后可使用内置大模型（注册赠送积分）',
+                    style: TextStyle(fontSize: 11, color: Colors.grey),
+                  ),
+                ),
+              if (profiles.isNotEmpty) ...[
+                _sheetHeader('自定义模型', isDark),
+                for (final profile in profiles)
+                  ListTile(
+                    dense: true,
+                    leading: const Icon(Icons.tune, size: 18),
+                    title: Text(profile.name),
+                    subtitle: Text(
+                      '${profile.model} · ${profile.apiBase}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 11),
+                    ),
+                    trailing: !settings.llmUseBuiltin &&
+                            profile.id == settings.activeLlmId
+                        ? Icon(Icons.check_circle, size: 18, color: primary)
+                        : null,
+                    onTap: () async {
+                      await ai.selectCustomModel(profile);
+                      if (sheetContext.mounted) {
+                        Navigator.of(sheetContext).pop();
+                      }
+                    },
+                  ),
+              ],
+              const Divider(height: 8),
+              ListTile(
+                dense: true,
+                leading: const Icon(Icons.settings_outlined, size: 18),
+                title: const Text('管理模型与积分'),
+                trailing: const Icon(Icons.chevron_right, size: 18),
+                onTap: () {
+                  Navigator.of(sheetContext).pop();
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const SettingsScreen(),
+                    ),
+                  );
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _sheetHeader(String title, bool isDark) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 2),
+      child: Text(
+        title,
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+          color: isDark ? Colors.white54 : Colors.black54,
+        ),
+      ),
     );
   }
 }
@@ -300,12 +610,16 @@ class _MessageBubble extends StatelessWidget {
     required this.isUser,
     required this.isDark,
     required this.streaming,
+    this.reasoning,
   });
 
   final String content;
   final bool isUser;
   final bool isDark;
   final bool streaming;
+
+  /// AI 思考过程（reasoning_content）
+  final String? reasoning;
 
   @override
   Widget build(BuildContext context) {
@@ -356,6 +670,15 @@ class _MessageBubble extends StatelessWidget {
                         ),
                       ),
                     ],
+                  ),
+                ),
+              if (!isUser && reasoning != null && reasoning!.trim().isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: _ReasoningPanel(
+                    reasoning: reasoning!,
+                    isDark: isDark,
+                    live: streaming,
                   ),
                 ),
               if (isUser)
@@ -419,6 +742,104 @@ class _MessageBubble extends StatelessWidget {
       ),
       listBullet: TextStyle(fontSize: 13, color: textColor),
       a: const TextStyle(color: Colors.blueAccent),
+    );
+  }
+}
+
+/// AI 思考过程面板（可折叠）
+///
+/// 透传 reasoning_content：流式生成时实时展开，历史消息默认折叠。
+class _ReasoningPanel extends StatefulWidget {
+  const _ReasoningPanel({
+    required this.reasoning,
+    required this.isDark,
+    this.live = false,
+  });
+
+  final String reasoning;
+  final bool isDark;
+  final bool live;
+
+  @override
+  State<_ReasoningPanel> createState() => _ReasoningPanelState();
+}
+
+class _ReasoningPanelState extends State<_ReasoningPanel> {
+  late bool _expanded = widget.live;
+
+  @override
+  void didUpdateWidget(covariant _ReasoningPanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.live && !oldWidget.live) {
+      _expanded = true;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = widget.isDark;
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF20242B) : const Color(0xFFF3F1FB),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: isDark ? Colors.white12 : const Color(0xFFE3DEF5),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          InkWell(
+            borderRadius: BorderRadius.circular(8),
+            onTap: () => setState(() => _expanded = !_expanded),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+              child: Row(
+                children: [
+                  const Icon(
+                    Icons.psychology_alt_outlined,
+                    size: 14,
+                    color: Colors.purpleAccent,
+                  ),
+                  const SizedBox(width: 5),
+                  Text(
+                    widget.live ? '思考中…' : '思考过程',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: isDark ? Colors.white60 : Colors.black54,
+                    ),
+                  ),
+                  const Spacer(),
+                  Icon(
+                    _expanded ? Icons.expand_less : Icons.expand_more,
+                    size: 15,
+                    color: isDark ? Colors.white38 : Colors.black38,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (_expanded)
+            Container(
+              width: double.infinity,
+              constraints: const BoxConstraints(maxHeight: 200),
+              padding: const EdgeInsets.fromLTRB(9, 0, 9, 8),
+              child: SingleChildScrollView(
+                child: SelectableText(
+                  widget.reasoning,
+                  style: TextStyle(
+                    fontSize: 11,
+                    height: 1.5,
+                    fontStyle: FontStyle.italic,
+                    color: isDark ? Colors.white54 : Colors.black54,
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
     );
   }
 }

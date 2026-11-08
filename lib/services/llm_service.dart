@@ -19,12 +19,16 @@ class ChatMessage {
   /// role=assistant 时返回的工具调用列表（OpenAI 格式）
   final List<Map<String, dynamic>>? toolCalls;
 
+  /// 深度思考模型的思考过程（reasoning_content），仅用于展示，不回传上游
+  final String? reasoning;
+
   const ChatMessage({
     required this.role,
     required this.content,
     this.toolCallId,
     this.name,
     this.toolCalls,
+    this.reasoning,
   });
 
   factory ChatMessage.toolResult({
@@ -66,6 +70,7 @@ class ChatMessage {
         content: (json['content'] as String?) ?? '',
         toolCallId: json['tool_call_id'] as String?,
         name: json['name'] as String?,
+        reasoning: json['reasoning_content'] as String?,
       );
 }
 
@@ -84,11 +89,22 @@ class LlmException implements Exception {
 /// （含 tool_calls），仅在流结束时出现一次。
 class LlmStreamChunk {
   final String? deltaText;
+
+  /// 本次新增的思考过程（reasoning_content）
+  final String? reasoningText;
   final Map<String, dynamic>? finalMessage;
 
-  const LlmStreamChunk.delta(this.deltaText) : finalMessage = null;
+  const LlmStreamChunk.delta(this.deltaText)
+      : finalMessage = null,
+        reasoningText = null;
 
-  const LlmStreamChunk.done(this.finalMessage) : deltaText = null;
+  const LlmStreamChunk.reasoning(this.reasoningText)
+      : finalMessage = null,
+        deltaText = null;
+
+  const LlmStreamChunk.done(this.finalMessage)
+      : deltaText = null,
+        reasoningText = null;
 }
 
 /// LLM 服务
@@ -255,6 +271,7 @@ class LlmService {
       }
 
       final content = StringBuffer();
+      final reasoning = StringBuffer();
       final toolCalls = <int, Map<String, dynamic>>{};
       final nonSse = StringBuffer();
 
@@ -283,6 +300,12 @@ class LlmService {
         if (text is String && text.isNotEmpty) {
           content.write(text);
           yield LlmStreamChunk.delta(text);
+        }
+
+        final reasoningText = delta['reasoning_content'] ?? delta['reasoning'];
+        if (reasoningText is String && reasoningText.isNotEmpty) {
+          reasoning.write(reasoningText);
+          yield LlmStreamChunk.reasoning(reasoningText);
         }
 
         final calls = delta['tool_calls'];
@@ -330,6 +353,10 @@ class LlmService {
               if (text is String && text.isNotEmpty) {
                 yield LlmStreamChunk.delta(text);
               }
+              final think = message['reasoning_content'] ?? message['reasoning'];
+              if (think is String && think.isNotEmpty) {
+                yield LlmStreamChunk.reasoning(think);
+              }
               yield LlmStreamChunk.done(message);
               return;
             }
@@ -343,6 +370,9 @@ class LlmService {
         'role': 'assistant',
         'content': content.toString(),
       };
+      if (reasoning.isNotEmpty) {
+        message['reasoning_content'] = reasoning.toString();
+      }
       if (toolCalls.isNotEmpty) {
         final keys = toolCalls.keys.toList()..sort();
         message['tool_calls'] = keys.map((key) => toolCalls[key]).toList();

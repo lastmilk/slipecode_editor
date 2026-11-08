@@ -9,13 +9,17 @@ import 'package:provider/provider.dart';
 import '../l10n/app_localizations.dart';
 import '../models/app_settings.dart';
 import '../models/llm_profile.dart';
+import '../models/mcp_config.dart';
 import '../providers/account_provider.dart';
 import '../providers/settings_provider.dart';
+import '../services/ai_extensions_service.dart';
 import '../services/docs_service.dart';
+import '../services/external_mcp_manager.dart';
 import '../services/git_host.dart';
 import '../services/llm_presets.dart';
 import '../services/security_service.dart';
 import '../widgets/ai_floating_ball.dart';
+import '../widgets/credits_sheet.dart';
 import '../widgets/image_crop_dialog.dart';
 import 'account_screen.dart';
 
@@ -50,6 +54,8 @@ class _SettingsScreenState extends State<SettingsScreen>
   void initState() {
     super.initState();
     _tabController = TabController(length: _tabNames.length, vsync: this);
+    // 加载用户配置的第三方 MCP 与外源 Skill
+    AiExtensionsService.instance.ensureLoaded();
   }
 
   @override
@@ -612,6 +618,91 @@ class _SettingsScreenState extends State<SettingsScreen>
   ) {
     final profiles = settings.llmProfiles;
     return [
+      _SectionData('SLIPE 内置模型', [
+        _Entry(
+          'SLIPE 内置模型 deepseek stepfun 积分 大模型 免费额度',
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('使用 SLIPE 内置大模型'),
+            subtitle: const Text(
+              '登录后直接在对话框底部使用，按积分计费，无需自备 API Key。'
+              '注册赠送 500 积分，默认使用 DeepSeek Flash。',
+            ),
+            value: settings.llmUseBuiltin,
+            onChanged: (value) async {
+              await sp.setUseBuiltinLlm(value);
+              if (value) await account.refreshBuiltinModels();
+            },
+          ),
+        ),
+        if (account.builtinModels.isNotEmpty)
+          for (final model in account.builtinModels)
+            _Entry(
+              '内置模型 ${model.name} ${model.id} 倍率 ${model.multiplier}',
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(
+                  settings.llmUseBuiltin &&
+                          model.id == (settings.builtinLlmId.isEmpty
+                              ? account.defaultBuiltinModelId
+                              : settings.builtinLlmId)
+                      ? Icons.radio_button_checked
+                      : Icons.radio_button_off,
+                  color: settings.llmUseBuiltin &&
+                          model.id == (settings.builtinLlmId.isEmpty
+                              ? account.defaultBuiltinModelId
+                              : settings.builtinLlmId)
+                      ? Theme.of(context).colorScheme.primary
+                      : Colors.grey,
+                ),
+                title: Row(
+                  children: [
+                    Text(model.name),
+                    if (model.isDefault) ...[
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 5,
+                          vertical: 1,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.blueAccent.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: const Text(
+                          '默认',
+                          style: TextStyle(
+                            fontSize: 9,
+                            color: Colors.blueAccent,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+                subtitle: Text(
+                  '${model.description.isEmpty ? '由 SLIPE 提供' : model.description}'
+                  ' · 倍率 ${model.multiplier} · 约 '
+                  '${model.tokensPerCredit} Tokens/积分',
+                  style: const TextStyle(fontSize: 11, height: 1.3),
+                ),
+                onTap: () => sp.setBuiltinLlm(model.id),
+              ),
+            )
+        else
+          _Entry(
+            '内置模型 登录 注册赠送 500 积分',
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Text(
+                account.isSignedIn
+                    ? '内置模型列表加载中，请检查网络后重试…'
+                    : '登录 SLIPE 账号后即可使用内置模型，注册即赠送 500 积分。',
+                style: const TextStyle(fontSize: 11, color: Colors.grey),
+              ),
+            ),
+          ),
+      ]),
       _SectionData('模型列表', [
         for (final profile in profiles)
           _Entry(
@@ -619,16 +710,17 @@ class _SettingsScreenState extends State<SettingsScreen>
             ListTile(
               contentPadding: EdgeInsets.zero,
               leading: Icon(
-                profile.id == settings.activeLlmId
+                !settings.llmUseBuiltin && profile.id == settings.activeLlmId
                     ? Icons.radio_button_checked
                     : Icons.radio_button_off,
-                color: profile.id == settings.activeLlmId
+                color: !settings.llmUseBuiltin &&
+                        profile.id == settings.activeLlmId
                     ? Theme.of(context).colorScheme.primary
                     : Colors.grey,
               ),
               title: Text(profile.name),
               subtitle: Text(
-                '${profile.model}\n${profile.apiBase.isEmpty ? '（云端模型）' : profile.apiBase}',
+                '${profile.model}\n${profile.apiBase}',
                 style: const TextStyle(fontSize: 11, height: 1.3),
               ),
               isThreeLine: true,
@@ -767,6 +859,18 @@ class _SettingsScreenState extends State<SettingsScreen>
           ),
         ),
       ]),
+      _SectionData('第三方 MCP', [
+        _Entry(
+          '第三方 MCP 服务器 配置 导入 mcpServers SSE stdio',
+          const _McpServersCard(),
+        ),
+      ]),
+      _SectionData('外源 Skill', [
+        _Entry(
+          '外源 Skill 导入 markdown 提示词 skill',
+          const _ImportedSkillsCard(),
+        ),
+      ]),
     ];
   }
 
@@ -791,6 +895,12 @@ class _SettingsScreenState extends State<SettingsScreen>
     bool isDark,
   ) {
     return [
+      _SectionData('积分与充值', [
+        _Entry(
+          '积分 充值 余额 签到 激活码 套餐 流水 credits billing',
+          const CreditsPanel(),
+        ),
+      ]),
       _SectionData('账号', [
         _Entry('账号同步状态 sync account login', _SyncCard(account: account)),
         _Entry(
@@ -1749,6 +1859,739 @@ class _QqGroupTileState extends State<_QqGroupTile> {
         onPressed: _copy,
       ),
       onTap: _copy,
+    );
+  }
+}
+
+// =============================================================================
+// 第三方 MCP 服务器
+// =============================================================================
+
+/// MCP 配置编辑对话框返回的草稿数据
+typedef _McpDraft = ({
+  String name,
+  String transport,
+  String url,
+  Map<String, String> headers,
+  String command,
+  List<String> args,
+  Map<String, String> env,
+});
+
+class _McpServersCard extends StatelessWidget {
+  const _McpServersCard();
+
+  @override
+  Widget build(BuildContext context) {
+    final service = AiExtensionsService.instance;
+    final manager = ExternalMcpManager.instance;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return ListenableBuilder(
+      listenable: Listenable.merge([service, manager]),
+      builder: (context, _) {
+        final servers = service.servers;
+        final errors = manager.errors;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              '连接第三方 MCP 服务器后，AI 可直接调用其提供的工具。'
+              '支持 Streamable HTTP / SSE / stdio（仅桌面端），'
+              '配置仅保存在本机，不会上传云端。',
+              style: TextStyle(fontSize: 11, color: Colors.grey, height: 1.4),
+            ),
+            const SizedBox(height: 8),
+            if (servers.isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                child: Text(
+                  '尚未配置 MCP 服务器',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: isDark ? Colors.white38 : Colors.black45,
+                  ),
+                ),
+              ),
+            for (final server in servers)
+              Container(
+                margin: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.fromLTRB(10, 6, 4, 6),
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF2A2A2C) : Colors.white,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: isDark ? Colors.white12 : const Color(0xFFE4E7EB),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      server.isStdio ? Icons.terminal : Icons.cloud_outlined,
+                      size: 18,
+                      color: server.enabled ? Colors.blueAccent : Colors.grey,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            server.name,
+                            style: const TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          Text(
+                            '${server.transport.toUpperCase()} · ${server.endpointLabel}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 10,
+                              color:
+                                  isDark ? Colors.white38 : Colors.black45,
+                            ),
+                          ),
+                          if (server.enabled && errors[server.id] != null)
+                            Text(
+                              '连接失败：${errors[server.id]}',
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 10,
+                                color: Colors.redAccent,
+                              ),
+                            )
+                          else if (server.enabled &&
+                              manager.hasServers &&
+                              !errors.containsKey(server.id))
+                            const Text(
+                              '已连接',
+                              style: TextStyle(
+                                fontSize: 10,
+                                color: Colors.green,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                    Switch(
+                      value: server.enabled,
+                      onChanged: (value) =>
+                          service.toggleServer(server.id, value),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.edit_outlined, size: 18),
+                      tooltip: '编辑',
+                      onPressed: () => _editServer(context, server),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.delete_outline, size: 18),
+                      tooltip: '删除',
+                      onPressed: () => service.removeServer(server.id),
+                    ),
+                  ],
+                ),
+              ),
+            Wrap(
+              spacing: 8,
+              runSpacing: 4,
+              children: [
+                OutlinedButton.icon(
+                  onPressed: () => _editServer(context, null),
+                  icon: const Icon(Icons.add, size: 16),
+                  label: const Text('添加 MCP 服务器'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: () => _importConfig(context),
+                  icon: const Icon(Icons.data_object, size: 16),
+                  label: const Text('粘贴配置'),
+                ),
+                if (servers.isNotEmpty)
+                  TextButton.icon(
+                    onPressed: () => manager.refresh(service.enabledServers),
+                    icon: const Icon(Icons.wifi_tethering, size: 16),
+                    label: const Text('测试连接'),
+                  ),
+                TextButton.icon(
+                  onPressed: () => _importConfigFile(context),
+                  icon: const Icon(Icons.upload_file, size: 16),
+                  label: const Text('导入配置文件'),
+                ),
+              ],
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _editServer(
+    BuildContext context,
+    McpServerConfig? existing,
+  ) async {
+    final draft = await showDialog<_McpDraft>(
+      context: context,
+      builder: (_) => _McpServerEditDialog(existing: existing),
+    );
+    if (draft == null) return;
+    final service = AiExtensionsService.instance;
+    if (existing == null) {
+      await service.addServer(
+        name: draft.name,
+        transport: draft.transport,
+        url: draft.url,
+        headers: draft.headers,
+        command: draft.command,
+        args: draft.args,
+        env: draft.env,
+      );
+    } else {
+      await service.updateServer(
+        existing.copyWith(
+          name: draft.name,
+          transport: draft.transport,
+          url: draft.url,
+          headers: draft.headers,
+          command: draft.command,
+          args: draft.args,
+          env: draft.env,
+        ),
+      );
+    }
+    // 保存后立即尝试连接，让用户在设置页就能看到连接结果
+    await ExternalMcpManager.instance.refresh(service.enabledServers);
+  }
+
+  Future<void> _importConfig(BuildContext context) async {
+    final controller = TextEditingController();
+    final raw = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('粘贴 MCP 配置'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: TextField(
+            controller: controller,
+            autofocus: true,
+            minLines: 8,
+            maxLines: 16,
+            style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+            decoration: const InputDecoration(
+              hintText: '支持 Claude Desktop / Cursor 格式：\n'
+                  '{\n'
+                  '  "mcpServers": {\n'
+                  '    "filesystem": {\n'
+                  '      "command": "npx",\n'
+                  '      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]\n'
+                  '    },\n'
+                  '    "remote": {"url": "https://example.com/mcp"}\n'
+                  '  }\n'
+                  '}',
+              border: OutlineInputBorder(),
+              isDense: true,
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(controller.text),
+            child: const Text('导入'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (raw == null || raw.trim().isEmpty) return;
+    final result = await AiExtensionsService.instance.importConfig(raw);
+    if (result.imported > 0) {
+      await ExternalMcpManager.instance.refresh(
+        AiExtensionsService.instance.enabledServers,
+      );
+    }
+    if (!context.mounted) return;
+    final message = result.error != null
+        ? result.error!
+        : '已导入 ${result.imported} 个配置'
+            '${result.skipped > 0 ? '，跳过 ${result.skipped} 个' : ''}';
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: result.imported > 0 ? Colors.green : Colors.orange,
+      ),
+    );
+  }
+
+  Future<void> _importConfigFile(BuildContext context) async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['json', 'txt'],
+        dialogTitle: '选择 MCP 配置文件',
+      );
+      final path = result?.files.single.path;
+      if (path == null || path.isEmpty) return;
+      final raw = await File(path).readAsString();
+      final imported = await AiExtensionsService.instance.importConfig(raw);
+      if (imported.imported > 0) {
+        await ExternalMcpManager.instance.refresh(
+          AiExtensionsService.instance.enabledServers,
+        );
+      }
+      if (!context.mounted) return;
+      final message = imported.error != null
+          ? imported.error!
+          : '已导入 ${imported.imported} 个配置'
+              '${imported.skipped > 0 ? '，跳过 ${imported.skipped} 个' : ''}';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(message),
+          backgroundColor: imported.imported > 0 ? Colors.green : Colors.orange,
+        ),
+      );
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('导入失败：$e')),
+      );
+    }
+  }
+}
+
+class _McpServerEditDialog extends StatefulWidget {
+  const _McpServerEditDialog({this.existing});
+
+  final McpServerConfig? existing;
+
+  @override
+  State<_McpServerEditDialog> createState() => _McpServerEditDialogState();
+}
+
+class _McpServerEditDialogState extends State<_McpServerEditDialog> {
+  late final TextEditingController _name = TextEditingController(
+    text: widget.existing?.name ?? '',
+  );
+  late final TextEditingController _url = TextEditingController(
+    text: widget.existing?.url ?? '',
+  );
+  late final TextEditingController _command = TextEditingController(
+    text: widget.existing?.command ?? '',
+  );
+  late final TextEditingController _args = TextEditingController(
+    text: (widget.existing?.args ?? const []).join('\n'),
+  );
+  late final TextEditingController _headers = TextEditingController(
+    text: _formatPairs(widget.existing?.headers ?? const {}, ': '),
+  );
+  late final TextEditingController _env = TextEditingController(
+    text: _formatPairs(widget.existing?.env ?? const {}, '='),
+  );
+  late String _transport = widget.existing?.transport ?? 'http';
+  String? _error;
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _url.dispose();
+    _command.dispose();
+    _args.dispose();
+    _headers.dispose();
+    _env.dispose();
+    super.dispose();
+  }
+
+  static String _formatPairs(Map<String, String> map, String sep) =>
+      map.entries.map((e) => '${e.key}$sep${e.value}').join('\n');
+
+  static Map<String, String> _parsePairs(String raw, String sep) {
+    final map = <String, String>{};
+    for (final line in raw.split('\n')) {
+      final trimmed = line.trim();
+      if (trimmed.isEmpty) continue;
+      final index = trimmed.indexOf(sep);
+      if (index <= 0) continue;
+      map[trimmed.substring(0, index).trim()] =
+          trimmed.substring(index + sep.length).trim();
+    }
+    return map;
+  }
+
+  void _save() {
+    final name = _name.text.trim();
+    if (name.isEmpty) {
+      setState(() => _error = '请填写名称');
+      return;
+    }
+    final url = _url.text.trim();
+    final command = _command.text.trim();
+    if (_transport == 'stdio') {
+      if (command.isEmpty) {
+        setState(() => _error = 'stdio 方式需要填写启动命令');
+        return;
+      }
+    } else if (url.isEmpty) {
+      setState(() => _error = '请填写 MCP 服务器地址');
+      return;
+    }
+    Navigator.of(context).pop<_McpDraft>((
+      name: name,
+      transport: _transport,
+      url: url,
+      headers: _parsePairs(_headers.text, ':'),
+      command: command,
+      args: _args.text
+          .split('\n')
+          .map((e) => e.trim())
+          .where((e) => e.isNotEmpty)
+          .toList(),
+      env: _parsePairs(_env.text, '='),
+    ));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isStdio = _transport == 'stdio';
+    return AlertDialog(
+      title: Text(widget.existing == null ? '添加 MCP 服务器' : '编辑 MCP 服务器'),
+      content: SizedBox(
+        width: 480,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: _name,
+                decoration: const InputDecoration(
+                  labelText: '名称',
+                  isDense: true,
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                initialValue: _transport,
+                decoration: const InputDecoration(
+                  labelText: '传输方式',
+                  isDense: true,
+                  border: OutlineInputBorder(),
+                ),
+                items: const [
+                  DropdownMenuItem(value: 'http', child: Text('Streamable HTTP')),
+                  DropdownMenuItem(value: 'sse', child: Text('HTTP + SSE（旧版）')),
+                  DropdownMenuItem(value: 'stdio', child: Text('stdio（桌面端）')),
+                ],
+                onChanged: (value) {
+                  if (value != null) setState(() => _transport = value);
+                },
+              ),
+              const SizedBox(height: 12),
+              if (isStdio) ...[
+                TextField(
+                  controller: _command,
+                  decoration: const InputDecoration(
+                    labelText: '启动命令',
+                    hintText: '例如 npx',
+                    isDense: true,
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _args,
+                  minLines: 2,
+                  maxLines: 5,
+                  decoration: const InputDecoration(
+                    labelText: '参数（一行一个）',
+                    isDense: true,
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _env,
+                  minLines: 2,
+                  maxLines: 5,
+                  decoration: const InputDecoration(
+                    labelText: '环境变量（每行 KEY=VALUE）',
+                    isDense: true,
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ] else ...[
+                TextField(
+                  controller: _url,
+                  decoration: const InputDecoration(
+                    labelText: '服务器地址',
+                    hintText: 'https://example.com/mcp',
+                    isDense: true,
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _headers,
+                  minLines: 2,
+                  maxLines: 5,
+                  decoration: const InputDecoration(
+                    labelText: '请求头（每行 Key: Value）',
+                    isDense: true,
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ],
+              if (_error != null) ...[
+                const SizedBox(height: 8),
+                Text(
+                  _error!,
+                  style: const TextStyle(fontSize: 12, color: Colors.red),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('取消'),
+        ),
+        FilledButton(onPressed: _save, child: const Text('保存')),
+      ],
+    );
+  }
+}
+
+// =============================================================================
+// 外源 Skill
+// =============================================================================
+
+class _ImportedSkillsCard extends StatelessWidget {
+  const _ImportedSkillsCard();
+
+  @override
+  Widget build(BuildContext context) {
+    final service = AiExtensionsService.instance;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return ListenableBuilder(
+      listenable: service,
+      builder: (context, _) {
+        final skills = service.skills;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              '导入 Markdown / 文本格式的 Skill，启用后会追加到 AI 的系统提示词中，'
+              '让 AI 按你定义的规则工作。',
+              style: TextStyle(fontSize: 11, color: Colors.grey, height: 1.4),
+            ),
+            const SizedBox(height: 8),
+            if (skills.isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                child: Text(
+                  '尚未导入 Skill',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: isDark ? Colors.white38 : Colors.black45,
+                  ),
+                ),
+              ),
+            for (final skill in skills)
+              Container(
+                margin: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.fromLTRB(10, 4, 4, 4),
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF2A2A2C) : Colors.white,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: isDark ? Colors.white12 : const Color(0xFFE4E7EB),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.menu_book_outlined,
+                      size: 18,
+                      color: Colors.blueAccent,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: InkWell(
+                        onTap: () => _showSkill(context, skill),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              skill.name,
+                              style: const TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                            Text(
+                              '${skill.content.length} 字符',
+                              style: TextStyle(
+                                fontSize: 10,
+                                color:
+                                    isDark ? Colors.white38 : Colors.black45,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    Switch(
+                      value: skill.enabled,
+                      onChanged: (value) =>
+                          service.toggleSkill(skill.id, value),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.delete_outline, size: 18),
+                      tooltip: '删除',
+                      onPressed: () => service.removeSkill(skill.id),
+                    ),
+                  ],
+                ),
+              ),
+            Wrap(
+              spacing: 8,
+              runSpacing: 4,
+              children: [
+                OutlinedButton.icon(
+                  onPressed: () => _importSkillFile(context),
+                  icon: const Icon(Icons.upload_file, size: 16),
+                  label: const Text('导入 Skill 文件'),
+                ),
+                TextButton.icon(
+                  onPressed: () => _pasteSkill(context),
+                  icon: const Icon(Icons.edit_note, size: 16),
+                  label: const Text('粘贴内容'),
+                ),
+              ],
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _importSkillFile(BuildContext context) async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['md', 'markdown', 'txt'],
+        dialogTitle: '选择 Skill 文件',
+      );
+      final path = result?.files.single.path;
+      if (path == null || path.isEmpty) return;
+      final content = await File(path).readAsString();
+      if (content.trim().isEmpty) return;
+      final fileName = path.split(RegExp(r'[/\\]')).last;
+      final name = fileName.replaceAll(RegExp(r'\.(md|markdown|txt)$'), '');
+      await AiExtensionsService.instance.addSkill(name: name, content: content);
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('已导入 Skill「$name」')),
+      );
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('导入失败：$e')),
+      );
+    }
+  }
+
+  Future<void> _pasteSkill(BuildContext context) async {
+    final nameController = TextEditingController();
+    final contentController = TextEditingController();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('粘贴 Skill 内容'),
+        content: SizedBox(
+          width: 480,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: nameController,
+                decoration: const InputDecoration(
+                  labelText: '名称',
+                  isDense: true,
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: contentController,
+                minLines: 8,
+                maxLines: 16,
+                style: const TextStyle(fontSize: 12, fontFamily: 'monospace'),
+                decoration: const InputDecoration(
+                  labelText: 'Skill 内容（Markdown）',
+                  isDense: true,
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('导入'),
+          ),
+        ],
+      ),
+    );
+    final name = nameController.text;
+    final content = contentController.text;
+    nameController.dispose();
+    contentController.dispose();
+    if (confirmed != true || content.trim().isEmpty) return;
+    await AiExtensionsService.instance.addSkill(name: name, content: content);
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Skill 已导入')),
+    );
+  }
+
+  Future<void> _showSkill(BuildContext context, ImportedSkill skill) async {
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(skill.name),
+        content: SizedBox(
+          width: 560,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 420),
+            child: SingleChildScrollView(
+              child: SelectableText(
+                skill.content,
+                style: const TextStyle(
+                  fontSize: 11,
+                  height: 1.5,
+                  fontFamily: 'monospace',
+                ),
+              ),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('关闭'),
+          ),
+        ],
+      ),
     );
   }
 }

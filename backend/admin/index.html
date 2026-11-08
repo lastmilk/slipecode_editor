@@ -56,6 +56,7 @@
         <el-menu :default-active="tab" class="menu" @select="selectTab">
           <el-menu-item index="overview">概览统计</el-menu-item>
           <el-menu-item index="users">用户管理</el-menu-item>
+          <el-menu-item index="activation">激活码充值</el-menu-item>
           <el-menu-item index="config">凭据配置</el-menu-item>
           <el-menu-item index="llm">LLM 模型</el-menu-item>
           <el-menu-item index="docs">使用文档</el-menu-item>
@@ -352,6 +353,109 @@
             </el-table>
           </div>
         </section>
+
+        <!-- 激活码充值 -->
+        <section v-else-if="tab === 'activation'" class="panel">
+          <header class="panel-head">
+            <div>
+              <h2>激活码充值</h2>
+              <p>批量生成积分激活码，用户在 App「设置 → 积分与充值」中兑换。激活码仅在未使用时可以停用。</p>
+            </div>
+            <div class="toolbar">
+              <el-button :loading="loadingCodes" @click="loadCodes">刷新</el-button>
+              <el-button type="primary" @click="openCodeDialog">生成激活码</el-button>
+            </div>
+          </header>
+
+          <div class="stat-grid">
+            <div class="stat-card">
+              <span class="stat-label">激活码总数</span>
+              <strong class="stat-value">{{ fmt(codeSummary.total) }}</strong>
+              <span class="stat-foot">累计面额 {{ fmt(codeSummary.creditsIssued) }} 积分</span>
+            </div>
+            <div class="stat-card">
+              <span class="stat-label">未使用</span>
+              <strong class="stat-value">{{ fmt(codeSummary.unused) }}</strong>
+              <span class="stat-foot">可发放给用户</span>
+            </div>
+            <div class="stat-card">
+              <span class="stat-label">已使用</span>
+              <strong class="stat-value">{{ fmt(codeSummary.used) }}</strong>
+              <span class="stat-foot">已核销 {{ fmt(codeSummary.creditsRedeemed) }} 积分</span>
+            </div>
+            <div class="stat-card">
+              <span class="stat-label">计价口径</span>
+              <strong class="stat-value">1 : 1000</strong>
+              <span class="stat-foot">1 积分 = 1000 token（倍率 1.0）</span>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="toolbar">
+              <el-select v-model="codeStatus" style="width: 150px" @change="loadCodes">
+                <el-option label="全部" value="" />
+                <el-option label="未使用" value="unused" />
+                <el-option label="已使用" value="used" />
+                <el-option label="已停用" value="disabled" />
+              </el-select>
+              <el-input
+                v-model="codeQuery"
+                placeholder="搜索激活码 / 使用人邮箱"
+                clearable
+                style="max-width: 300px"
+                @keyup.enter="loadCodes"
+                @clear="loadCodes"
+              />
+              <span class="dim">共 {{ codeTotal }} 条</span>
+            </div>
+
+            <el-table :data="codes" stripe empty-text="暂无激活码" v-loading="loadingCodes">
+              <el-table-column label="激活码" min-width="210">
+                <template #default="{ row }">
+                  <span class="mono">{{ row.code }}</span>
+                  <el-button link type="primary" @click="copyText(row.code)">复制</el-button>
+                </template>
+              </el-table-column>
+              <el-table-column label="积分" width="100">
+                <template #default="{ row }">{{ fmt(row.credits) }}</template>
+              </el-table-column>
+              <el-table-column prop="planName" label="套餐" width="100" />
+              <el-table-column label="状态" width="100">
+                <template #default="{ row }">
+                  <el-tag :type="codeStatusType(row)" size="small">{{ codeStatusText(row) }}</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="生成时间" min-width="160">
+                <template #default="{ row }">{{ dateText(row.createdAt) }}</template>
+              </el-table-column>
+              <el-table-column label="使用信息" min-width="200">
+                <template #default="{ row }">
+                  <span v-if="row.usedAt">{{ row.usedByEmail }}<br /><span class="dim">{{ dateText(row.usedAt) }}</span></span>
+                  <span v-else class="dim">未使用</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="操作" width="150" fixed="right">
+                <template #default="{ row }">
+                  <el-button v-if="!row.usedAt" link :type="row.disabled ? 'success' : 'warning'" @click="toggleCode(row)">
+                    {{ row.disabled ? '启用' : '停用' }}
+                  </el-button>
+                  <el-button link type="danger" @click="removeCode(row)">删除</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+
+            <div class="pager">
+              <el-pagination
+                layout="prev, pager, next"
+                :total="codeTotal"
+                :page-size="codePageSize"
+                :current-page="codePage"
+                @current-change="onCodePageChange"
+              />
+            </div>
+          </div>
+        </section>
+
         <!-- 使用文档 -->
         <section v-else-if="tab === 'docs'" class="panel">
           <header class="panel-head">
@@ -701,6 +805,54 @@
       </template>
     </el-dialog>
 
+    <!-- 生成激活码 -->
+    <el-dialog v-model="codeDialog" title="生成激活码" width="560px" :close-on-click-modal="!savingCode">
+      <el-form label-width="100px">
+        <el-form-item label="积分面额" required>
+          <el-input-number v-model="codeForm.credits" :min="1" :max="1000000" :step="1000" />
+          <span class="dim" style="margin-left: 8px">每张激活码可兑换的积分</span>
+        </el-form-item>
+        <el-form-item label="套餐">
+          <el-select v-model="codeForm.planId" clearable placeholder="选择套餐（仅用于标记，不改变面额）" style="width: 100%">
+            <el-option
+              v-for="p in creditPlans"
+              :key="p.id"
+              :label="`${p.name} · ${p.credits} 积分 · ¥${p.price}`"
+              :value="p.id"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="生成数量">
+          <el-input-number v-model="codeForm.count" :min="1" :max="200" />
+        </el-form-item>
+        <el-form-item label="过期时间">
+          <el-date-picker
+            v-model="codeForm.expiresAt"
+            type="datetime"
+            placeholder="不填则永久有效"
+            value-format="YYYY-MM-DDTHH:mm:ssZ"
+            style="width: 100%"
+          />
+        </el-form-item>
+        <el-form-item label="备注">
+          <el-input v-model="codeForm.note" maxlength="120" placeholder="例如：双十一活动 / 某渠道分销" />
+        </el-form-item>
+      </el-form>
+
+      <div v-if="generatedCodes.length" class="card" style="margin-top: 8px">
+        <div class="card-head">
+          <h3>已生成 {{ generatedCodes.length }} 张</h3>
+          <el-button link type="primary" @click="copyAllCodes">复制全部</el-button>
+        </div>
+        <pre class="mono pre-block">{{ generatedCodes.join('\n') }}</pre>
+      </div>
+
+      <template #footer>
+        <el-button @click="codeDialog = false" :disabled="savingCode">关闭</el-button>
+        <el-button type="primary" :loading="savingCode" @click="generateCodes">生成</el-button>
+      </template>
+    </el-dialog>
+
     <!-- 新增 / 编辑文档 -->
     <el-dialog v-model="docDialog" :title="docForm.id ? '编辑文档' : '新增文档'" width="720px" top="6vh">
       <el-form label-width="80px">
@@ -742,6 +894,10 @@
         </el-form-item>
         <el-form-item label="积分倍率">
           <el-input-number v-model="modelForm.multiplier" :min="0.1" :step="0.1" :precision="1" />
+          <span class="dim" style="margin-left: 8px">倍率越低越便宜，0.2 ≈ 5000 token/积分</span>
+        </el-form-item>
+        <el-form-item label="模型简介">
+          <el-input v-model="modelForm.description" maxlength="120" placeholder="展示在 App 模型选择器中，可选" />
         </el-form-item>
       </el-form>
       <template #footer>

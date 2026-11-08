@@ -48,11 +48,20 @@ import {
   handleGetChatHistory,
   handlePutChatHistory,
 } from './routes/chat.js';
+import {
+  handleBillingPlans,
+  handleRedeemActivationCode,
+  handleAdminListActivationCodes,
+  handleAdminCreateActivationCodes,
+  handleAdminToggleActivationCode,
+  handleAdminDeleteActivationCode,
+} from './routes/billing.js';
 import { handleLlmChat, handleLlmModels } from './routes/llm.js';
 import {
   handleCheckin,
   handleDeleteWallpaper,
   handleGetAvatar,
+  handleGetCreditLogs,
   handleGetCredits,
   handleGetSettings,
   handleGetWallpaper,
@@ -149,10 +158,16 @@ const ROUTES = {
   // 积分
   'POST /api/checkin': handleCheckin,
   'GET /api/credits': handleGetCredits,
+  'GET /api/credits/logs': handleGetCreditLogs,
 
-  // LLM
+  // 商业化：充值套餐与激活码兑换
+  'GET /api/billing/plans': handleBillingPlans,
+  'POST /api/billing/redeem': handleRedeemActivationCode,
+
+  // LLM（/api/llm 作为 OpenAI 兼容 base，客户端会拼 /chat/completions）
   'GET /api/llm/models': handleLlmModels,
   'POST /api/llm/chat': handleLlmChat,
+  'POST /api/llm/chat/completions': handleLlmChat,
 
   // 社区 Payload（列表公开；发布 / 下载需登录）
   'POST /api/community/publish': handlePublishPackage,
@@ -182,6 +197,8 @@ const ROUTES = {
   'GET /api/admin/config': handleAdminGetConfig,
   'PUT /api/admin/config': handleAdminPutConfig,
   'GET /api/admin/users': handleAdminUsers,
+  'GET /api/admin/activation-codes': handleAdminListActivationCodes,
+  'POST /api/admin/activation-codes': handleAdminCreateActivationCodes,
   'GET /api/admin/llm/models': handleAdminListModels,
   'POST /api/admin/llm/models': handleAdminCreateModel,
   'GET /api/admin/docs': handleAdminListDocs,
@@ -225,6 +242,18 @@ const DYNAMIC_ROUTES = [
     pattern: /^\/api\/admin\/users\/([^/]+)\/credits$/,
     handler: (req, res, match) =>
       handleAdminUserCredits(req, res, decodeURIComponent(match[1])),
+  },
+  {
+    method: 'POST',
+    pattern: /^\/api\/admin\/activation-codes\/([^/]+)\/toggle$/,
+    handler: (req, res, match) =>
+      handleAdminToggleActivationCode(req, res, decodeURIComponent(match[1])),
+  },
+  {
+    method: 'DELETE',
+    pattern: /^\/api\/admin\/activation-codes\/([^/]+)$/,
+    handler: (req, res, match) =>
+      handleAdminDeleteActivationCode(req, res, decodeURIComponent(match[1])),
   },
   {
     method: 'PUT',

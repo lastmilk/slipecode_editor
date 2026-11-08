@@ -23,7 +23,7 @@ class LlmProfile {
   /// 来源预置（[LlmPresets] 的 id）；自定义时为空
   final String? presetId;
 
-  /// 是否为 SLIPE 云端模型（Key 使用账号 token）
+  /// 是否依赖账号登录（历史字段，内置模型已改为服务端下发）
   final bool requiresLogin;
 
   const LlmProfile({

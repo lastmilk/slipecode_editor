@@ -11,7 +11,10 @@ class AgentResult {
   final String content;
   final List<AgentToolStep> steps;
 
-  const AgentResult(this.content, this.steps);
+  /// 模型的思考过程（reasoning_content）
+  final String reasoning;
+
+  const AgentResult(this.content, this.steps, {this.reasoning = ''});
 }
 
 /// 用户取消了 Agent 运行
@@ -47,11 +50,15 @@ class AgentService {
   }
 
   /// 组装系统提示词
-  Future<String> buildSystemPrompt() async {
+  ///
+  /// [extraSkill] 为用户导入的外源 Skill 内容，追加到内置 Skill 之后。
+  Future<String> buildSystemPrompt({String extraSkill = ''}) async {
     final skill = await loadSkill();
     final root = _project.projectPath ?? '（未打开项目）';
     final payload = _project.payload;
+    final extra = extraSkill.trim();
     return '$skill\n\n'
+        '${extra.isEmpty ? '' : '# 用户导入的扩展 Skill\n$extra\n\n'}'
         '# 运行环境\n'
         '- 项目根目录：$root\n'
         '- 项目载荷：${payload.name}（${payload.id}）\n'
@@ -72,16 +79,24 @@ class AgentService {
     required List<ChatMessage> history,
     void Function(AgentToolStep step)? onStep,
     void Function(String delta)? onDelta,
+    void Function(String delta)? onReasoning,
+    String extraSystemPrompt = '',
     bool Function()? isCancelled,
   }) async {
-    final system = await buildSystemPrompt();
+    final system = await buildSystemPrompt(extraSkill: extraSystemPrompt);
     final messages = <ChatMessage>[
       ChatMessage(role: ChatRole.system, content: system),
       ...history,
     ];
     final steps = <AgentToolStep>[];
+    final reasoningBuffer = StringBuffer();
     String? lastSignature;
     var repeatCount = 0;
+
+    void emitReasoning(String delta) {
+      reasoningBuffer.write(delta);
+      onReasoning?.call(delta);
+    }
 
     while (true) {
       if (isCancelled?.call() == true) throw const AgentCancelled();
@@ -93,6 +108,7 @@ class AgentService {
           model: model,
           messages: messages,
           onDelta: onDelta,
+          onReasoning: emitReasoning,
         );
       } catch (e) {
         // 部分模型不支持 tools / 流式：首轮失败时退回普通对话
@@ -104,7 +120,7 @@ class AgentService {
             messages: messages,
           );
           onDelta?.call(text);
-          return AgentResult(text, steps);
+          return AgentResult(text, steps, reasoning: reasoningBuffer.toString());
         }
         rethrow;
       }
@@ -129,11 +145,12 @@ class AgentService {
             messages: messages,
           );
           onDelta?.call(text);
-          return AgentResult(text, steps);
+          return AgentResult(text, steps, reasoning: reasoningBuffer.toString());
         }
         return AgentResult(
           content.trim().isEmpty ? '（模型没有返回内容）' : content,
           steps,
+          reasoning: reasoningBuffer.toString(),
         );
       }
 
@@ -181,6 +198,7 @@ class AgentService {
               '检测到工具调用重复执行且结果未变化，已自动停止。'
               '请查看已完成的修改，或换一种说法继续描述需求。',
               steps,
+              reasoning: reasoningBuffer.toString(),
             );
           }
         } else {
@@ -198,6 +216,7 @@ class AgentService {
     required String model,
     required List<ChatMessage> messages,
     void Function(String delta)? onDelta,
+    void Function(String delta)? onReasoning,
   }) async {
     Map<String, dynamic>? finalMessage;
     await for (final chunk in LlmService.instance.streamChatMessage(
@@ -208,6 +227,7 @@ class AgentService {
       tools: toolbox.definitions,
     )) {
       if (chunk.deltaText != null) onDelta?.call(chunk.deltaText!);
+      if (chunk.reasoningText != null) onReasoning?.call(chunk.reasoningText!);
       if (chunk.finalMessage != null) finalMessage = chunk.finalMessage;
     }
     if (finalMessage == null) {

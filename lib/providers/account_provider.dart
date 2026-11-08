@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 
 import '../l10n/app_localizations.dart';
+import '../models/credits.dart';
 import '../services/account_service.dart';
 import '../services/avatar_service.dart';
 import '../services/wallpaper_sync_service.dart';
@@ -28,8 +29,24 @@ class AccountProvider extends ChangeNotifier {
   Timer? _pushTimer;
   bool _disposed = false;
 
+  // 商业化：积分 / 内置模型
+  List<BuiltinLlmModel> _builtinModels = const [];
+  String _defaultBuiltinModelId = '';
+  List<CreditLogEntry> _creditLogs = const [];
+  BillingInfo _billing = const BillingInfo();
+  bool _checkedInToday = false;
+  bool _loadingCredits = false;
+
   AccountStatus get status => _status;
   AccountUser? get user => _user;
+
+  int get credits => _user?.credits ?? 0;
+  List<BuiltinLlmModel> get builtinModels => _builtinModels;
+  String get defaultBuiltinModelId => _defaultBuiltinModelId;
+  List<CreditLogEntry> get creditLogs => _creditLogs;
+  BillingInfo get billing => _billing;
+  bool get checkedInToday => _checkedInToday;
+  bool get loadingCredits => _loadingCredits;
 
   /// 当前账号 token（用于 SLIPE 云端模型 / 同步接口）
   String? get token => _token;
@@ -161,6 +178,11 @@ class AccountProvider extends ChangeNotifier {
     _user = null;
     _status = AccountStatus.signedOut;
     _lastSyncAt = null;
+    _builtinModels = const [];
+    _defaultBuiltinModelId = '';
+    _creditLogs = const [];
+    _billing = const BillingInfo();
+    _checkedInToday = false;
     // 退出账号后不再保留账号头像（避免首页仍显示已退出账号的头像）
     await _settings.clearAvatar();
     _safeNotify();
@@ -234,6 +256,104 @@ class AccountProvider extends ChangeNotifier {
     }
     await _syncAvatar();
     await _syncWallpaper();
+    await _syncBilling();
+  }
+
+  /// 登录后同步积分、内置模型与充值套餐
+  Future<void> _syncBilling() async {
+    await refreshBuiltinModels();
+    await refreshCredits();
+    await loadBillingPlans();
+  }
+
+  /// 刷新内置模型列表
+  Future<void> refreshBuiltinModels() async {
+    if (!isSignedIn) return;
+    try {
+      final result = await AccountService.instance.fetchLlmModels(_token!);
+      _builtinModels = result.models;
+      if (result.defaultId.isNotEmpty) {
+        _defaultBuiltinModelId = result.defaultId;
+      } else if (_builtinModels.isNotEmpty) {
+        _defaultBuiltinModelId = _builtinModels.first.id;
+      }
+      _safeNotify();
+    } catch (e) {
+      debugPrint('内置模型列表获取失败：$e');
+    }
+  }
+
+  /// 刷新积分余额与签到状态
+  Future<void> refreshCredits() async {
+    if (!isSignedIn) return;
+    try {
+      final result = await AccountService.instance.fetchCredits(_token!);
+      _checkedInToday = result.checkedInToday;
+      _applyCredits(result.credits);
+    } catch (e) {
+      debugPrint('积分刷新失败：$e');
+    }
+  }
+
+  /// 拉取积分明细
+  Future<void> refreshCreditLogs() async {
+    if (!isSignedIn) return;
+    try {
+      _creditLogs = await AccountService.instance.fetchCreditLogs(_token!);
+      _safeNotify();
+    } catch (e) {
+      debugPrint('积分明细获取失败：$e');
+    }
+  }
+
+  /// 拉取充值套餐（公开接口）
+  Future<void> loadBillingPlans() async {
+    if (!isConfigured) return;
+    try {
+      _billing = await AccountService.instance.fetchBillingPlans();
+      _safeNotify();
+    } catch (e) {
+      debugPrint('充值套餐获取失败：$e');
+    }
+  }
+
+  /// 每日签到
+  Future<(bool, String)> checkin() async {
+    if (!isSignedIn) return (false, '请先登录');
+    try {
+      final result = await AccountService.instance.checkin(_token!);
+      _checkedInToday = true;
+      _applyCredits(result.credits);
+      return (result.ok, result.message);
+    } catch (e) {
+      return (false, '$e');
+    }
+  }
+
+  /// 兑换激活码
+  Future<(bool, String)> redeemActivationCode(String code) async {
+    if (!isSignedIn) return (false, '请先登录');
+    try {
+      final result = await AccountService.instance.redeemActivationCode(_token!, code);
+      _applyCredits(result.credits);
+      await refreshCreditLogs();
+      return (result.ok, result.message);
+    } catch (e) {
+      return (false, '$e');
+    }
+  }
+
+  /// AI 调用扣费后同步余额（后端流式响应会返回最新余额）
+  void updateCredits(int value) {
+    if (value == credits) return;
+    _applyCredits(value);
+  }
+
+  void _applyCredits(int value) {
+    final user = _user;
+    if (user == null) return;
+    _user = user.copyWith(credits: value);
+    _safeNotify();
   }
 
   /// 下载账号头像为本地头像

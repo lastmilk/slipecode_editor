@@ -114,6 +114,7 @@ export function publicUser(user) {
     phone: user.phone || '',
     avatarUrl: user.avatar ? `/api/avatars/${user.id}?v=${user.avatar.version}` : '',
     wallpaperVersion: user.wallpaper?.version || '',
+    credits: Number.isFinite(user.credits) ? user.credits : 0,
   };
 }
 
