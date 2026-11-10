@@ -65,7 +65,35 @@ class PayloadParamDef {
       );
 }
 
-/// IconData 序列化（自定义 Payload 需要持久化图标）
+/// Payload 可选图标（必须是 const IconData，避免 release 构建的图标 tree-shaking 失败）
+const List<IconData> payloadIconPresets = [
+  Icons.widgets_outlined,
+  Icons.public,
+  Icons.dashboard_outlined,
+  Icons.support_agent,
+  Icons.insights_outlined,
+  Icons.engineering_outlined,
+  Icons.api_outlined,
+  Icons.smartphone,
+  Icons.login,
+  Icons.payment_outlined,
+  Icons.analytics_outlined,
+  Icons.settings_outlined,
+  Icons.description_outlined,
+  Icons.notifications_active_outlined,
+  Icons.dark_mode_outlined,
+  Icons.translate_outlined,
+  Icons.translate,
+  Icons.storefront_outlined,
+  Icons.shield_outlined,
+  Icons.privacy_tip_outlined,
+  Icons.verified_user_outlined,
+  Icons.shopping_cart_checkout,
+  Icons.sms_outlined,
+  Icons.dns_outlined,
+  Icons.flutter_dash,
+];
+
 Map<String, dynamic> iconToMap(IconData icon) => {
       'iconCodePoint': icon.codePoint,
       if (icon.fontFamily != null) 'iconFontFamily': icon.fontFamily,
@@ -75,13 +103,13 @@ Map<String, dynamic> iconToMap(IconData icon) => {
 IconData iconFromMap(Map<String, dynamic> map) {
   final codePoint = (map['iconCodePoint'] as num?)?.toInt() ?? 0xe1b1;
   final family = map['iconFontFamily'] as String?;
-  final pkg = map['iconFontPackage'] as String?;
-  if (codePoint == 0) return Icons.widgets_outlined;
-  return IconData(
-    codePoint,
-    fontFamily: family,
-    fontPackage: pkg,
-  );
+  for (final icon in payloadIconPresets) {
+    if (icon.codePoint == codePoint &&
+        (family == null || icon.fontFamily == family)) {
+      return icon;
+    }
+  }
+  return Icons.widgets_outlined;
 }
 
 /// 参数值工具（值统一存 String；bool 为 'true'/'false'；多选用英文逗号连接）
@@ -113,6 +141,38 @@ class PayloadParamValues {
   }
 }
 
+/// Root Payload 的环境变量定义
+///
+/// Root Payload 本质上 = 一组环境变量 + 一份 GitHub Actions workflow。
+/// [secret] 为 true 时生成 `${{ secrets.KEY }}`，值不会写入仓库。
+class RootEnvVar {
+  final String key;
+  final String value;
+  final bool secret;
+  final String description;
+
+  const RootEnvVar({
+    required this.key,
+    this.value = '',
+    this.secret = false,
+    this.description = '',
+  });
+
+  Map<String, dynamic> toMap() => {
+        'key': key,
+        'value': value,
+        'secret': secret,
+        'description': description,
+      };
+
+  factory RootEnvVar.fromMap(Map<String, dynamic> map) => RootEnvVar(
+        key: map['key']?.toString() ?? '',
+        value: map['value']?.toString() ?? '',
+        secret: map['secret'] == true,
+        description: map['description']?.toString() ?? '',
+      );
+}
+
 /// Root Payload：项目初始环境（镜像）
 class RootPayloadSpec {
   final String id;
@@ -120,7 +180,7 @@ class RootPayloadSpec {
   final String description;
   final IconData icon;
 
-  /// 构建环境标识：flutter / node
+  /// 构建环境标识：flutter / node / custom
   final String buildEnv;
 
   /// 构建环境展示名
@@ -131,6 +191,12 @@ class RootPayloadSpec {
 
   final List<PayloadParamDef> params;
 
+  /// 环境变量组（自定义 Root 的核心内容）
+  final List<RootEnvVar> envVars;
+
+  /// 是否官方内置（内置项不可删除）
+  final bool isBuiltin;
+
   const RootPayloadSpec({
     required this.id,
     required this.name,
@@ -140,12 +206,95 @@ class RootPayloadSpec {
     required this.buildEnvLabel,
     required this.workflowContent,
     required this.params,
+    this.envVars = const [],
+    this.isBuiltin = true,
   });
 
+  Map<String, dynamic> toMap() => {
+        'id': id,
+        'name': name,
+        'description': description,
+        ...iconToMap(icon),
+        'buildEnv': buildEnv,
+        'buildEnvLabel': buildEnvLabel,
+        'workflowContent': workflowContent,
+        'params': params.map((e) => e.toMap()).toList(),
+        'envVars': envVars.map((e) => e.toMap()).toList(),
+        'isBuiltin': isBuiltin,
+      };
+
+  factory RootPayloadSpec.fromMap(Map<String, dynamic> map) => RootPayloadSpec(
+        id: map['id']?.toString() ?? '',
+        name: map['name']?.toString() ?? '',
+        description: map['description']?.toString() ?? '',
+        icon: iconFromMap(map),
+        buildEnv: map['buildEnv']?.toString() ?? 'custom',
+        buildEnvLabel: map['buildEnvLabel']?.toString() ?? 'Custom',
+        workflowContent: map['workflowContent']?.toString() ?? '',
+        params: ((map['params'] as List?) ?? const [])
+            .whereType<Map>()
+            .map((e) => PayloadParamDef.fromMap(e.cast<String, dynamic>()))
+            .toList(),
+        envVars: ((map['envVars'] as List?) ?? const [])
+            .whereType<Map>()
+            .map((e) => RootEnvVar.fromMap(e.cast<String, dynamic>()))
+            .toList(),
+        isBuiltin: false,
+      );
+
+  /// 生成 GitHub Actions 的 env 块（顶层 YAML）
+  String buildEnvBlock() {
+    if (envVars.isEmpty) return '';
+    final buffer = StringBuffer('env:\n');
+    for (final env in envVars) {
+      if (env.key.trim().isEmpty) continue;
+      final value = env.secret
+          ? '\${{ secrets.${env.key.trim()} }}'
+          : _yamlQuote(env.value);
+      buffer.writeln('  ${env.key.trim()}: $value');
+    }
+    return buffer.toString();
+  }
+
+  static String _yamlQuote(String value) {
+    final escaped = value
+        .replaceAll('\\', '\\\\')
+        .replaceAll('"', '\\"')
+        .replaceAll('\n', '\\n');
+    return '"$escaped"';
+  }
+
   /// 实际使用的 workflow（Flutter 环境复用内置模板）
-  String resolveWorkflow() => workflowContent.isNotEmpty
-      ? workflowContent
-      : GitHubActionsTemplates.flutterBuildWorkflow;
+  ///
+  /// 支持占位符：
+  /// - `{{ENV}}`：环境变量 env 块
+  /// - `{{env.KEY}}`：单个环境变量（secret 用 `${{ secrets.KEY }}`）
+  String resolveWorkflow([Map<String, String>? overrides]) {
+    var workflow = workflowContent.isNotEmpty
+        ? workflowContent
+        : GitHubActionsTemplates.flutterBuildWorkflow;
+
+    final envBlock = buildEnvBlock();
+    for (final env in envVars) {
+      final key = env.key.trim();
+      if (key.isEmpty) continue;
+      final override = overrides?[key];
+      final value = (override != null && override.isNotEmpty)
+          ? override
+          : (env.secret ? '\${{ secrets.$key }}' : env.value);
+      workflow = workflow.replaceAll('{{env.$key}}', value);
+    }
+
+    if (envBlock.isNotEmpty) {
+      if (workflow.contains('{{ENV}}')) {
+        workflow = workflow.replaceAll('{{ENV}}', envBlock);
+      } else if (!RegExp(r'^env:\s*$', multiLine: true).hasMatch(workflow)) {
+        // YAML 顶层 env 合法，放在文件最前面即可生效
+        workflow = '$envBlock$workflow';
+      }
+    }
+    return workflow;
+  }
 }
 
 /// System Payload：一个「端」的模板化目录结构
@@ -355,7 +504,8 @@ jobs:
 class RootPayloadRegistry {
   RootPayloadRegistry._();
 
-  static const List<RootPayloadSpec> all = [
+  /// 官方内置 Root Payload（不可删除）
+  static const List<RootPayloadSpec> builtin = [
     RootPayloadSpec(
       id: 'flutter_cloud',
       name: 'Flutter 云镜像',
@@ -404,6 +554,22 @@ class RootPayloadRegistry {
     }
     return all.first;
   }
+
+  static final List<RootPayloadSpec> _custom = [];
+
+  /// 内置 + 用户自定义（顺序：内置在前，自定义在后）
+  static List<RootPayloadSpec> get all => [...builtin, ..._custom];
+
+  static List<RootPayloadSpec> get custom => List.unmodifiable(_custom);
+
+  /// 注入用户自定义 Root（由 CustomPayloadService 调用）
+  static void setCustom(List<RootPayloadSpec> specs) {
+    _custom
+      ..clear()
+      ..addAll(specs);
+  }
+
+  static bool isBuiltin(String id) => builtin.any((s) => s.id == id);
 }
 
 /// ---------------------------------------------------------------------------

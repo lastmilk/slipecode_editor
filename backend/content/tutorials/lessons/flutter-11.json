@@ -1,0 +1,35 @@
+{
+  "id": "flutter-11",
+  "track": "flutter",
+  "title": "Flutter 导航与路由",
+  "summary": "Navigator.push/pop 管理页面栈，命名路由适合大型应用。",
+  "steps": [
+    {
+      "type": "text",
+      "title": "Flutter 导航与路由",
+      "body": "- Navigator.push/pop 管理页面栈，命名路由适合大型应用。\n- 先理解概念，再运行代码示例，最后完成随堂测验。\n- 遇到报错时优先阅读第一条错误信息，并检查依赖版本。"
+    },
+    {
+      "type": "code",
+      "title": "代码示例",
+      "language": "dart",
+      "code": "Navigator.of(context).push(\n  MaterialPageRoute(builder: (_) => const DetailPage()),\n);"
+    },
+    {
+      "type": "quiz",
+      "question": "返回上一页应调用？",
+      "options": [
+        "Navigator.pop",
+        "Navigator.push",
+        "setState"
+      ],
+      "answer": 0,
+      "explain": "pop 将当前页面从栈中弹出。"
+    },
+    {
+      "type": "action",
+      "title": "动手试试",
+      "body": "实现列表点击进入详情页并返回。"
+    }
+  ]
+}

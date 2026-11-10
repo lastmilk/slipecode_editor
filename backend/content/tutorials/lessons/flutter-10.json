@@ -1,0 +1,35 @@
+{
+  "id": "flutter-10",
+  "track": "flutter",
+  "title": "Flutter HTTP 请求",
+  "summary": "使用 http 包请求接口，注意超时与异常处理。",
+  "steps": [
+    {
+      "type": "text",
+      "title": "Flutter HTTP 请求",
+      "body": "- 使用 http 包请求接口，注意超时与异常处理。\n- 先理解概念，再运行代码示例，最后完成随堂测验。\n- 遇到报错时优先阅读第一条错误信息，并检查依赖版本。"
+    },
+    {
+      "type": "code",
+      "title": "代码示例",
+      "language": "dart",
+      "code": "final res = await http.get(Uri.parse(url)).timeout(\n  const Duration(seconds: 10),\n);\nif (res.statusCode == 200) {\n  final data = jsonDecode(utf8.decode(res.bodyBytes));\n}"
+    },
+    {
+      "type": "quiz",
+      "question": "网络请求为什么建议加超时？",
+      "options": [
+        "避免界面无限等待",
+        "提高画质",
+        "减少代码量"
+      ],
+      "answer": 0,
+      "explain": "超时能让失败快速暴露并给出兜底提示。"
+    },
+    {
+      "type": "action",
+      "title": "动手试试",
+      "body": "请求一个公开 JSON 接口并展示其中一个字段。"
+    }
+  ]
+}

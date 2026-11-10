@@ -4,6 +4,7 @@ import 'dart:math';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../l10n/app_localizations.dart';
 import '../models/project.dart';
@@ -76,7 +77,48 @@ class _HomeScreenState extends State<HomeScreen>
     // 项目默认存放在应用私有目录，外部项目通过系统文件选择器导入。
     _loadHistory();
     _loadSaying();
+    _showSwipeHintOnce();
   }
+
+  /// 首次进入首页时提示「右划进入社区」
+  Future<void> _showSwipeHintOnce() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (prefs.getBool('slipe_community_swipe_hint') == true) return;
+      await prefs.setBool('slipe_community_swipe_hint', true);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('提示：在主界面右划可进入社区'),
+          duration: Duration(seconds: 4),
+        ),
+      );
+    } catch (_) {
+      // 提示失败不影响主流程
+    }
+  }
+
+  /// 右划进入社区（从右侧滑入）
+  Future<void> _openCommunity() async {
+    await Navigator.of(context).push(
+      PageRouteBuilder(
+        transitionDuration: const Duration(milliseconds: 260),
+        pageBuilder: (_, animation, _) => const CommunityScreen(),
+        transitionsBuilder: (_, animation, _, child) {
+          final slide = Tween<Offset>(
+            begin: const Offset(1, 0),
+            end: Offset.zero,
+          ).animate(
+            CurvedAnimation(parent: animation, curve: Curves.easeOutCubic),
+          );
+          return SlideTransition(position: slide, child: child);
+        },
+      ),
+    );
+    if (mounted) _loadHistory();
+  }
+
+  double _dragStartX = 0;
 
   @override
   void dispose() {
@@ -416,7 +458,18 @@ class _HomeScreenState extends State<HomeScreen>
     // GitHub 已登录时，点击底部栏 GitHub 头像可弹出用户抽屉
     final githubSignedIn = context.watch<GitHubProvider>().isSignedIn;
 
-    return Scaffold(
+    return GestureDetector(
+      behavior: HitTestBehavior.translucent,
+      // 右划进入社区；只响应从左边缘开始的水平右滑，避免与横向筛选条冲突
+      onHorizontalDragStart: (details) {
+        _dragStartX = details.globalPosition.dx;
+      },
+      onHorizontalDragEnd: (details) {
+        if (_dragStartX <= 64 && (details.primaryVelocity ?? 0) > 300) {
+          _openCommunity();
+        }
+      },
+      child: Scaffold(
       endDrawer: githubSignedIn ? const GitHubUserDrawer() : null,
       endDrawerEnableOpenDragGesture: false,
       body: AppBackground.wrap(
@@ -444,13 +497,9 @@ class _HomeScreenState extends State<HomeScreen>
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
                     IconButton(
-                      tooltip: 'Payload 社区',
-                      icon: const Icon(Icons.storefront_outlined),
-                      onPressed: () => Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => const CommunityScreen(),
-                        ),
-                      ),
+                      tooltip: '社区',
+                      icon: const Icon(Icons.forum_outlined),
+                      onPressed: _openCommunity,
                     ),
                     IconButton(
                       tooltip: '同步仓库',
@@ -612,6 +661,7 @@ class _HomeScreenState extends State<HomeScreen>
       ),
       // 底部 Git 平台登录状态栏（GitHub / Gitee）
       bottomNavigationBar: const _GitStatusBar(),
+    ),
     );
   }
 

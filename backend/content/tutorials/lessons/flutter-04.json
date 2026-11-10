@@ -1,0 +1,35 @@
+{
+  "id": "flutter-04",
+  "track": "flutter",
+  "title": "Flutter StatelessWidget",
+  "summary": "无状态组件适合只依赖入参的静态界面。",
+  "steps": [
+    {
+      "type": "text",
+      "title": "Flutter StatelessWidget",
+      "body": "- 无状态组件适合只依赖入参的静态界面。\n- 先理解概念，再运行代码示例，最后完成随堂测验。\n- 遇到报错时优先阅读第一条错误信息，并检查依赖版本。"
+    },
+    {
+      "type": "code",
+      "title": "代码示例",
+      "language": "dart",
+      "code": "class TitleText extends StatelessWidget {\n  const TitleText(this.text, {super.key});\n  final String text;\n  @override\n  Widget build(BuildContext context) => Text(\n        text,\n        style: const TextStyle(fontSize: 20),\n      );\n}"
+    },
+    {
+      "type": "quiz",
+      "question": "StatelessWidget 能否在内部保存可变状态？",
+      "options": [
+        "可以",
+        "不可以",
+        "只能保存数字"
+      ],
+      "answer": 1,
+      "explain": "无状态组件不能保存可变状态，需要 StatefulWidget。"
+    },
+    {
+      "type": "action",
+      "title": "动手试试",
+      "body": "把首页标题抽成一个 StatelessWidget。"
+    }
+  ]
+}

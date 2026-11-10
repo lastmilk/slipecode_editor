@@ -1,0 +1,35 @@
+{
+  "id": "flutter-02",
+  "track": "flutter",
+  "title": "Flutter 项目结构",
+  "summary": "认识 lib、android、ios、assets、pubspec.yaml 的职责。",
+  "steps": [
+    {
+      "type": "text",
+      "title": "Flutter 项目结构",
+      "body": "- 认识 lib、android、ios、assets、pubspec.yaml 的职责。\n- 先理解概念，再运行代码示例，最后完成随堂测验。\n- 遇到报错时优先阅读第一条错误信息，并检查依赖版本。"
+    },
+    {
+      "type": "code",
+      "title": "代码示例",
+      "language": "dart",
+      "code": "lib/\n  main.dart\n  screens/\n  widgets/\nassets/\n  images/\npubspec.yaml"
+    },
+    {
+      "type": "quiz",
+      "question": "第三方依赖与资源声明写在哪个文件？",
+      "options": [
+        "pubspec.yaml",
+        "AndroidManifest.xml",
+        "main.dart"
+      ],
+      "answer": 0,
+      "explain": "pubspec.yaml 负责依赖、资源与版本号。"
+    },
+    {
+      "type": "action",
+      "title": "动手试试",
+      "body": "在 pubspec.yaml 中添加一张图片资源并在页面展示。"
+    }
+  ]
+}

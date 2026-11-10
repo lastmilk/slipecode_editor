@@ -1,0 +1,35 @@
+{
+  "id": "flutter-20",
+  "track": "flutter",
+  "title": "Flutter 打包与发布",
+  "summary": "flutter build apk/appbundle，配置签名与版本号。",
+  "steps": [
+    {
+      "type": "text",
+      "title": "Flutter 打包与发布",
+      "body": "- flutter build apk/appbundle，配置签名与版本号。\n- 先理解概念，再运行代码示例，最后完成随堂测验。\n- 遇到报错时优先阅读第一条错误信息，并检查依赖版本。"
+    },
+    {
+      "type": "code",
+      "title": "代码示例",
+      "language": "dart",
+      "code": "flutter build apk --release\nflutter build appbundle --release"
+    },
+    {
+      "type": "quiz",
+      "question": "Android 应用商店上传推荐哪种产物？",
+      "options": [
+        "AAB",
+        "APK",
+        "ZIP"
+      ],
+      "answer": 0,
+      "explain": "Google Play 推荐 Android App Bundle（AAB）。"
+    },
+    {
+      "type": "action",
+      "title": "动手试试",
+      "body": "把版本号从 1.0.0+1 改为 1.0.1+2 并构建。"
+    }
+  ]
+}

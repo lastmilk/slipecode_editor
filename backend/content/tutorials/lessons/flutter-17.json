@@ -1,0 +1,35 @@
+{
+  "id": "flutter-17",
+  "track": "flutter",
+  "title": "Flutter DevTools",
+  "summary": "用 DevTools 检查 Widget 树、性能、网络与内存。",
+  "steps": [
+    {
+      "type": "text",
+      "title": "Flutter DevTools",
+      "body": "- 用 DevTools 检查 Widget 树、性能、网络与内存。\n- 先理解概念，再运行代码示例，最后完成随堂测验。\n- 遇到报错时优先阅读第一条错误信息，并检查依赖版本。"
+    },
+    {
+      "type": "code",
+      "title": "代码示例",
+      "language": "dart",
+      "code": "flutter run\n# 然后在终端按 v 打开 DevTools"
+    },
+    {
+      "type": "quiz",
+      "question": "DevTools 不能用于以下哪项？",
+      "options": [
+        "查看 Widget 树",
+        "分析性能帧",
+        "直接发布到应用商店"
+      ],
+      "answer": 2,
+      "explain": "发布上架需要打包与签名，DevTools 只用于调试分析。"
+    },
+    {
+      "type": "action",
+      "title": "动手试试",
+      "body": "运行 App 并打开 DevTools 的 Widget Inspector。"
+    }
+  ]
+}

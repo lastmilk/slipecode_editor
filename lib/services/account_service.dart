@@ -26,6 +26,9 @@ class AccountUser {
   /// 积分余额
   final int credits;
 
+  /// 当前会员信息
+  final MembershipInfo membership;
+
   const AccountUser({
     required this.id,
     required this.email,
@@ -34,6 +37,7 @@ class AccountUser {
     this.avatarUrl = '',
     this.wallpaperVersion = '',
     this.credits = 0,
+    this.membership = const MembershipInfo(),
   });
 
   factory AccountUser.fromJson(Map<String, dynamic> json) => AccountUser(
@@ -46,6 +50,10 @@ class AccountUser {
         avatarUrl: json['avatarUrl'] as String? ?? '',
         wallpaperVersion: json['wallpaperVersion'] as String? ?? '',
         credits: (json['credits'] as num?)?.toInt() ?? 0,
+        membership: json['membership'] is Map
+            ? MembershipInfo.fromJson(
+                Map<String, dynamic>.from(json['membership'] as Map))
+            : const MembershipInfo(),
       );
 
   Map<String, dynamic> toJson() => {
@@ -56,6 +64,14 @@ class AccountUser {
         'avatarUrl': avatarUrl,
         'wallpaperVersion': wallpaperVersion,
         'credits': credits,
+        'membership': {
+          'planId': membership.planId,
+          'planName': membership.planName,
+          'active': membership.active,
+          'expiresAt': membership.expiresAt?.toIso8601String(),
+          'monthlyCredits': membership.monthlyCredits,
+          'checkinReward': membership.checkinReward,
+        },
       };
 
   AccountUser copyWith({
@@ -66,6 +82,7 @@ class AccountUser {
     String? avatarUrl,
     String? wallpaperVersion,
     int? credits,
+    MembershipInfo? membership,
   }) {
     return AccountUser(
       id: id ?? this.id,
@@ -75,6 +92,7 @@ class AccountUser {
       avatarUrl: avatarUrl ?? this.avatarUrl,
       wallpaperVersion: wallpaperVersion ?? this.wallpaperVersion,
       credits: credits ?? this.credits,
+      membership: membership ?? this.membership,
     );
   }
 }
@@ -586,19 +604,95 @@ class AccountService {
         .get(_u('/api/billing/plans'))
         .timeout(const Duration(seconds: 20));
     final data = await _decode(res, '获取充值套餐失败');
-    final list = data['plans'];
-    final plans = list is List
-        ? list
-            .whereType<Map>()
-            .map((e) => CreditPlan.fromJson(Map<String, dynamic>.from(e)))
-            .toList()
-        : <CreditPlan>[];
+
+    final plans = <MembershipPlan>[];
+    final rawPlans = data['plans'];
+    if (rawPlans is List) {
+      for (final item in rawPlans.whereType<Map>()) {
+        final map = Map<String, dynamic>.from(item);
+        // 兼容旧后端：旧版 plans 是积分包，没有 prices 字段
+        if (map['prices'] is Map) plans.add(MembershipPlan.fromJson(map));
+      }
+    }
+
+    final cycles = <MembershipCycle>[];
+    final rawCycles = data['cycles'];
+    if (rawCycles is List) {
+      for (final item in rawCycles.whereType<Map>()) {
+        cycles.add(MembershipCycle.fromJson(Map<String, dynamic>.from(item)));
+      }
+    }
+
+    final creditPlans = <CreditPlan>[];
+    final rawCreditPlans = data['creditPlans'];
+    if (rawCreditPlans is List) {
+      for (final item in rawCreditPlans.whereType<Map>()) {
+        creditPlans.add(CreditPlan.fromJson(Map<String, dynamic>.from(item)));
+      }
+    }
+
     final pricing = data['pricing'];
+    final wechatPay = data['wechatPay'];
     return BillingInfo(
       plans: plans,
-      pricing: pricing is Map<String, dynamic>
-          ? BillingPricing.fromJson(pricing)
+      cycles: cycles,
+      creditPlans: creditPlans,
+      pricing: pricing is Map
+          ? BillingPricing.fromJson(Map<String, dynamic>.from(pricing))
           : const BillingPricing(),
+      wechatPay: wechatPay is Map
+          ? WechatPayInfo.fromJson(Map<String, dynamic>.from(wechatPay))
+          : const WechatPayInfo(),
+    );
+  }
+
+  /// 创建微信支付订单，返回支付页链接（App 内渲染为二维码）
+  Future<({WechatOrder order, String payUrl, String appId})> createWechatOrder(
+    String token, {
+    required String planId,
+    required String cycleId,
+  }) async {
+    _ensureConfigured();
+    final res = await _client
+        .post(
+          _u('/api/billing/wechat/order'),
+          headers: _headers(token),
+          body: jsonEncode({'planId': planId, 'cycleId': cycleId}),
+        )
+        .timeout(const Duration(seconds: 25));
+    final data = await _decode(res, '创建支付订单失败');
+    final orderJson = data['order'];
+    if (orderJson is! Map) {
+      throw const AccountException('下单响应缺少订单信息');
+    }
+    return (
+      order: WechatOrder.fromJson(Map<String, dynamic>.from(orderJson)),
+      payUrl: (data['payUrl'] ?? '').toString(),
+      appId: (data['appId'] ?? '').toString(),
+    );
+  }
+
+  /// 查询订单状态（服务端会主动向微信查单并结算）
+  Future<({WechatOrder order, bool paid, int credits, String warning})>
+      fetchWechatOrder(String token, String outTradeNo) async {
+    _ensureConfigured();
+    final uri = _u('/api/billing/wechat/order').replace(
+      queryParameters: {'outTradeNo': outTradeNo},
+    );
+    final res = await _client
+        .get(uri, headers: _headers(token))
+        .timeout(const Duration(seconds: 20));
+    final data = await _decode(res, '查询支付订单失败');
+    final orderJson = data['order'];
+    if (orderJson is! Map) {
+      throw const AccountException('订单查询响应缺少订单信息');
+    }
+    final order = WechatOrder.fromJson(Map<String, dynamic>.from(orderJson));
+    return (
+      order: order,
+      paid: data['status'] == 'paid' || order.isPaid,
+      credits: (data['credits'] as num?)?.toInt() ?? 0,
+      warning: (data['warning'] ?? '').toString(),
     );
   }
 

@@ -1,0 +1,35 @@
+{
+  "id": "flutter-08",
+  "track": "flutter",
+  "title": "Flutter 用户输入",
+  "summary": "TextField 与 TextEditingController 处理文本输入。",
+  "steps": [
+    {
+      "type": "text",
+      "title": "Flutter 用户输入",
+      "body": "- TextField 与 TextEditingController 处理文本输入。\n- 先理解概念，再运行代码示例，最后完成随堂测验。\n- 遇到报错时优先阅读第一条错误信息，并检查依赖版本。"
+    },
+    {
+      "type": "code",
+      "title": "代码示例",
+      "language": "dart",
+      "code": "final controller = TextEditingController();\n\nTextField(\n  controller: controller,\n  decoration: const InputDecoration(labelText: '昵称'),\n  onSubmitted: (value) => print(value),\n);"
+    },
+    {
+      "type": "quiz",
+      "question": "读取输入框当前文本应使用？",
+      "options": [
+        "controller.text",
+        "widget.text",
+        "context.text"
+      ],
+      "answer": 0,
+      "explain": "TextEditingController 持有并暴露文本。"
+    },
+    {
+      "type": "action",
+      "title": "动手试试",
+      "body": "做一个输入昵称并显示在下方的小页面。"
+    }
+  ]
+}

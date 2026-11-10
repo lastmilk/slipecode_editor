@@ -142,6 +142,86 @@ export const DEFAULT_POLICIES = {
   },
 };
 
+/** 社区默认公约（管理端可编辑，写入 db.communitySettings.covenant） */
+export const DEFAULT_COMMUNITY_COVENANT = `# SLIPE 社区公约
+
+欢迎来到 SLIPE 社区。这里用于交流开发经验、分享 Payload 与教程。为了保持社区干净、友善、可持续，请遵守以下约定。
+
+## 一、禁止发布的内容
+
+1. **违法违规**：危害国家安全、破坏民族团结、宣扬恐怖主义与极端主义、传播邪教、组织非法集会等。
+2. **色情低俗**：色情、裸露、性暗示、招嫖、软色情图文与链接。
+3. **暴力血腥**：血腥、虐待、自残、凶杀、教唆伤害他人。
+4. **赌博诈骗**：赌博、博彩、私彩、刷单、杀猪盘、虚假兼职、传销、高利贷、洗钱、代开发票。
+5. **毒品与违禁品**：毒品制作/买卖、枪支弹药、管制刀具、假证假章。
+6. **侵权盗版**：破解软件、外挂、免杀木马、盗版课程、未经授权的付费资源。
+7. **恶意代码**：病毒、木马、挖矿程序、勒索软件、钓鱼页面、批量注册/爬虫脚本。
+8. **广告与引流**：与开发无关的推广、二维码引流、加群加微信、返利链接、刷量服务。
+9. **人身攻击**：辱骂、歧视、地域黑、恶意挂人、骚扰、威胁。
+10. **隐私泄露**：公开他人姓名、电话、住址、身份证、聊天记录等个人信息。
+11. **未成年人伤害**：任何涉及未成年人的不当内容。
+12. **其他**：冒充官方、发布虚假公告、批量灌水、恶意刷赞/刷评论。
+
+## 二、处罚条款
+
+| 情节 | 处理方式 |
+| --- | --- |
+| 首次轻微违规（广告、灌水、轻微攻击） | 删除内容 + 站内警告 |
+| 重复违规或拒不整改 | 删除内容 + 禁言 7 天 |
+| 严重违规（诈骗、色情、恶意代码、隐私泄露） | 永久封禁账号 + 删除全部内容 |
+| 涉嫌违法犯罪 | 固定证据并依法向有关部门报告 |
+
+- 首次发帖需要管理员审核，通过后即可正常发布。
+- 被禁言/封禁期间，发帖、评论、发布 Payload 均不可用。
+- 对处罚有异议，可在「我的 → 申诉」中提交说明，管理员将在 3 个工作日内复核。
+
+## 三、内容与版权
+
+1. 你发布的内容视为你拥有相应权利，并授权 SLIPE 在社区范围内展示、存储与分发。
+2. 引用他人代码/文章请注明来源与许可证。
+3. 转载教程、图片、字体等请确保已获得授权。
+
+## 四、温馨提示
+
+- 不要在任何帖子、评论、Payload 中粘贴真实密钥、Token、身份证号等敏感信息。
+- 遇到违规内容请使用「举报」，我们会优先处理。
+- 社区鼓励：清晰的问题描述、可复现的最小示例、友善的技术讨论。`;
+
+/** 社区默认关键词（管理端可增删） */
+export const DEFAULT_COMMUNITY_KEYWORDS = [
+  '赌博',
+  '博彩',
+  '私彩',
+  '色情',
+  '招嫖',
+  '裸聊',
+  '毒品',
+  '冰毒',
+  '枪支',
+  '弹药',
+  '诈骗',
+  '洗钱',
+  '传销',
+  '高利贷',
+  '代开发票',
+  '办证',
+  '刷单',
+  '兼职日结',
+  '外挂',
+  '破解版',
+  '免杀',
+  '木马',
+  '挖矿',
+  '黑客接单',
+  '加微信',
+  '加qq',
+  'porn',
+  'casino',
+  'drugs',
+  'hack',
+  'crack',
+];
+
 const DEFAULT_DB = {
   users: [],
   settings: {},
@@ -156,8 +236,21 @@ const DEFAULT_DB = {
   release: null,
   // 社区 Payload 包（用户发布，需管理端审核通过后公开）
   community: [],
+  // 社区帖子 / 评论 / 举报（首帖审核 + 关键词过滤）
+  communityPosts: [],
+  communityComments: [],
+  communityReports: [],
+  communitySettings: {
+    keywords: DEFAULT_COMMUNITY_KEYWORDS,
+    covenant: DEFAULT_COMMUNITY_COVENANT,
+    firstPostReview: true,
+    maxPostsPerDay: 20,
+    updatedAt: '',
+  },
   // 积分激活码（管理端生成，用户兑换）
   activationCodes: [],
+  // 会员订单（微信支付）
+  payOrders: [],
   // 运行期配置（优先级高于环境变量，便于在管理端热更新）
   config: {
     geetest: {},
@@ -175,6 +268,23 @@ const DEFAULT_DB = {
       maxTotalMb: 30,
       maxUnzipFiles: 50,
       maxUnzipMb: 50,
+    },
+    // 微信支付（敏感字段默认留空，由管理端或环境变量配置）
+    wechatPay: {
+      appId: '',
+      appSecret: '',
+      mchId: '',
+      serialNo: '',
+      apiV3Key: '',
+      privateKeyPem: '',
+      privateKeyPath: '',
+      publicKeyPem: '',
+      publicKeyPath: '',
+      publicKeyId: '',
+      notifyUrl: '',
+      pageBase: 'https://ser1996.niav.cn',
+      // 平台证书缓存：{ [serial_no]: pem }
+      platformCerts: {},
     },
   },
   stats: {
@@ -229,9 +339,20 @@ export async function loadDb() {
       release:
         parsed.release && typeof parsed.release === 'object' ? parsed.release : null,
       community: Array.isArray(parsed.community) ? parsed.community : [],
+      communityPosts: Array.isArray(parsed.communityPosts)
+        ? parsed.communityPosts
+        : [],
+      communityComments: Array.isArray(parsed.communityComments)
+        ? parsed.communityComments
+        : [],
+      communityReports: Array.isArray(parsed.communityReports)
+        ? parsed.communityReports
+        : [],
+      communitySettings: mergeCommunitySettings(parsed.communitySettings),
       activationCodes: Array.isArray(parsed.activationCodes)
         ? parsed.activationCodes
         : [],
+      payOrders: Array.isArray(parsed.payOrders) ? parsed.payOrders : [],
       config: mergeConfig(parsed.config),
       stats: mergeStats(parsed.stats),
       githubHosts:
@@ -259,6 +380,38 @@ function mergeConfig(raw) {
       privacyPolicy: { ...base.policies.privacyPolicy, ...(raw.policies?.privacyPolicy || {}) },
     },
     aiUploads: { ...base.aiUploads, ...(raw.aiUploads || {}) },
+    wechatPay: {
+      ...base.wechatPay,
+      ...(raw.wechatPay || {}),
+      platformCerts: {
+        ...base.wechatPay.platformCerts,
+        ...(raw.wechatPay?.platformCerts || {}),
+      },
+    },
+  };
+}
+
+/** 合并社区设置，旧版 db.json 缺失时以默认值兜底 */
+function mergeCommunitySettings(raw) {
+  const base = structuredClone(DEFAULT_DB.communitySettings);
+  if (!raw || typeof raw !== 'object') return base;
+  return {
+    keywords: Array.isArray(raw.keywords) && raw.keywords.length
+      ? raw.keywords.filter((k) => typeof k === 'string' && k.trim()).map((k) => k.trim())
+      : base.keywords,
+    covenant:
+      typeof raw.covenant === 'string' && raw.covenant.trim()
+        ? raw.covenant
+        : base.covenant,
+    firstPostReview:
+      typeof raw.firstPostReview === 'boolean'
+        ? raw.firstPostReview
+        : base.firstPostReview,
+    maxPostsPerDay:
+      Number.isFinite(Number(raw.maxPostsPerDay)) && Number(raw.maxPostsPerDay) > 0
+        ? Math.min(200, Math.trunc(Number(raw.maxPostsPerDay)))
+        : base.maxPostsPerDay,
+    updatedAt: raw.updatedAt || '',
   };
 }
 
@@ -278,7 +431,8 @@ export function saveDb() {
   writeQueue = writeQueue.then(async () => {
     await mkdir(DATA_DIR, { recursive: true });
     const tmp = `${DB_FILE}.tmp`;
-    await writeFile(tmp, JSON.stringify(db, null, 2), 'utf8');
+    // db.json 含微信支付等敏感凭据，仅允许服务账号读写
+    await writeFile(tmp, JSON.stringify(db, null, 2), { encoding: 'utf8', mode: 0o600 });
     await rename(tmp, DB_FILE);
   });
   return writeQueue;

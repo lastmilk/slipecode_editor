@@ -77,7 +77,7 @@ class CreditLogEntry {
   }
 }
 
-/// 充值套餐
+/// 充值套餐（旧版积分包，保留用于激活码面额展示）
 class CreditPlan {
   final String id;
   final String name;
@@ -128,9 +128,176 @@ class BillingPricing {
   }
 }
 
-class BillingInfo {
-  final List<CreditPlan> plans;
-  final BillingPricing pricing;
+/// 会员档位（与后端 MEMBERSHIP_PLANS 对应）
+class MembershipPlan {
+  final String id;
+  final String name;
+  final String description;
+  final String badge;
+  final bool free;
+  final int monthlyCredits;
+  final int checkinReward;
+  final Map<String, double> prices;
 
-  const BillingInfo({this.plans = const [], this.pricing = const BillingPricing()});
+  const MembershipPlan({
+    required this.id,
+    required this.name,
+    this.description = '',
+    this.badge = '',
+    this.free = false,
+    this.monthlyCredits = 0,
+    this.checkinReward = 0,
+    this.prices = const {},
+  });
+
+  double priceFor(String cycleId) => prices[cycleId] ?? 0;
+
+  factory MembershipPlan.fromJson(Map<String, dynamic> json) {
+    final rawPrices = json['prices'];
+    final prices = <String, double>{};
+    if (rawPrices is Map) {
+      rawPrices.forEach((key, value) {
+        final price = (value as num?)?.toDouble();
+        if (price != null) prices['$key'] = price;
+      });
+    }
+    return MembershipPlan(
+      id: (json['id'] ?? '').toString(),
+      name: (json['name'] ?? '').toString(),
+      description: (json['description'] ?? '').toString(),
+      badge: (json['badge'] ?? '').toString(),
+      free: json['free'] == true,
+      monthlyCredits: (json['monthlyCredits'] as num?)?.toInt() ?? 0,
+      checkinReward: (json['checkinReward'] as num?)?.toInt() ?? 0,
+      prices: prices,
+    );
+  }
+}
+
+/// 付费周期（月付 / 季付 / 年付）
+class MembershipCycle {
+  final String id;
+  final String name;
+  final int months;
+  final String unit;
+
+  const MembershipCycle({
+    required this.id,
+    required this.name,
+    this.months = 1,
+    this.unit = '月',
+  });
+
+  factory MembershipCycle.fromJson(Map<String, dynamic> json) => MembershipCycle(
+        id: (json['id'] ?? '').toString(),
+        name: (json['name'] ?? '').toString(),
+        months: (json['months'] as num?)?.toInt() ?? 1,
+        unit: (json['unit'] ?? '月').toString(),
+      );
+}
+
+/// 微信支付可用状态
+class WechatPayInfo {
+  final bool enabled;
+  final String pageBase;
+
+  const WechatPayInfo({this.enabled = false, this.pageBase = ''});
+
+  factory WechatPayInfo.fromJson(Map<String, dynamic> json) => WechatPayInfo(
+        enabled: json['enabled'] == true,
+        pageBase: (json['pageBase'] ?? '').toString(),
+      );
+}
+
+/// 微信支付订单
+class WechatOrder {
+  final String outTradeNo;
+  final String planId;
+  final String planName;
+  final String cycleId;
+  final String cycleName;
+  final int months;
+  final double amount;
+  final int amountFen;
+  final String status;
+  final DateTime? createdAt;
+  final DateTime? paidAt;
+  final String transactionId;
+
+  const WechatOrder({
+    required this.outTradeNo,
+    required this.planId,
+    required this.planName,
+    required this.cycleId,
+    required this.cycleName,
+    this.months = 1,
+    this.amount = 0,
+    this.amountFen = 0,
+    this.status = 'pending',
+    this.createdAt,
+    this.paidAt,
+    this.transactionId = '',
+  });
+
+  bool get isPaid => status == 'paid';
+  bool get isClosed => status == 'closed' || status == 'failed' || status == 'mismatch';
+
+  factory WechatOrder.fromJson(Map<String, dynamic> json) => WechatOrder(
+        outTradeNo: (json['outTradeNo'] ?? '').toString(),
+        planId: (json['planId'] ?? '').toString(),
+        planName: (json['planName'] ?? '').toString(),
+        cycleId: (json['cycleId'] ?? '').toString(),
+        cycleName: (json['cycleName'] ?? '').toString(),
+        months: (json['months'] as num?)?.toInt() ?? 1,
+        amount: (json['amount'] as num?)?.toDouble() ?? 0,
+        amountFen: (json['amountFen'] as num?)?.toInt() ?? 0,
+        status: (json['status'] ?? 'pending').toString(),
+        createdAt: DateTime.tryParse((json['createdAt'] ?? '').toString()),
+        paidAt: DateTime.tryParse((json['paidAt'] ?? '').toString()),
+        transactionId: (json['transactionId'] ?? '').toString(),
+      );
+}
+
+/// 当前生效的会员信息
+class MembershipInfo {
+  final String planId;
+  final String planName;
+  final bool active;
+  final DateTime? expiresAt;
+  final int monthlyCredits;
+  final int checkinReward;
+
+  const MembershipInfo({
+    this.planId = 'personal',
+    this.planName = 'Personal',
+    this.active = false,
+    this.expiresAt,
+    this.monthlyCredits = 0,
+    this.checkinReward = 0,
+  });
+
+  factory MembershipInfo.fromJson(Map<String, dynamic> json) => MembershipInfo(
+        planId: (json['planId'] ?? 'personal').toString(),
+        planName: (json['planName'] ?? 'Personal').toString(),
+        active: json['active'] == true,
+        expiresAt: DateTime.tryParse((json['expiresAt'] ?? '').toString()),
+        monthlyCredits: (json['monthlyCredits'] as num?)?.toInt() ?? 0,
+        checkinReward: (json['checkinReward'] as num?)?.toInt() ?? 0,
+      );
+}
+
+class BillingInfo {
+  final List<MembershipPlan> plans;
+  final List<MembershipCycle> cycles;
+  final List<CreditPlan> creditPlans;
+  final BillingPricing pricing;
+  final WechatPayInfo wechatPay;
+
+  const BillingInfo({
+    this.plans = const [],
+    this.cycles = const [],
+    this.creditPlans = const [],
+    this.pricing = const BillingPricing(),
+    this.wechatPay = const WechatPayInfo(),
+  });
 }

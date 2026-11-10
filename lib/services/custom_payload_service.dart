@@ -15,28 +15,39 @@ class CustomPayloadService extends ChangeNotifier {
 
   static final CustomPayloadService instance = CustomPayloadService._();
 
+  static const _rootKey = 'slipe_custom_root_payloads';
   static const _systemKey = 'slipe_custom_system_payloads';
   static const _blockKey = 'slipe_custom_block_payloads';
 
+  final List<RootPayloadSpec> _roots = [];
   final List<SystemPayloadSpec> _systems = [];
   final List<BlockPayloadSpec> _blocks = [];
   bool _loaded = false;
 
   bool get isLoaded => _loaded;
 
+  List<RootPayloadSpec> get rootPayloads => List.unmodifiable(_roots);
   List<SystemPayloadSpec> get systemPayloads => List.unmodifiable(_systems);
   List<BlockPayloadSpec> get blockPayloads => List.unmodifiable(_blocks);
 
-  int get totalCount => _systems.length + _blocks.length;
+  int get totalCount => _roots.length + _systems.length + _blocks.length;
 
   Future<void> init() async {
     if (_loaded) return;
     final prefs = await SharedPreferences.getInstance();
+    _readRoots(prefs.getString(_rootKey));
     _readSystems(prefs.getString(_systemKey));
     _readBlocks(prefs.getString(_blockKey));
     _syncRegistries();
     _loaded = true;
     notifyListeners();
+  }
+
+  RootPayloadSpec? findRoot(String id) {
+    for (final spec in _roots) {
+      if (spec.id == id) return spec;
+    }
+    return null;
   }
 
   SystemPayloadSpec? findSystem(String id) {
@@ -51,6 +62,21 @@ class CustomPayloadService extends ChangeNotifier {
       if (spec.id == id) return spec;
     }
     return null;
+  }
+
+  Future<void> upsertRoot(RootPayloadSpec spec) async {
+    final index = _roots.indexWhere((r) => r.id == spec.id);
+    if (index == -1) {
+      _roots.insert(0, spec);
+    } else {
+      _roots[index] = spec;
+    }
+    await _afterChange();
+  }
+
+  Future<void> removeRoot(String id) async {
+    _roots.removeWhere((r) => r.id == id);
+    await _afterChange();
   }
 
   Future<void> upsertSystem(SystemPayloadSpec spec) async {
@@ -83,6 +109,14 @@ class CustomPayloadService extends ChangeNotifier {
     await _afterChange();
   }
 
+  /// 从社区下载的 Root Payload 导入到本地（自动处理 id 冲突）
+  Future<RootPayloadSpec> importRoot(Map<String, dynamic> map) async {
+    final parsed = RootPayloadSpec.fromMap(map);
+    final spec = _cloneRoot(parsed, _uniqueRootId(parsed.id));
+    await upsertRoot(spec);
+    return spec;
+  }
+
   /// 从社区下载的 System Payload 导入到本地（自动处理 id 冲突）
   Future<SystemPayloadSpec> importSystem(Map<String, dynamic> map) async {
     final parsed = SystemPayloadSpec.fromMap(map);
@@ -105,6 +139,21 @@ class CustomPayloadService extends ChangeNotifier {
   // -------------------------------------------------------------------------
   // 内部实现
   // -------------------------------------------------------------------------
+
+  String _uniqueRootId(String desired) {
+    var base = desired.trim();
+    if (base.isEmpty || !base.startsWith('user_')) {
+      base = newId('root');
+    }
+    var id = base;
+    var suffix = 1;
+    while (RootPayloadRegistry.isBuiltin(id) ||
+        _roots.any((r) => r.id == id)) {
+      id = '${base}_$suffix';
+      suffix++;
+    }
+    return id;
+  }
 
   String _uniqueSystemId(String desired) {
     var base = desired.trim();
@@ -136,6 +185,19 @@ class CustomPayloadService extends ChangeNotifier {
     return id;
   }
 
+  RootPayloadSpec _cloneRoot(RootPayloadSpec r, String id) => RootPayloadSpec(
+        id: id,
+        name: r.name,
+        description: r.description,
+        icon: r.icon,
+        buildEnv: r.buildEnv,
+        buildEnvLabel: r.buildEnvLabel,
+        workflowContent: r.workflowContent,
+        params: r.params,
+        envVars: r.envVars,
+        isBuiltin: false,
+      );
+
   SystemPayloadSpec _cloneSystem(SystemPayloadSpec s, String id) =>
       SystemPayloadSpec(
         id: id,
@@ -157,6 +219,24 @@ class CustomPayloadService extends ChangeNotifier {
         params: b.params,
         markdownTemplate: b.markdownTemplate,
       );
+
+  void _readRoots(String? raw) {
+    _roots.clear();
+    if (raw == null || raw.isEmpty) return;
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return;
+      for (final item in decoded) {
+        if (item is Map) {
+          _roots.add(
+            RootPayloadSpec.fromMap(item.cast<String, dynamic>()),
+          );
+        }
+      }
+    } catch (_) {
+      _roots.clear();
+    }
+  }
 
   void _readSystems(String? raw) {
     _systems.clear();
@@ -196,6 +276,7 @@ class CustomPayloadService extends ChangeNotifier {
   }
 
   void _syncRegistries() {
+    RootPayloadRegistry.setCustom(_roots);
     SystemPayloadRegistry.setCustom(_systems);
     BlockPayloadRegistry.setCustom(_blocks);
   }
@@ -203,6 +284,10 @@ class CustomPayloadService extends ChangeNotifier {
   Future<void> _afterChange() async {
     _syncRegistries();
     final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      _rootKey,
+      jsonEncode(_roots.map((r) => r.toMap()).toList()),
+    );
     await prefs.setString(
       _systemKey,
       jsonEncode(_systems.map((s) => s.toMap()).toList()),

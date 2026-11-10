@@ -11,6 +11,10 @@ import {
   adminPasswordHash,
   aliyunConfig,
   geetestConfig,
+  wechatPayConfig,
+  wechatPayPrivateKeyAvailable,
+  wechatPayPublicKeyAvailable,
+  wechatPayReady,
 } from '../config.js';
 import { dailySeries, getDb, saveDb, todayStr } from '../db.js';
 import { readJson, sendJson } from '../http.js';
@@ -139,6 +143,7 @@ export async function handleAdminGetConfig(req, res) {
   requireAdmin(req);
   const g = geetestConfig();
   const a = aliyunConfig();
+  const w = wechatPayConfig();
   sendJson(res, 200, {
     geetest: {
       captchaId: g.captchaId,
@@ -163,6 +168,25 @@ export async function handleAdminGetConfig(req, res) {
     },
     aiUploads: {
       ...(getDb().config?.aiUploads || {}),
+    },
+    wechatPay: {
+      appId: w.appId,
+      appSecret: '',
+      appSecretMasked: maskSecret(w.appSecret),
+      mchId: w.mchId,
+      serialNo: w.serialNo,
+      apiV3Key: '',
+      apiV3KeyMasked: maskSecret(w.apiV3Key),
+      privateKeyPem: '',
+      privateKeyConfigured: wechatPayPrivateKeyAvailable(),
+      privateKeyPath: w.privateKeyPath,
+      publicKeyPem: '',
+      publicKeyConfigured: wechatPayPublicKeyAvailable(),
+      publicKeyPath: w.publicKeyPath,
+      publicKeyId: w.publicKeyId,
+      notifyUrl: w.notifyUrl,
+      pageBase: w.pageBase,
+      ready: wechatPayReady(),
     },
   });
 }
@@ -229,6 +253,44 @@ export async function handleAdminPutConfig(req, res) {
       maxUnzipFiles: num(limits.maxUnzipFiles, 1, 500, 50),
       maxUnzipMb: num(limits.maxUnzipMb, 1, 500, 50),
     };
+  }
+
+  if (body.wechatPay && typeof body.wechatPay === 'object') {
+    const w = body.wechatPay;
+    if (!config.wechatPay) config.wechatPay = {};
+    const setText = (key, max) => {
+      if (typeof w[key] === 'string') {
+        config.wechatPay[key] = w[key].trim().slice(0, max);
+      }
+    };
+    setText('appId', 64);
+    setText('mchId', 32);
+    setText('serialNo', 128);
+    setText('publicKeyId', 128);
+    setText('notifyUrl', 255);
+    setText('pageBase', 120);
+    setText('privateKeyPath', 255);
+    setText('publicKeyPath', 255);
+
+    // 留空表示不修改（避免管理端仅修改其它字段时误清空密钥）
+    if (typeof w.appSecret === 'string' && w.appSecret.trim()) {
+      config.wechatPay.appSecret = w.appSecret.trim().slice(0, 128);
+    }
+    if (typeof w.apiV3Key === 'string' && w.apiV3Key.trim()) {
+      const key = w.apiV3Key.trim();
+      if (key.length !== 32) {
+        return sendJson(res, 400, { error: 'APIv3 密钥必须是 32 位字符' });
+      }
+      config.wechatPay.apiV3Key = key;
+    }
+    if (typeof w.privateKeyPem === 'string' && w.privateKeyPem.trim()) {
+      config.wechatPay.privateKeyPem = w.privateKeyPem.trim();
+    }
+    if (typeof w.publicKeyPem === 'string' && w.publicKeyPem.trim()) {
+      config.wechatPay.publicKeyPem = w.publicKeyPem.trim();
+    }
+    if (w.clearPrivateKey === true) config.wechatPay.privateKeyPem = '';
+    if (w.clearPublicKey === true) config.wechatPay.publicKeyPem = '';
   }
 
   if (typeof body.adminPassword === 'string' && body.adminPassword) {

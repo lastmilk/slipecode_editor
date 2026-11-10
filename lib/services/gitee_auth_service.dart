@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 
-import 'package:app_links/app_links.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
@@ -10,6 +9,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../config/app_config.dart';
 import 'github_auth_service.dart' show HttpExceptionWithBody;
+import 'oauth_link_bus.dart';
 
 /// Gitee 授权结果
 class GiteeAuthResult {
@@ -44,9 +44,7 @@ class GiteeAuthService {
   static const _expiryKey = 'gitee_token_expiry';
   static const _scopeKey = 'gitee_token_scope';
 
-  final AppLinks _appLinks = AppLinks();
-  Completer<Uri>? _pendingCallback;
-  StreamSubscription<Uri>? _linkSub;
+  Completer<Uri>? _cancel;
 
   Future<String?> get savedToken => _storage.read(key: _tokenKey);
 
@@ -115,67 +113,72 @@ class GiteeAuthService {
       'state': state,
     });
 
-    _pendingCallback = Completer<Uri>();
-    await _linkSub?.cancel();
-    _linkSub = _appLinks.uriLinkStream.listen((uri) {
-      if (_isCallbackUri(uri) && _pendingCallback?.isCompleted == false) {
-        _pendingCallback!.complete(uri);
-      }
-    });
-
-    final launched = await launchUrl(
-      authorizeUri,
-      // 同 GitHub：用应用内浏览器视图，避免第三方浏览器/App 拦截导致 404
-      mode: LaunchMode.inAppBrowserView,
-    );
-    if (!launched) {
-      await _cleanup();
-      throw StateError('无法打开浏览器完成 Gitee 授权');
-    }
-
-    final callback = await _pendingCallback!.future.timeout(
-      timeout,
-      onTimeout: () => throw TimeoutException('Gitee 授权超时，请重试'),
-    );
-    await _cleanup();
-
-    if (callback.queryParameters['state'] != state) {
-      throw StateError('Gitee 授权回调 state 校验失败');
-    }
-    final error = callback.queryParameters['error'];
-    if (error != null) {
-      throw StateError(
-        'Gitee 授权被拒绝：$error ${callback.queryParameters['error_description'] ?? ''}',
+    final cancel = Completer<Uri>();
+    _cancel = cancel;
+    try {
+      final launched = await launchUrl(
+        authorizeUri,
+        // 同 GitHub：用应用内浏览器视图，避免第三方浏览器/App 拦截导致 404
+        mode: LaunchMode.inAppBrowserView,
       );
-    }
-    final code = callback.queryParameters['code'];
-    if (code == null || code.isEmpty) {
-      throw StateError('Gitee 授权回调缺少 code');
-    }
+      if (!launched) {
+        throw StateError('无法打开浏览器完成 Gitee 授权');
+      }
 
-    final result = await _exchangeCode(code);
-    await _save(result);
-    return result;
+      final callback = await Future.any<Uri>([
+        OAuthLinkBus.instance.waitFor(
+          (uri) =>
+              _isCallbackUri(uri) && uri.queryParameters['state'] == state,
+          timeout: timeout,
+        ),
+        cancel.future,
+      ]);
+      OAuthLinkBus.instance.consume(callback);
+
+      if (callback.queryParameters['state'] != state) {
+        throw StateError('Gitee 授权回调 state 校验失败');
+      }
+      final error = callback.queryParameters['error'];
+      if (error != null) {
+        throw StateError(
+          'Gitee 授权被拒绝：$error ${callback.queryParameters['error_description'] ?? ''}',
+        );
+      }
+      final code = callback.queryParameters['code'];
+      if (code == null || code.isEmpty) {
+        throw StateError('Gitee 授权回调缺少 code');
+      }
+
+      final result = await _exchangeCode(code);
+      await _save(result);
+      return result;
+    } finally {
+      if (!cancel.isCompleted) {
+        cancel.completeError(StateError('已取消授权'));
+      }
+      if (identical(_cancel, cancel)) _cancel = null;
+    }
   }
 
   bool _isCallbackUri(Uri uri) {
     final expected = Uri.parse(AppConfig.giteeRedirectUri);
-    return uri.scheme == expected.scheme &&
+    if (uri.scheme == expected.scheme &&
         uri.host == expected.host &&
-        uri.path == expected.path;
-  }
-
-  Future<void> _cleanup() async {
-    await _linkSub?.cancel();
-    _linkSub = null;
-    _pendingCallback = null;
-  }
-
-  Future<void> cancelSignIn() async {
-    if (_pendingCallback?.isCompleted == false) {
-      _pendingCallback!.completeError(StateError('已取消授权'));
+        uri.path == expected.path) {
+      return true;
     }
-    await _cleanup();
+    // 兼容旧 scheme：slipecode://oauth/gitee/callback
+    return uri.scheme == 'slipecode' &&
+        uri.host == 'oauth' &&
+        uri.path == '/gitee/callback';
+  }
+
+  /// 取消正在进行的授权
+  Future<void> cancelSignIn() async {
+    final cancel = _cancel;
+    if (cancel != null && !cancel.isCompleted) {
+      cancel.completeError(StateError('已取消授权'));
+    }
   }
 
   // ---------------------------------------------------------------------------

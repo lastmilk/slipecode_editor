@@ -1,0 +1,35 @@
+{
+  "id": "flutter-21",
+  "track": "flutter",
+  "title": "Flutter 最佳实践",
+  "summary": "拆分 Widget、避免 build 中做重活、统一状态与错误处理。",
+  "steps": [
+    {
+      "type": "text",
+      "title": "Flutter 最佳实践",
+      "body": "- 拆分 Widget、避免 build 中做重活、统一状态与错误处理。\n- 先理解概念，再运行代码示例，最后完成随堂测验。\n- 遇到报错时优先阅读第一条错误信息，并检查依赖版本。"
+    },
+    {
+      "type": "code",
+      "title": "代码示例",
+      "language": "dart",
+      "code": "// 推荐：小而专注的 Widget\nclass UserTile extends StatelessWidget {\n  const UserTile({super.key, required this.name});\n  final String name;\n  @override\n  Widget build(BuildContext context) => ListTile(title: Text(name));\n}"
+    },
+    {
+      "type": "quiz",
+      "question": "以下哪项是推荐做法？",
+      "options": [
+        "在 build 中发网络请求",
+        "拆分小而专注的 Widget",
+        "所有状态都放全局"
+      ],
+      "answer": 1,
+      "explain": "拆分 Widget 能降低重建范围并提升可读性。"
+    },
+    {
+      "type": "action",
+      "title": "动手试试",
+      "body": "把一个 300 行的 build 方法拆成 3 个组件。"
+    }
+  ]
+}

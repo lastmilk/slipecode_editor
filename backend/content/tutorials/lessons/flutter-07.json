@@ -1,0 +1,35 @@
+{
+  "id": "flutter-07",
+  "track": "flutter",
+  "title": "Flutter ListView",
+  "summary": "ListView 用于滚动列表，builder 形式适合大量数据。",
+  "steps": [
+    {
+      "type": "text",
+      "title": "Flutter ListView",
+      "body": "- ListView 用于滚动列表，builder 形式适合大量数据。\n- 先理解概念，再运行代码示例，最后完成随堂测验。\n- 遇到报错时优先阅读第一条错误信息，并检查依赖版本。"
+    },
+    {
+      "type": "code",
+      "title": "代码示例",
+      "language": "dart",
+      "code": "ListView.builder(\n  itemCount: 100,\n  itemBuilder: (context, index) => ListTile(\n    title: Text('第 $index 项'),\n  ),\n);"
+    },
+    {
+      "type": "quiz",
+      "question": "大量列表数据推荐使用哪种构造？",
+      "options": [
+        "ListView.builder",
+        "Column",
+        "Wrap"
+      ],
+      "answer": 0,
+      "explain": "builder 按需构建，避免一次性创建全部子项。"
+    },
+    {
+      "type": "action",
+      "title": "动手试试",
+      "body": "做一个 100 项的聊天列表。"
+    }
+  ]
+}

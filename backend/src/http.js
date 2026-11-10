@@ -62,6 +62,25 @@ export function readJson(req, { limit = 1024 * 1024 } = {}) {
   });
 }
 
+/** 读取原始请求体（微信支付回调验签必须使用原始报文） */
+export function readRaw(req, { limit = 1024 * 1024 } = {}) {
+  return new Promise((resolve, reject) => {
+    let size = 0;
+    const chunks = [];
+    req.on('data', (chunk) => {
+      size += chunk.length;
+      if (size > limit) {
+        reject(httpError(413, '请求体过大'));
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+    req.on('error', reject);
+  });
+}
+
 export function bearer(req) {
   const raw = req.headers.authorization || '';
   const match = /^Bearer\s+(.+)$/i.exec(raw);
@@ -91,6 +110,7 @@ const MIME_BY_EXT = {
   '.mjs': 'application/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
+  '.txt': 'text/plain; charset=utf-8',
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
@@ -101,6 +121,10 @@ const MIME_BY_EXT = {
   '.woff2': 'font/woff2',
   '.ttf': 'font/ttf',
   '.map': 'application/json; charset=utf-8',
+  '.zip': 'application/zip',
+  '.mp4': 'video/mp4',
+  '.webm': 'video/webm',
+  '.md': 'text/markdown; charset=utf-8',
 };
 
 /**

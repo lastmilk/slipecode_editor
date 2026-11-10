@@ -1,0 +1,35 @@
+{
+  "id": "flutter-15",
+  "track": "flutter",
+  "title": "Flutter 本地存储",
+  "summary": "shared_preferences 存少量键值，sqflite 存结构化数据。",
+  "steps": [
+    {
+      "type": "text",
+      "title": "Flutter 本地存储",
+      "body": "- shared_preferences 存少量键值，sqflite 存结构化数据。\n- 先理解概念，再运行代码示例，最后完成随堂测验。\n- 遇到报错时优先阅读第一条错误信息，并检查依赖版本。"
+    },
+    {
+      "type": "code",
+      "title": "代码示例",
+      "language": "dart",
+      "code": "final prefs = await SharedPreferences.getInstance();\nawait prefs.setBool('dark', true);\nfinal dark = prefs.getBool('dark') ?? false;"
+    },
+    {
+      "type": "quiz",
+      "question": "保存少量键值对推荐使用？",
+      "options": [
+        "shared_preferences",
+        "AnimationController",
+        "GridView"
+      ],
+      "answer": 0,
+      "explain": "shared_preferences 适合偏好与轻量状态。"
+    },
+    {
+      "type": "action",
+      "title": "动手试试",
+      "body": "把主题选择保存到本地，重启后仍然生效。"
+    }
+  ]
+}

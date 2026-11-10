@@ -1,0 +1,35 @@
+{
+  "id": "flutter-16",
+  "track": "flutter",
+  "title": "Flutter 图片与资源",
+  "summary": "Image.asset/network 与 pubspec assets 声明。",
+  "steps": [
+    {
+      "type": "text",
+      "title": "Flutter 图片与资源",
+      "body": "- Image.asset/network 与 pubspec assets 声明。\n- 先理解概念，再运行代码示例，最后完成随堂测验。\n- 遇到报错时优先阅读第一条错误信息，并检查依赖版本。"
+    },
+    {
+      "type": "code",
+      "title": "代码示例",
+      "language": "dart",
+      "code": "Image.asset(\n  'assets/logo.png',\n  width: 72,\n  height: 72,\n  fit: BoxFit.cover,\n);"
+    },
+    {
+      "type": "quiz",
+      "question": "本地图片资源需要在哪个文件声明？",
+      "options": [
+        "pubspec.yaml",
+        "main.dart",
+        "AndroidManifest.xml"
+      ],
+      "answer": 0,
+      "explain": "未声明资源会在运行时找不到。"
+    },
+    {
+      "type": "action",
+      "title": "动手试试",
+      "body": "添加一张本地图片并做圆角头像。"
+    }
+  ]
+}

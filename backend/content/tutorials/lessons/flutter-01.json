@@ -1,0 +1,35 @@
+{
+  "id": "flutter-01",
+  "track": "flutter",
+  "title": "第一个 Flutter 应用",
+  "summary": "从 main() 与 runApp 开始，理解 Flutter 应用的最小结构。",
+  "steps": [
+    {
+      "type": "text",
+      "title": "第一个 Flutter 应用",
+      "body": "- 从 main() 与 runApp 开始，理解 Flutter 应用的最小结构。\n- 先理解概念，再运行代码示例，最后完成随堂测验。\n- 遇到报错时优先阅读第一条错误信息，并检查依赖版本。"
+    },
+    {
+      "type": "code",
+      "title": "代码示例",
+      "language": "dart",
+      "code": "import 'package:flutter/material.dart';\n\nvoid main() => runApp(const MyApp());\n\nclass MyApp extends StatelessWidget {\n  const MyApp({super.key});\n  @override\n  Widget build(BuildContext context) => const MaterialApp(home: HomePage());\n}\n\nclass HomePage extends StatelessWidget {\n  const HomePage({super.key});\n  @override\n  Widget build(BuildContext context) => const Scaffold(\n        body: Center(child: Text('Hello SLIPE')),\n      );\n}"
+    },
+    {
+      "type": "quiz",
+      "question": "Flutter 应用的入口函数是什么？",
+      "options": [
+        "main()",
+        "initState()",
+        "build()"
+      ],
+      "answer": 0,
+      "explain": "Flutter 与 Dart 程序一样从 main() 开始，runApp 挂载根 Widget。"
+    },
+    {
+      "type": "action",
+      "title": "动手试试",
+      "body": "新建一个 Flutter 项目，把首页文字改成你的名字。"
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "id": "flutter-19",
+  "track": "flutter",
+  "title": "Flutter 测试",
+  "summary": "widget test 验证界面行为，unit test 验证纯逻辑。",
+  "steps": [
+    {
+      "type": "text",
+      "title": "Flutter 测试",
+      "body": "- widget test 验证界面行为，unit test 验证纯逻辑。\n- 先理解概念，再运行代码示例，最后完成随堂测验。\n- 遇到报错时优先阅读第一条错误信息，并检查依赖版本。"
+    },
+    {
+      "type": "code",
+      "title": "代码示例",
+      "language": "dart",
+      "code": "testWidgets('counter increments', (tester) async {\n  await tester.pumpWidget(const MyApp());\n  await tester.tap(find.byType(FloatingActionButton));\n  await tester.pump();\n  expect(find.text('1'), findsOneWidget);\n});"
+    },
+    {
+      "type": "quiz",
+      "question": "验证界面交互应使用哪种测试？",
+      "options": [
+        "widget test",
+        "unit test",
+        "压力测试"
+      ],
+      "answer": 0,
+      "explain": "widget test 可以驱动界面并断言渲染结果。"
+    },
+    {
+      "type": "action",
+      "title": "动手试试",
+      "body": "为计数器补一个 +1 的 widget test。"
+    }
+  ]
+}

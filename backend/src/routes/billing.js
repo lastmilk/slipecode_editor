@@ -6,8 +6,12 @@ import {
   CHECKIN_REWARD,
   CREDIT_PLANS,
   INITIAL_CREDITS,
+  MEMBERSHIP_CYCLES,
+  MEMBERSHIP_PLANS,
   TOKENS_PER_CREDIT,
   creditPlanById,
+  wechatPayConfig,
+  wechatPayReady,
 } from '../config.js';
 import { bumpStat, getDb, saveDb } from '../db.js';
 import { readJson, sendJson } from '../http.js';
@@ -38,16 +42,23 @@ function normalizeCode(value) {
     .replace(/\s+/g, '');
 }
 
-/** 充值套餐与计价口径（客户端展示用，可公开） */
+/** 会员档位与计价口径（客户端展示用，可公开） */
 export async function handleBillingPlans(req, res) {
   sendJson(res, 200, {
-    plans: CREDIT_PLANS,
+    plans: MEMBERSHIP_PLANS,
+    cycles: MEMBERSHIP_CYCLES,
     pricing: {
       tokensPerCredit: TOKENS_PER_CREDIT,
       initialCredits: INITIAL_CREDITS,
       checkinReward: CHECKIN_REWARD,
       currency: 'CNY',
     },
+    wechatPay: {
+      enabled: wechatPayReady(),
+      pageBase: wechatPayConfig().pageBase,
+    },
+    // 激活码仍可用于人工充值
+    creditPlans: CREDIT_PLANS,
     redeemEnabled: true,
   });
 }

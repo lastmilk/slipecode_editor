@@ -22,6 +22,7 @@ import 'services/app_globals.dart';
 import 'services/ai_extensions_service.dart';
 import 'services/custom_payload_service.dart';
 import 'services/github_hosts_service.dart';
+import 'services/oauth_link_bus.dart';
 import 'services/overlay_service.dart';
 import 'services/project_history_service.dart';
 import 'widgets/ai_quick_chat.dart';
@@ -33,6 +34,10 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   // 加载 .env（各平台 OAuth Client ID、账号后端地址；不含任何 secret）
   await dotenv.load(fileName: '.env', isOptional: true);
+
+  // OAuth 深链总线：必须在任何授权流程之前初始化，
+  // 否则冷启动时由深链拉起 App 的 initial link 会丢失
+  await OAuthLinkBus.instance.init();
 
   // 偏好设置先加载，决定首帧主题
   final settingsProvider = SettingsProvider();

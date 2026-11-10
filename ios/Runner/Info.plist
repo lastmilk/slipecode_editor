@@ -35,6 +35,7 @@
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>slipe</string>
+				<string>slipecode</string>
 			</array>
 		</dict>
 	</array>

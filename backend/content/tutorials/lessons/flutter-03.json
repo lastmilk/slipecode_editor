@@ -1,0 +1,35 @@
+{
+  "id": "flutter-03",
+  "track": "flutter",
+  "title": "Flutter Widget 基础",
+  "summary": "Widget 是界面的不可变描述，分为 Stateless 与 Stateful。",
+  "steps": [
+    {
+      "type": "text",
+      "title": "Flutter Widget 基础",
+      "body": "- Widget 是界面的不可变描述，分为 Stateless 与 Stateful。\n- 先理解概念，再运行代码示例，最后完成随堂测验。\n- 遇到报错时优先阅读第一条错误信息，并检查依赖版本。"
+    },
+    {
+      "type": "code",
+      "title": "代码示例",
+      "language": "dart",
+      "code": "const Text(\n  'Widget 是不可变的配置',\n  style: TextStyle(fontSize: 16),\n);"
+    },
+    {
+      "type": "quiz",
+      "question": "Flutter 中界面由什么组成？",
+      "options": [
+        "Widget 树",
+        "HTML 标签",
+        "XML 布局"
+      ],
+      "answer": 0,
+      "explain": "Flutter 通过组合 Widget 构建界面。"
+    },
+    {
+      "type": "action",
+      "title": "动手试试",
+      "body": "用 Column 组合 Text 与 Icon 两个 Widget。"
+    }
+  ]
+}

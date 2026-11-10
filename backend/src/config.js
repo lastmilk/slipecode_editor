@@ -3,6 +3,8 @@
 // 优先级：db.config（管理端热更新） > 环境变量 > 内置默认值
 // 注意：JWT_SECRET 只能来自环境变量（热更新会导致已签发的 token 失效）。
 
+import { existsSync } from 'node:fs';
+
 import { getDb } from './db.js';
 
 const env = process.env;
@@ -21,9 +23,122 @@ export const PASSWORD_MIN = 8;
 /** 调用第三方服务的单次请求超时 */
 export const HTTP_TIMEOUT_MS = 8000;
 
-export const CHECKIN_REWARD = 100;
+/** Personal（免费档）每日签到积分 */
+export const CHECKIN_REWARD = 25;
 /** 注册赠送积分（一次性免费额度） */
 export const INITIAL_CREDITS = 500;
+
+// ---------------------------------------------------------------------------
+// 会员体系
+// ---------------------------------------------------------------------------
+
+/** 付费周期：月付 / 季付 / 年付 */
+export const MEMBERSHIP_CYCLES = [
+  { id: 'month', name: '月付', months: 1, unit: '月' },
+  { id: 'quarter', name: '季付', months: 3, unit: '季' },
+  { id: 'year', name: '年付', months: 12, unit: '年' },
+];
+
+/**
+ * 会员档位。
+ * - monthlyCredits：每个自然月发放的积分（0 表示不发放）
+ * - checkinReward：每日签到积分
+ * - prices：各付费周期价格（元）
+ */
+export const MEMBERSHIP_PLANS = [
+  {
+    id: 'personal',
+    name: 'Personal',
+    free: true,
+    monthlyCredits: 0,
+    checkinReward: 25,
+    prices: { month: 0, quarter: 0, year: 0 },
+    description: '免费档 · 每日签到 25 积分',
+    badge: '',
+  },
+  {
+    id: 'lite',
+    name: 'Lite',
+    free: false,
+    monthlyCredits: 3000,
+    checkinReward: 100,
+    prices: { month: 9.9, quarter: 26.9, year: 89 },
+    description: '每月 3000 积分 · 每日签到 100 积分',
+    badge: '入门',
+  },
+  {
+    id: 'pro',
+    name: 'Pro',
+    free: false,
+    monthlyCredits: 5500,
+    checkinReward: 200,
+    prices: { month: 19.9, quarter: 53.9, year: 179 },
+    description: '每月 5500 积分 · 每日签到 200 积分',
+    badge: '推荐',
+  },
+  {
+    id: 'ultimate',
+    name: 'Ultimate',
+    free: false,
+    monthlyCredits: 12000,
+    checkinReward: 200,
+    prices: { month: 39.9, quarter: 107.9, year: 359 },
+    description: '每月 12000 积分 · 每日签到 200 积分',
+    badge: '最高档',
+  },
+];
+
+export function membershipPlanById(id) {
+  return MEMBERSHIP_PLANS.find((p) => p.id === String(id || '')) || null;
+}
+
+export function billingCycleById(id) {
+  return MEMBERSHIP_CYCLES.find((c) => c.id === String(id || '')) || null;
+}
+
+/** 用户当前生效的会员记录（未开通或已过期返回 null） */
+export function activeMembership(user) {
+  const m = user?.membership;
+  if (!m || !m.planId || !m.expiresAt) return null;
+  if (Date.parse(m.expiresAt) <= Date.now()) return null;
+  return m;
+}
+
+/** 用户当前生效的档位（默认 Personal） */
+export function effectiveMembershipPlan(user) {
+  const m = activeMembership(user);
+  return (m && membershipPlanById(m.planId)) || MEMBERSHIP_PLANS[0];
+}
+
+export function checkinRewardFor(user) {
+  return effectiveMembershipPlan(user).checkinReward;
+}
+
+/** 下发给客户端的会员信息快照 */
+export function membershipSnapshot(user) {
+  const m = activeMembership(user);
+  const plan = effectiveMembershipPlan(user);
+  return {
+    planId: plan.id,
+    planName: plan.name,
+    active: Boolean(m),
+    expiresAt: m?.expiresAt || null,
+    startedAt: m?.startedAt || null,
+    monthlyCredits: plan.monthlyCredits,
+    checkinReward: plan.checkinReward,
+    nextCreditGrantAt: m?.nextCreditGrantAt || null,
+  };
+}
+
+/** 日期加月份（月末自动收敛，例如 1/31 + 1 月 = 2/28） */
+export function addMonths(dateLike, months) {
+  const date = new Date(dateLike);
+  const day = date.getDate();
+  date.setMonth(date.getMonth() + Number(months || 0));
+  if (date.getDate() < day) date.setDate(0);
+  return date;
+}
+
 /**
  * 积分计价基准：1 积分 = 1000 token（倍率 1.0 的模型）。
  * 实际可用 token = TOKENS_PER_CREDIT / 模型倍率：
@@ -173,3 +288,83 @@ export const GITHUB = {
 
 /** 一次性票据有效期（5 分钟） */
 export const OAUTH_TICKET_TTL_MS = 5 * 60 * 1000;
+
+// ---------------------------------------------------------------------------
+// 微信支付（JSAPI）
+// ---------------------------------------------------------------------------
+//
+// 支付页面固定部署在 ser1996.niav.cn（微信支付要求该域名已配置为
+// 支付授权目录 / 网页授权域名，其他域名无法发起 JSAPI 支付）。
+//
+// 敏感字段（AppSecret / APIv3Key / 商户私钥 / 微信支付公钥）不入库默认值，
+// 由管理端「凭据配置」或环境变量提供。
+
+const ENV_WECHAT_PAY = {
+  appId: env.WECHAT_PAY_APP_ID || 'wxfd62dc1710c0e35e',
+  appSecret: env.WECHAT_PAY_APP_SECRET || '',
+  mchId: env.WECHAT_PAY_MCH_ID || '',
+  serialNo: env.WECHAT_PAY_SERIAL_NO || '',
+  apiV3Key: env.WECHAT_PAY_API_V3_KEY || '',
+  privateKeyPem: '',
+  privateKeyPath: env.WECHAT_PAY_PRIVATE_KEY_PATH || '',
+  publicKeyPem: '',
+  publicKeyPath: env.WECHAT_PAY_PUBLIC_KEY_PATH || '',
+  publicKeyId: env.WECHAT_PAY_PUBLIC_KEY_ID || '',
+  notifyUrl: env.WECHAT_PAY_NOTIFY_URL || '',
+  pageBase: env.WECHAT_PAY_PAGE_BASE || 'https://ser1996.niav.cn',
+};
+
+/** 当前生效的微信支付配置（db.config 优先于环境变量） */
+export function wechatPayConfig() {
+  const c = getDb().config?.wechatPay || {};
+  const pick = (key) => {
+    const value = c[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+    return ENV_WECHAT_PAY[key] || '';
+  };
+  const pageBase = (pick('pageBase') || 'https://ser1996.niav.cn').replace(/\/+$/, '');
+  const privateKeyPem = String(c.privateKeyPem || '') || ENV_WECHAT_PAY.privateKeyPem;
+  const publicKeyPem = String(c.publicKeyPem || '') || ENV_WECHAT_PAY.publicKeyPem;
+  return {
+    appId: pick('appId') || 'wxfd62dc1710c0e35e',
+    appSecret: pick('appSecret'),
+    mchId: pick('mchId'),
+    serialNo: pick('serialNo'),
+    apiV3Key: pick('apiV3Key'),
+    privateKeyPem,
+    privateKeyPath: pick('privateKeyPath'),
+    publicKeyPem,
+    publicKeyPath: pick('publicKeyPath'),
+    publicKeyId: pick('publicKeyId'),
+    notifyUrl: pick('notifyUrl') || `${pageBase}/api/pay/wechat/notify`,
+    pageBase,
+  };
+}
+
+/** 商户私钥是否可读（PEM 文本或本地文件） */
+export function wechatPayPrivateKeyAvailable() {
+  const c = wechatPayConfig();
+  if (c.privateKeyPem) return true;
+  return Boolean(c.privateKeyPath && existsSync(c.privateKeyPath));
+}
+
+/** 微信支付公钥是否可读（PEM 文本或本地文件） */
+export function wechatPayPublicKeyAvailable() {
+  const c = wechatPayConfig();
+  if (c.publicKeyPem) return true;
+  return Boolean(c.publicKeyPath && existsSync(c.publicKeyPath));
+}
+
+/** 微信支付是否已具备下单条件 */
+export function wechatPayReady() {
+  const c = wechatPayConfig();
+  return Boolean(
+    c.appId &&
+      c.appSecret &&
+      c.mchId &&
+      c.serialNo &&
+      c.apiV3Key.length === 32 &&
+      wechatPayPrivateKeyAvailable(),
+  );
+}
+

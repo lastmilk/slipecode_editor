@@ -2,20 +2,25 @@ import 'package:flutter/material.dart';
 
 import '../payloads/loader/loader_payload.dart';
 import '../services/custom_payload_service.dart';
+import '../services/github_actions_templates.dart';
 
 /// 自定义 Payload 编辑器
 ///
-/// Root Payload 只能由官方定义；这里用于创建 / 编辑用户自己的
-/// System Payload（端）与 Block Payload（功能模块）。
+/// 支持 Root / System / Block 三类：
+/// - Root：环境变量组 + GitHub Actions workflow
+/// - System：一个「端」的模板化目录结构
+/// - Block：细分功能模块（Markdown）
 class CustomPayloadEditorScreen extends StatefulWidget {
-  /// 'system' | 'block'
+  /// 'root' | 'system' | 'block'
   final String kind;
+  final RootPayloadSpec? root;
   final SystemPayloadSpec? system;
   final BlockPayloadSpec? block;
 
   const CustomPayloadEditorScreen({
     super.key,
     required this.kind,
+    this.root,
     this.system,
     this.block,
   });
@@ -53,31 +58,53 @@ class _CustomPayloadEditorScreenState extends State<CustomPayloadEditorScreen> {
   late final TextEditingController _libraries;
   late final TextEditingController _defaultLibrary;
   late final TextEditingController _markdown;
+  late final TextEditingController _buildEnvLabel;
+  late final TextEditingController _workflow;
+  final List<_EnvDraft> _envDrafts = [];
 
   IconData _icon = Icons.widgets_outlined;
   final Set<String> _applicable = {};
   final List<PayloadParamDef> _params = [];
+  String _buildEnv = 'flutter';
 
+  bool get _isRoot => widget.kind == 'root';
   bool get _isSystem => widget.kind == 'system';
 
   @override
   void initState() {
     super.initState();
+    final root = widget.root;
     final system = widget.system;
     final block = widget.block;
-    _name = TextEditingController(text: system?.name ?? block?.name ?? '');
+    _name = TextEditingController(
+      text: root?.name ?? system?.name ?? block?.name ?? '',
+    );
     _description = TextEditingController(
-        text: system?.description ?? block?.description ?? '');
+      text: root?.description ?? system?.description ?? block?.description ?? '',
+    );
     _folder = TextEditingController(text: system?.defaultFolder ?? '');
     _libraries = TextEditingController(
         text: (system?.libraryOptions ?? const []).join(','));
     _defaultLibrary =
         TextEditingController(text: system?.defaultLibrary ?? 'ElementPlus');
     _markdown = TextEditingController(text: block?.markdownTemplate ?? '');
-    _icon = system?.icon ?? block?.icon ?? Icons.widgets_outlined;
+    _buildEnvLabel =
+        TextEditingController(text: root?.buildEnvLabel ?? 'Flutter (stable)');
+    _buildEnv = root?.buildEnv ?? 'flutter';
+    _workflow = TextEditingController(
+      text: (root?.workflowContent ?? '').trim().isEmpty
+          ? '{{ENV}}\n${GitHubActionsTemplates.flutterBuildWorkflow}'
+          : root!.workflowContent,
+    );
+    _icon = root?.icon ?? system?.icon ?? block?.icon ?? Icons.widgets_outlined;
     if (block != null) _applicable.addAll(block.applicableSystems);
     if (system != null) _params.addAll(system.extraParams);
     if (block != null) _params.addAll(block.params);
+    if (root != null) {
+      for (final env in root.envVars) {
+        _envDrafts.add(_EnvDraft.fromEnv(env));
+      }
+    }
   }
 
   @override
@@ -88,6 +115,11 @@ class _CustomPayloadEditorScreenState extends State<CustomPayloadEditorScreen> {
     _libraries.dispose();
     _defaultLibrary.dispose();
     _markdown.dispose();
+    _buildEnvLabel.dispose();
+    _workflow.dispose();
+    for (final draft in _envDrafts) {
+      draft.dispose();
+    }
     super.dispose();
   }
 
@@ -97,6 +129,65 @@ class _CustomPayloadEditorScreenState extends State<CustomPayloadEditorScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('请填写 Payload 名称')),
       );
+      return;
+    }
+    if (_isRoot) {
+      final keys = <String>{};
+      final envVars = <RootEnvVar>[];
+      for (final draft in _envDrafts) {
+        final key = draft.key.text.trim().toUpperCase();
+        if (key.isEmpty) continue;
+        if (!RegExp(r'^[A-Z][A-Z0-9_]*$').hasMatch(key)) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('环境变量名不合法：$key（仅支持大写字母/数字/下划线）')),
+          );
+          return;
+        }
+        if (!keys.add(key)) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('环境变量名重复：$key')),
+          );
+          return;
+        }
+        envVars.add(
+          RootEnvVar(
+            key: key,
+            value: draft.value.text,
+            secret: draft.secret,
+            description: draft.description.text.trim(),
+          ),
+        );
+      }
+      final workflow = _workflow.text.trim();
+      if (workflow.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('请填写 GitHub Actions workflow')),
+        );
+        return;
+      }
+      final spec = RootPayloadSpec(
+        id: widget.root?.id ?? CustomPayloadService.newId('root'),
+        name: name,
+        description: _description.text.trim(),
+        icon: _icon,
+        buildEnv: _buildEnv,
+        buildEnvLabel: _buildEnvLabel.text.trim().isEmpty
+            ? _buildEnv
+            : _buildEnvLabel.text.trim(),
+        workflowContent: workflow,
+        params: const [],
+        envVars: envVars,
+        isBuiltin: false,
+      );
+      await CustomPayloadService.instance.upsertRoot(spec);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Root Payload 已保存'),
+          backgroundColor: Colors.green,
+        ),
+      );
+      Navigator.of(context).pop(true);
       return;
     }
     if (_isSystem) {
@@ -169,9 +260,11 @@ class _CustomPayloadEditorScreenState extends State<CustomPayloadEditorScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.system != null || widget.block != null
-            ? '编辑自定义 Payload'
-            : '新建 ${_isSystem ? 'System' : 'Block'} Payload'),
+        title: Text(
+          widget.root != null || widget.system != null || widget.block != null
+              ? '编辑自定义 Payload'
+              : '新建 ${_isRoot ? 'Root' : (_isSystem ? 'System' : 'Block')} Payload',
+        ),
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 8),
@@ -242,7 +335,94 @@ class _CustomPayloadEditorScreenState extends State<CustomPayloadEditorScreen> {
             ],
           ),
           const SizedBox(height: 18),
-          if (_isSystem) ...[
+          if (_isRoot) ...[
+            _sectionTitle('构建环境', isDark),
+            const SizedBox(height: 8),
+            DropdownButtonFormField<String>(
+              initialValue: _buildEnv,
+              decoration: const InputDecoration(
+                labelText: '环境标识',
+                border: OutlineInputBorder(),
+                isDense: true,
+              ),
+              items: const [
+                DropdownMenuItem(value: 'flutter', child: Text('Flutter')),
+                DropdownMenuItem(value: 'node', child: Text('Node.js')),
+                DropdownMenuItem(value: 'custom', child: Text('自定义')),
+              ],
+              onChanged: (v) {
+                if (v != null) setState(() => _buildEnv = v);
+              },
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _buildEnvLabel,
+              decoration: const InputDecoration(
+                labelText: '环境展示名',
+                hintText: '例如 Flutter (stable) / Node.js 20',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 18),
+            Row(
+              children: [
+                _sectionTitle('环境变量', isDark),
+                const Spacer(),
+                TextButton.icon(
+                  onPressed: () => setState(
+                    () => _envDrafts.add(_EnvDraft.empty()),
+                  ),
+                  icon: const Icon(Icons.add, size: 16),
+                  label: const Text('添加变量'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Secret 变量的值只写入 GitHub Secrets，不会出现在仓库文件里；'
+              '普通变量会写入 workflow 与 .env.example。',
+              style: TextStyle(
+                fontSize: 11,
+                height: 1.5,
+                color: isDark ? Colors.white38 : Colors.black45,
+              ),
+            ),
+            const SizedBox(height: 8),
+            if (_envDrafts.isEmpty)
+              Text(
+                '暂无环境变量',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: isDark ? Colors.white38 : Colors.black45,
+                ),
+              )
+            else
+              for (var i = 0; i < _envDrafts.length; i++)
+                _buildEnvRow(i, isDark),
+            const SizedBox(height: 18),
+            _sectionTitle('GitHub Actions Workflow', isDark),
+            const SizedBox(height: 4),
+            Text(
+              '可用 {{ENV}} 占位符插入全部环境变量；也可用 {{env.KEY}} 插入单个变量。'
+              '未包含 {{ENV}} 时会自动在文件顶部追加 env 块。',
+              style: TextStyle(
+                fontSize: 11,
+                height: 1.5,
+                color: isDark ? Colors.white38 : Colors.black45,
+              ),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _workflow,
+              minLines: 14,
+              maxLines: 28,
+              style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+              decoration: const InputDecoration(
+                hintText: 'name: SLIPE Build\non: ...\n{{ENV}}\njobs: ...',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ] else if (_isSystem) ...[
             _sectionTitle('System Payload 结构', isDark),
             const SizedBox(height: 8),
             TextField(
@@ -311,56 +491,138 @@ class _CustomPayloadEditorScreenState extends State<CustomPayloadEditorScreen> {
               ),
             ),
           ],
-          const SizedBox(height: 20),
-          Row(
-            children: [
-              _sectionTitle('参数定义', isDark),
-              const Spacer(),
-              TextButton.icon(
-                onPressed: _editParam,
-                icon: const Icon(Icons.add, size: 16),
-                label: const Text('添加参数'),
-              ),
-            ],
-          ),
-          if (_params.isEmpty)
-            Text('暂无参数；参数会出现在编排器的参数表单中',
-                style: TextStyle(
-                    fontSize: 11,
-                    color: isDark ? Colors.white38 : Colors.black45))
-          else
-            for (var i = 0; i < _params.length; i++)
-              Card(
-                margin: const EdgeInsets.only(bottom: 8),
-                child: ListTile(
-                  dense: true,
-                  title: Text('${_params[i].label}（${_params[i].key}）',
-                      style: const TextStyle(fontSize: 13)),
-                  subtitle: Text(
-                    '${_params[i].type.name}'
-                    '${_params[i].defaultValue.isEmpty ? '' : ' · 默认 ${_params[i].defaultValue}'}',
-                    style: const TextStyle(fontSize: 11),
-                  ),
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      IconButton(
-                        visualDensity: VisualDensity.compact,
-                        icon: const Icon(Icons.edit_outlined, size: 18),
-                        onPressed: () => _editParam(index: i),
-                      ),
-                      IconButton(
-                        visualDensity: VisualDensity.compact,
-                        icon: const Icon(Icons.close, size: 18),
-                        onPressed: () =>
-                            setState(() => _params.removeAt(i)),
-                      ),
-                    ],
+          if (!_isRoot) ...[
+            const SizedBox(height: 20),
+            Row(
+              children: [
+                _sectionTitle('参数定义', isDark),
+                const Spacer(),
+                TextButton.icon(
+                  onPressed: _editParam,
+                  icon: const Icon(Icons.add, size: 16),
+                  label: const Text('添加参数'),
+                ),
+              ],
+            ),
+            if (_params.isEmpty)
+              Text('暂无参数；参数会出现在编排器的参数表单中',
+                  style: TextStyle(
+                      fontSize: 11,
+                      color: isDark ? Colors.white38 : Colors.black45))
+            else
+              for (var i = 0; i < _params.length; i++)
+                Card(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  child: ListTile(
+                    dense: true,
+                    title: Text('${_params[i].label}（${_params[i].key}）',
+                        style: const TextStyle(fontSize: 13)),
+                    subtitle: Text(
+                      '${_params[i].type.name}'
+                      '${_params[i].defaultValue.isEmpty ? '' : ' · 默认 ${_params[i].defaultValue}'}',
+                      style: const TextStyle(fontSize: 11),
+                    ),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          visualDensity: VisualDensity.compact,
+                          icon: const Icon(Icons.edit_outlined, size: 18),
+                          onPressed: () => _editParam(index: i),
+                        ),
+                        IconButton(
+                          visualDensity: VisualDensity.compact,
+                          icon: const Icon(Icons.close, size: 18),
+                          onPressed: () =>
+                              setState(() => _params.removeAt(i)),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-              ),
+          ],
           const SizedBox(height: 40),
         ],
+      ),
+    );
+  }
+
+  Widget _buildEnvRow(int index, bool isDark) {
+    final draft = _envDrafts[index];
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(10, 8, 6, 8),
+        child: Column(
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  flex: 4,
+                  child: TextField(
+                    controller: draft.key,
+                    textCapitalization: TextCapitalization.characters,
+                    style: const TextStyle(
+                      fontFamily: 'monospace',
+                      fontSize: 12,
+                    ),
+                    decoration: const InputDecoration(
+                      labelText: 'Key',
+                      hintText: 'API_KEY',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Column(
+                  children: [
+                    Switch(
+                      value: draft.secret,
+                      onChanged: (v) => setState(() => draft.secret = v),
+                    ),
+                    Text(
+                      draft.secret ? 'Secret' : '明文',
+                      style: TextStyle(
+                        fontSize: 9,
+                        color: isDark ? Colors.white38 : Colors.black45,
+                      ),
+                    ),
+                  ],
+                ),
+                IconButton(
+                  visualDensity: VisualDensity.compact,
+                  icon: const Icon(Icons.close, size: 18),
+                  onPressed: () => setState(() {
+                    _envDrafts.removeAt(index).dispose();
+                  }),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: draft.value,
+              obscureText: draft.secret,
+              style: const TextStyle(fontSize: 12),
+              decoration: InputDecoration(
+                labelText: 'Value',
+                hintText: draft.secret ? '仅在 GitHub Secrets 中配置' : '例如 stable',
+                border: const OutlineInputBorder(),
+                isDense: true,
+              ),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: draft.description,
+              style: const TextStyle(fontSize: 12),
+              decoration: const InputDecoration(
+                labelText: '说明（可选）',
+                border: OutlineInputBorder(),
+                isDense: true,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -502,5 +764,39 @@ class _CustomPayloadEditorScreenState extends State<CustomPayloadEditorScreen> {
         _params[index] = result;
       }
     });
+  }
+}
+
+/// Root Payload 环境变量行的编辑状态
+class _EnvDraft {
+  final TextEditingController key;
+  final TextEditingController value;
+  final TextEditingController description;
+  bool secret;
+
+  _EnvDraft({
+    required this.key,
+    required this.value,
+    required this.description,
+    this.secret = false,
+  });
+
+  factory _EnvDraft.empty() => _EnvDraft(
+        key: TextEditingController(),
+        value: TextEditingController(),
+        description: TextEditingController(),
+      );
+
+  factory _EnvDraft.fromEnv(RootEnvVar env) => _EnvDraft(
+        key: TextEditingController(text: env.key),
+        value: TextEditingController(text: env.value),
+        description: TextEditingController(text: env.description),
+        secret: env.secret,
+      );
+
+  void dispose() {
+    key.dispose();
+    value.dispose();
+    description.dispose();
   }
 }

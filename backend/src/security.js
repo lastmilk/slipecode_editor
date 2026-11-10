@@ -9,6 +9,7 @@ import {
   LEGACY_ADMIN_TOKEN,
   TOKEN_TTL_SECONDS,
   adminPasswordHash,
+  membershipSnapshot,
 } from './config.js';
 import { getDb } from './db.js';
 import { adminPasswordHeader, bearer, httpError, remoteIp } from './http.js';
@@ -115,6 +116,7 @@ export function publicUser(user) {
     avatarUrl: user.avatar ? `/api/avatars/${user.id}?v=${user.avatar.version}` : '',
     wallpaperVersion: user.wallpaper?.version || '',
     credits: Number.isFinite(user.credits) ? user.credits : 0,
+    membership: membershipSnapshot(user),
   };
 }
 

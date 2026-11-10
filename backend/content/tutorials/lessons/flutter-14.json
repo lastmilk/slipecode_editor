@@ -1,0 +1,35 @@
+{
+  "id": "flutter-14",
+  "track": "flutter",
+  "title": "Flutter 动画基础",
+  "summary": "AnimationController + Tween 驱动显式动画。",
+  "steps": [
+    {
+      "type": "text",
+      "title": "Flutter 动画基础",
+      "body": "- AnimationController + Tween 驱动显式动画。\n- 先理解概念，再运行代码示例，最后完成随堂测验。\n- 遇到报错时优先阅读第一条错误信息，并检查依赖版本。"
+    },
+    {
+      "type": "code",
+      "title": "代码示例",
+      "language": "dart",
+      "code": "final controller = AnimationController(\n  vsync: this,\n  duration: const Duration(milliseconds: 300),\n)..forward();\n\nFadeTransition(\n  opacity: controller,\n  child: const Text('淡入'),\n);"
+    },
+    {
+      "type": "quiz",
+      "question": "显式动画的核心控制器是？",
+      "options": [
+        "AnimationController",
+        "ScrollController",
+        "TextEditingController"
+      ],
+      "answer": 0,
+      "explain": "AnimationController 负责时间推进与状态管理。"
+    },
+    {
+      "type": "action",
+      "title": "动手试试",
+      "body": "做一个按钮点击后淡入的卡片。"
+    }
+  ]
+}

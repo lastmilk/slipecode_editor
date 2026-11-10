@@ -1,0 +1,29 @@
+{
+  "id": "app-05",
+  "track": "app",
+  "title": "Git 仓库同步",
+  "summary": "把本地项目同步到 GitHub/Gitee，并处理常见冲突。",
+  "steps": [
+    {
+      "type": "text",
+      "title": "Git 仓库同步",
+      "body": "- 「同步仓库」页面可以选择目标仓库、拉取或推送。\n- 推送前建议先拉取，避免覆盖远端其他人的提交。\n- 遇到冲突时先保留双方修改，再手动合并冲突标记。\n- 不要把 `.env`、密钥、签名文件提交到仓库。"
+    },
+    {
+      "type": "quiz",
+      "question": "以下哪类文件不应该提交到 Git 仓库？",
+      "options": [
+        "README.md",
+        "签名 keystore 与 .env 密钥",
+        "pubspec.yaml"
+      ],
+      "answer": 1,
+      "explain": "密钥与签名文件属于敏感信息，应通过 Secrets 或本地保存。"
+    },
+    {
+      "type": "action",
+      "title": "动手试试",
+      "body": "打开「同步仓库」，拉取一次远端更新，再推送一条本地修改。"
+    }
+  ]
+}

@@ -3,7 +3,8 @@
 // 用户把自建的 System / Block Payload 发布到社区；
 // 发布后进入待审核状态（pending），管理员在 WorkAdmin 审核通过（approved）
 // 后才对所有人可见，驳回（rejected）时附审核备注。
-// Root Payload 只能由官方内置，因此社区只接受 system / block 两类。
+// Root Payload 也可以由用户自定义（环境变量 + GitHub Actions workflow），
+// 因此社区接受 system / block / root 三类。
 
 import { randomBytes } from 'node:crypto';
 
@@ -15,7 +16,8 @@ const MAX_NAME = 60;
 const MAX_DESCRIPTION = 400;
 const MAX_README = 64 * 1024;
 const MAX_SPEC_BYTES = 512 * 1024;
-const KINDS = new Set(['system', 'block']);
+const MAX_ROOT_SPEC_BYTES = 1024 * 1024;
+const KINDS = new Set(['system', 'block', 'root']);
 
 function publicPackage(pkg, { withSpec = false } = {}) {
   const base = {
@@ -37,11 +39,11 @@ function publicPackage(pkg, { withSpec = false } = {}) {
   return base;
 }
 
-function readSpec(body) {
+function readSpec(body, maxBytes = MAX_SPEC_BYTES) {
   const spec = body.spec;
   if (!spec || typeof spec !== 'object' || Array.isArray(spec)) return null;
   const text = JSON.stringify(spec);
-  if (Buffer.byteLength(text) > MAX_SPEC_BYTES) return null;
+  if (Buffer.byteLength(text) > maxBytes) return null;
   return spec;
 }
 
@@ -55,13 +57,16 @@ export async function handlePublishPackage(req, res) {
   const body = await readJson(req, { limit: 1024 * 1024 });
   const kind = String(body.kind || '').trim();
   if (!KINDS.has(kind)) {
-    return sendJson(res, 400, { error: '仅支持发布 system / block 两类 Payload' });
+    return sendJson(res, 400, { error: '仅支持发布 system / block / root 三类 Payload' });
   }
   const name = String(body.name || '').trim().slice(0, MAX_NAME);
   if (!name) return sendJson(res, 400, { error: '名称不能为空' });
   const description = String(body.description || '').trim().slice(0, MAX_DESCRIPTION);
   const readme = String(body.readme || '').slice(0, MAX_README);
-  const spec = readSpec(body);
+  const spec = readSpec(
+    body,
+    kind === 'root' ? MAX_ROOT_SPEC_BYTES : MAX_SPEC_BYTES,
+  );
   if (!spec) return sendJson(res, 400, { error: 'Payload 定义缺失或过大' });
 
   const now = new Date().toISOString();

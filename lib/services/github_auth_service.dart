@@ -2,13 +2,13 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 
-import 'package:app_links/app_links.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 
 import '../config/app_config.dart';
+import 'oauth_link_bus.dart';
 
 /// GitHub OAuth 授权结果
 class GitHubAuthResult {
@@ -39,9 +39,7 @@ class GitHubAuthService {
   static const _tokenKey = 'github_access_token';
   static const _scopeKey = 'github_token_scope';
 
-  final AppLinks _appLinks = AppLinks();
-  Completer<Uri>? _pendingCallback;
-  StreamSubscription<Uri>? _linkSub;
+  Completer<Uri>? _cancel;
 
   /// 读取已保存的 token
   Future<String?> get savedToken => _storage.read(key: _tokenKey);
@@ -94,76 +92,81 @@ class GitHubAuthService {
       },
     );
 
-    // 先订阅深链，再打开浏览器，避免竞态
-    _pendingCallback = Completer<Uri>();
-    await _linkSub?.cancel();
-    _linkSub = _appLinks.uriLinkStream.listen((uri) {
-      if (_isCallbackUri(uri) && _pendingCallback?.isCompleted == false) {
-        _pendingCallback!.complete(uri);
-      }
-    });
-
-    final launched = await launchUrl(
-      authorizeUri,
-      // 用 Custom Tab / SFSafariViewController 打开，避免被 GitHub App
-      // 等已注册 github.com 链接的应用拦截（拦截后授权页会显示 404）
-      mode: LaunchMode.inAppBrowserView,
-    );
-    if (!launched) {
-      await _cleanup();
-      throw StateError('无法打开浏览器完成授权');
-    }
-
-    final callback = await _pendingCallback!.future.timeout(timeout,
-        onTimeout: () {
-      throw TimeoutException('授权超时，请重试');
-    });
-    await _cleanup();
-
-    // 校验 state 防 CSRF
-    if (callback.queryParameters['state'] != state) {
-      throw StateError('授权回调 state 校验失败');
-    }
-    final error = callback.queryParameters['error'];
-    if (error != null) {
-      throw StateError(
-        '授权被拒绝：$error ${callback.queryParameters['error_description'] ?? ''}',
+    final cancel = Completer<Uri>();
+    _cancel = cancel;
+    try {
+      final launched = await launchUrl(
+        authorizeUri,
+        // 用 Custom Tab / SFSafariViewController 打开，避免被 GitHub App
+        // 等已注册 github.com 链接的应用拦截（拦截后授权页会显示 404）
+        mode: LaunchMode.inAppBrowserView,
       );
-    }
+      if (!launched) {
+        throw StateError('无法打开浏览器完成授权');
+      }
 
-    // 后端中转回调会带回一次性 ticket（token 已由后端换好），
-    // 直接深链回调则带回 code，两种情况都交给后端接口。
-    final ticket = callback.queryParameters['ticket'];
-    final code = callback.queryParameters['code'];
-    if ((ticket ?? '').isEmpty && (code ?? '').isEmpty) {
-      throw StateError('授权回调缺少 code / ticket');
-    }
+      // 深链总线会优先复用冷启动时的 initial link，再等待新的回调事件；
+      // 同时与取消信号赛跑，保证用户点「取消」能立即结束等待。
+      final callback = await Future.any<Uri>([
+        OAuthLinkBus.instance.waitFor(
+          (uri) =>
+              _isCallbackUri(uri) && uri.queryParameters['state'] == state,
+          timeout: timeout,
+        ),
+        cancel.future,
+      ]);
+      OAuthLinkBus.instance.consume(callback);
 
-    final result = await _exchange(ticket: ticket, code: code);
-    await _storage.write(key: _tokenKey, value: result.accessToken);
-    await _storage.write(key: _scopeKey, value: result.scope);
-    return result;
+      // 校验 state 防 CSRF
+      if (callback.queryParameters['state'] != state) {
+        throw StateError('授权回调 state 校验失败');
+      }
+      final error = callback.queryParameters['error'];
+      if (error != null) {
+        throw StateError(
+          '授权被拒绝：$error ${callback.queryParameters['error_description'] ?? ''}',
+        );
+      }
+
+      // 后端中转回调会带回一次性 ticket（token 已由后端换好），
+      // 直接深链回调则带回 code，两种情况都交给后端接口。
+      final ticket = callback.queryParameters['ticket'];
+      final code = callback.queryParameters['code'];
+      if ((ticket ?? '').isEmpty && (code ?? '').isEmpty) {
+        throw StateError('授权回调缺少 code / ticket');
+      }
+
+      final result = await _exchange(ticket: ticket, code: code);
+      await _storage.write(key: _tokenKey, value: result.accessToken);
+      await _storage.write(key: _scopeKey, value: result.scope);
+      return result;
+    } finally {
+      if (!cancel.isCompleted) {
+        cancel.completeError(StateError('已取消授权'));
+      }
+      if (identical(_cancel, cancel)) _cancel = null;
+    }
   }
 
   bool _isCallbackUri(Uri uri) {
     final expected = Uri.parse(AppConfig.oauthDeepLink);
-    return uri.scheme == expected.scheme &&
+    if (uri.scheme == expected.scheme &&
         uri.host == expected.host &&
-        uri.path == expected.path;
-  }
-
-  Future<void> _cleanup() async {
-    await _linkSub?.cancel();
-    _linkSub = null;
-    _pendingCallback = null;
+        uri.path == expected.path) {
+      return true;
+    }
+    // 兼容线上旧配置：slipecode://oauth/callback
+    return uri.scheme == 'slipecode' &&
+        uri.host == 'oauth' &&
+        uri.path == '/callback';
   }
 
   /// 取消正在进行的授权
   Future<void> cancelSignIn() async {
-    if (_pendingCallback?.isCompleted == false) {
-      _pendingCallback!.completeError(StateError('已取消授权'));
+    final cancel = _cancel;
+    if (cancel != null && !cancel.isCompleted) {
+      cancel.completeError(StateError('已取消授权'));
     }
-    await _cleanup();
   }
 
   /// 把授权结果交给自建后端：由后端用 client_secret 换取 / 领取 access token

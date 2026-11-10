@@ -1,0 +1,35 @@
+{
+  "id": "flutter-05",
+  "track": "flutter",
+  "title": "Flutter 布局基础",
+  "summary": "Row、Column、Expanded、Padding 是最常用的布局组合。",
+  "steps": [
+    {
+      "type": "text",
+      "title": "Flutter 布局基础",
+      "body": "- Row、Column、Expanded、Padding 是最常用的布局组合。\n- 先理解概念，再运行代码示例，最后完成随堂测验。\n- 遇到报错时优先阅读第一条错误信息，并检查依赖版本。"
+    },
+    {
+      "type": "code",
+      "title": "代码示例",
+      "language": "dart",
+      "code": "Row(\n  children: [\n    const Icon(Icons.star),\n    const SizedBox(width: 8),\n    Expanded(child: Text('自适应宽度')),\n  ],\n);"
+    },
+    {
+      "type": "quiz",
+      "question": "想让子组件占满剩余空间应使用？",
+      "options": [
+        "Expanded",
+        "Opacity",
+        "Theme"
+      ],
+      "answer": 0,
+      "explain": "Expanded 会按 flex 分配剩余空间。"
+    },
+    {
+      "type": "action",
+      "title": "动手试试",
+      "body": "做一个左图标、右文字的列表项。"
+    }
+  ]
+}

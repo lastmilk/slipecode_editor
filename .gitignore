@@ -18,6 +18,7 @@ coverage/
 .packages
 android/local.properties
 android/.gradle/
+android/.kotlin/
 **/*.iml
 android/key.properties
 

@@ -61,7 +61,9 @@
           <el-menu-item index="llm">LLM 模型</el-menu-item>
           <el-menu-item index="docs">使用文档</el-menu-item>
           <el-menu-item index="releases">安装包</el-menu-item>
-          <el-menu-item index="community">社区审核</el-menu-item>
+          <el-menu-item index="orders">支付订单</el-menu-item>
+          <el-menu-item index="community">社区内容</el-menu-item>
+          <el-menu-item index="communitySettings">社区设置</el-menu-item>
           <el-menu-item index="policies">政策合规</el-menu-item>
         </el-menu>
         <div class="sidebar-footer">
@@ -330,6 +332,79 @@
                 <el-button type="primary" :loading="savingAli" @click="saveAliyun">保存阿里云配置</el-button>
                 <span class="dim" v-if="cfgInfo.aliyun.accessKeySecretMasked">
                   当前 Secret：{{ cfgInfo.aliyun.accessKeySecretMasked }}
+                </span>
+              </el-form-item>
+            </el-form>
+          </div>
+
+          <div class="card">
+            <div class="card-head">
+              <h3>微信支付（JSAPI 会员）</h3>
+              <el-tag :type="cfgInfo.wechatPay.ready ? 'success' : 'warning'" size="small">
+                {{ cfgInfo.wechatPay.ready ? '已就绪' : '未配置完整' }}
+              </el-tag>
+            </div>
+            <el-form label-width="150px" class="cfg-form">
+              <el-form-item label="公众号 AppID">
+                <el-input v-model="cfg.wechatPay.appId" placeholder="wx..." />
+              </el-form-item>
+              <el-form-item label="公众号 AppSecret">
+                <el-input
+                  v-model="cfg.wechatPay.appSecret"
+                  type="password"
+                  show-password
+                  :placeholder="placeholderSecret(cfgInfo.wechatPay.appSecretMasked)"
+                />
+              </el-form-item>
+              <el-form-item label="商户号 MchID">
+                <el-input v-model="cfg.wechatPay.mchId" placeholder="1117219917" />
+              </el-form-item>
+              <el-form-item label="证书序列号">
+                <el-input v-model="cfg.wechatPay.serialNo" placeholder="23EA..." />
+              </el-form-item>
+              <el-form-item label="APIv3 密钥">
+                <el-input
+                  v-model="cfg.wechatPay.apiV3Key"
+                  type="password"
+                  show-password
+                  maxlength="32"
+                  :placeholder="placeholderSecret(cfgInfo.wechatPay.apiV3KeyMasked)"
+                />
+              </el-form-item>
+              <el-form-item label="支付页域名">
+                <el-input v-model="cfg.wechatPay.pageBase" placeholder="https://ser1996.niav.cn" />
+              </el-form-item>
+              <el-form-item label="回调地址">
+                <el-input v-model="cfg.wechatPay.notifyUrl" placeholder="留空自动使用 https://ser1996.niav.cn/api/pay/wechat/notify" />
+              </el-form-item>
+              <el-form-item label="商户私钥 PEM">
+                <el-input
+                  v-model="cfg.wechatPay.privateKeyPem"
+                  type="textarea"
+                  :rows="4"
+                  :placeholder="cfgInfo.wechatPay.privateKeyConfigured ? '已配置（留空表示不修改）' : '粘贴 apiclient_key.pem 内容'"
+                />
+              </el-form-item>
+              <el-form-item label="商户私钥文件路径">
+                <el-input v-model="cfg.wechatPay.privateKeyPath" placeholder="可选：/www/wwwroot/slipecode-api/secrets/apiclient_key.pem" />
+              </el-form-item>
+              <el-form-item label="微信支付公钥 PEM">
+                <el-input
+                  v-model="cfg.wechatPay.publicKeyPem"
+                  type="textarea"
+                  :rows="4"
+                  :placeholder="cfgInfo.wechatPay.publicKeyConfigured ? '已配置（留空表示不修改）' : '粘贴微信支付公钥 pub_key.pem 内容'"
+                />
+              </el-form-item>
+              <el-form-item label="微信支付公钥 ID">
+                <el-input v-model="cfg.wechatPay.publicKeyId" placeholder="PUB_KEY_ID_..." />
+              </el-form-item>
+              <el-form-item>
+                <el-button type="primary" :loading="savingWechatPay" @click="saveWechatPay">
+                  保存微信支付配置
+                </el-button>
+                <span class="dim" style="margin-left: 8px">
+                  支付页：{{ cfg.wechatPay.pageBase }}/pay?order=…
                 </span>
               </el-form-item>
             </el-form>
@@ -671,17 +746,27 @@
             </template>
           </el-dialog>
         </section>
-        <!-- 社区审核 -->
+        <!-- 社区内容 -->
         <section v-else-if="tab === 'community'" class="panel">
           <header class="panel-head">
             <div>
-              <h2>社区审核</h2>
-              <p>用户发布的 Payload 包需审核通过后才会在 App 社区公开；被驳回的包仅作者可见。</p>
+              <h2>社区内容</h2>
+              <p>Payload 包与帖子/评论审核。首帖需审核通过后，作者后续帖子自动发布。</p>
             </div>
-            <el-button :loading="loadingCommunity" @click="loadCommunity">刷新</el-button>
+            <el-button
+              :loading="communityTab === 'posts' ? loadingCommunityPosts : loadingCommunity"
+              @click="communityTab === 'posts' ? loadCommunityPosts() : loadCommunity()"
+            >刷新</el-button>
           </header>
 
           <div class="card">
+            <el-radio-group v-model="communityTab" @change="onCommunityTabChange">
+              <el-radio-button label="packages">Payload 包</el-radio-button>
+              <el-radio-button label="posts">帖子与举报</el-radio-button>
+            </el-radio-group>
+          </div>
+
+          <div class="card" v-if="communityTab === 'packages'">
             <div class="toolbar">
               <el-select v-model="communityStatus" style="width: 160px" @change="loadCommunity">
                 <el-option label="待审核" value="pending" />
@@ -701,8 +786,8 @@
               </el-table-column>
               <el-table-column label="类型" width="100">
                 <template #default="{ row }">
-                  <el-tag :type="row.kind === 'system' ? 'primary' : 'warning'" size="small">
-                    {{ row.kind === 'system' ? 'System' : 'Block' }}
+                  <el-tag :type="row.kind === 'system' ? 'primary' : (row.kind === 'root' ? 'danger' : 'warning')" size="small">
+                    {{ row.kind === 'system' ? 'System' : (row.kind === 'root' ? 'Root' : 'Block') }}
                   </el-tag>
                 </template>
               </el-table-column>
@@ -735,7 +820,7 @@
             <div v-if="communityPreview">
               <el-descriptions :column="2" border>
                 <el-descriptions-item label="名称">{{ communityPreview.name }}</el-descriptions-item>
-                <el-descriptions-item label="类型">{{ communityPreview.kind === 'system' ? 'System Payload' : 'Block Payload' }}</el-descriptions-item>
+                <el-descriptions-item label="类型">{{ communityPreview.kind === 'system' ? 'System Payload' : (communityPreview.kind === 'root' ? 'Root Payload（构建镜像）' : 'Block Payload') }}</el-descriptions-item>
                 <el-descriptions-item label="作者">{{ communityPreview.authorName }}</el-descriptions-item>
                 <el-descriptions-item label="提交时间">{{ dateText(communityPreview.createdAt) }}</el-descriptions-item>
                 <el-descriptions-item label="状态">
@@ -768,6 +853,173 @@
               <el-button v-if="communityPreview && communityPreview.status === 'pending'" type="warning" @click="rejectCommunity(communityPreview)">驳回</el-button>
             </template>
           </el-dialog>
+
+          <!-- 帖子与举报 -->
+          <div class="card" v-if="communityTab === 'posts'">
+            <div class="toolbar">
+              <el-select v-model="communityPostStatus" style="width: 160px" @change="loadCommunityPosts">
+                <el-option label="待审核" value="pending" />
+                <el-option label="已发布" value="published" />
+                <el-option label="已驳回" value="rejected" />
+                <el-option label="全部" value="all" />
+              </el-select>
+              <el-button :loading="loadingReports" @click="loadReports">刷新举报</el-button>
+              <span class="dim">待处理举报 {{ communityReports.length }} 条</span>
+            </div>
+
+            <el-table :data="communityPosts" stripe empty-text="暂无帖子" v-loading="loadingCommunityPosts">
+              <el-table-column label="标题" min-width="200">
+                <template #default="{ row }">
+                  <div class="cell-title">{{ row.title }}</div>
+                  <div class="dim cell-sub">{{ row.excerpt || '（无正文）' }}</div>
+                </template>
+              </el-table-column>
+              <el-table-column prop="authorName" label="作者" width="130" show-overflow-tooltip />
+              <el-table-column label="互动" width="110">
+                <template #default="{ row }">👍 {{ row.likes }} · 💬 {{ row.commentCount }}</template>
+              </el-table-column>
+              <el-table-column label="提交时间" width="160">
+                <template #default="{ row }">{{ dateText(row.createdAt) }}</template>
+              </el-table-column>
+              <el-table-column label="状态" width="100">
+                <template #default="{ row }">
+                  <el-tag :type="communityPostStatusType(row.status)" size="small">
+                    {{ communityPostStatusText(row.status) }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="操作" width="220" fixed="right">
+                <template #default="{ row }">
+                  <el-button link type="primary" @click="openCommunityPost(row)">查看</el-button>
+                  <el-button v-if="row.status !== 'published'" link type="success" @click="approveCommunityPost(row)">通过</el-button>
+                  <el-button v-if="row.status !== 'rejected'" link type="warning" @click="rejectCommunityPost(row)">驳回</el-button>
+                  <el-button link type="danger" @click="removeCommunityPost(row)">删除</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+
+            <el-divider content-position="left">待处理举报</el-divider>
+            <el-table :data="communityReports" stripe empty-text="暂无举报" v-loading="loadingReports" size="small">
+              <el-table-column prop="postTitle" label="帖子" min-width="180" show-overflow-tooltip />
+              <el-table-column prop="reporterName" label="举报人" width="130" show-overflow-tooltip />
+              <el-table-column prop="reason" label="原因" min-width="220" show-overflow-tooltip />
+              <el-table-column label="时间" width="160">
+                <template #default="{ row }">{{ dateText(row.createdAt) }}</template>
+              </el-table-column>
+            </el-table>
+          </div>
+
+          <el-dialog v-model="communityPostDialog" title="帖子详情" width="760px" top="6vh">
+            <div v-if="communityPostPreview">
+              <el-descriptions :column="2" border>
+                <el-descriptions-item label="标题" :span="2">{{ communityPostPreview.title }}</el-descriptions-item>
+                <el-descriptions-item label="作者">{{ communityPostPreview.authorName }}</el-descriptions-item>
+                <el-descriptions-item label="状态">
+                  <el-tag :type="communityPostStatusType(communityPostPreview.status)" size="small">
+                    {{ communityPostStatusText(communityPostPreview.status) }}
+                  </el-tag>
+                </el-descriptions-item>
+                <el-descriptions-item label="点赞">{{ communityPostPreview.likes }}</el-descriptions-item>
+                <el-descriptions-item label="评论">{{ communityPostPreview.commentCount }}</el-descriptions-item>
+                <el-descriptions-item label="审核备注" :span="2">{{ communityPostPreview.reviewNote || '（无）' }}</el-descriptions-item>
+              </el-descriptions>
+              <div class="card" style="margin-top: 12px">
+                <div class="card-head"><h3>正文</h3></div>
+                <pre class="mono pre-block">{{ communityPostPreview.content }}</pre>
+              </div>
+            </div>
+            <template #footer>
+              <el-button @click="communityPostDialog = false">关闭</el-button>
+              <el-button v-if="communityPostPreview && communityPostPreview.status !== 'published'" type="success" @click="approveCommunityPost(communityPostPreview)">通过并发布</el-button>
+              <el-button v-if="communityPostPreview && communityPostPreview.status === 'pending'" type="warning" @click="rejectCommunityPost(communityPostPreview)">驳回</el-button>
+            </template>
+          </el-dialog>
+        </section>
+
+        <!-- 社区设置 -->
+        <section v-else-if="tab === 'communitySettings'" class="panel">
+          <header class="panel-head">
+            <div>
+              <h2>社区设置</h2>
+              <p>关键词过滤与社区公约保存后立即生效；首帖审核关闭后新用户可直接发布。</p>
+            </div>
+            <el-button :loading="loadingCommunityCfg" @click="loadCommunityCfg">刷新</el-button>
+          </header>
+
+          <div class="card" v-loading="loadingCommunityCfg">
+            <el-form label-width="110px" class="cfg-form">
+              <el-form-item label="违规关键词">
+                <el-input
+                  v-model="communityCfg.keywordsText"
+                  type="textarea"
+                  :rows="10"
+                  placeholder="每行一个关键词；支持中英文"
+                />
+                <div class="dim" style="font-size: 12px; margin-top: 6px">
+                  命中关键词的帖子/评论会被服务端直接拒绝。共 {{ communityCfg.keywordsText.split('\n').filter(Boolean).length }} 条。
+                </div>
+              </el-form-item>
+              <el-form-item label="首帖审核">
+                <el-switch v-model="communityCfg.firstPostReview" />
+                <span class="dim" style="margin-left: 8px">开启后，用户第一条帖子需审核</span>
+              </el-form-item>
+              <el-form-item label="每日发帖上限">
+                <el-input-number v-model="communityCfg.maxPostsPerDay" :min="1" :max="200" />
+              </el-form-item>
+              <el-form-item label="社区公约">
+                <el-input v-model="communityCfg.covenant" type="textarea" :rows="18" />
+              </el-form-item>
+              <el-form-item>
+                <el-button type="primary" :loading="savingCommunityCfg" @click="saveCommunityCfg">保存设置</el-button>
+                <span class="dim" style="margin-left: 12px">最后更新：{{ dateText(communityCfg.updatedAt) }}</span>
+              </el-form-item>
+            </el-form>
+          </div>
+        </section>
+
+        <!-- 支付订单 -->
+        <section v-else-if="tab === 'orders'" class="panel">
+          <header class="panel-head">
+            <div>
+              <h2>支付订单</h2>
+              <p>微信支付订单。到账由微信回调与服务端主动查单共同保证。</p>
+            </div>
+            <el-button :loading="loadingOrders" @click="loadOrders">刷新</el-button>
+          </header>
+
+          <div class="card">
+            <div class="toolbar">
+              <el-select v-model="orderStatus" style="width: 160px" @change="loadOrders">
+                <el-option label="全部" value="" />
+                <el-option label="待支付" value="pending" />
+                <el-option label="已支付" value="paid" />
+                <el-option label="已关闭" value="closed" />
+              </el-select>
+              <span class="dim">共 {{ orders.length }} 条</span>
+            </div>
+            <el-table :data="orders" stripe empty-text="暂无订单" v-loading="loadingOrders">
+              <el-table-column prop="outTradeNo" label="商户订单号" min-width="220" show-overflow-tooltip />
+              <el-table-column prop="userEmail" label="用户" min-width="180" show-overflow-tooltip />
+              <el-table-column label="套餐" min-width="150">
+                <template #default="{ row }">{{ row.planName }} · {{ row.cycleName }}</template>
+              </el-table-column>
+              <el-table-column label="金额" width="100">
+                <template #default="{ row }">¥{{ (row.amount || 0).toFixed(2) }}</template>
+              </el-table-column>
+              <el-table-column label="状态" width="100">
+                <template #default="{ row }">
+                  <el-tag :type="orderStatusType(row.status)" size="small">{{ orderStatusText(row.status) }}</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="创建时间" width="160">
+                <template #default="{ row }">{{ dateText(row.createdAt) }}</template>
+              </el-table-column>
+              <el-table-column label="支付时间" width="160">
+                <template #default="{ row }">{{ row.paidAt ? dateText(row.paidAt) : '-' }}</template>
+              </el-table-column>
+              <el-table-column prop="note" label="备注" min-width="180" show-overflow-tooltip />
+            </el-table>
+          </div>
         </section>
 
         <!-- 政策合规 -->

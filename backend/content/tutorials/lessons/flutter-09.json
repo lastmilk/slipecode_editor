@@ -1,0 +1,35 @@
+{
+  "id": "flutter-09",
+  "track": "flutter",
+  "title": "Flutter 状态管理",
+  "summary": "setState 适合局部状态，跨页面共享可用 Provider。",
+  "steps": [
+    {
+      "type": "text",
+      "title": "Flutter 状态管理",
+      "body": "- setState 适合局部状态，跨页面共享可用 Provider。\n- 先理解概念，再运行代码示例，最后完成随堂测验。\n- 遇到报错时优先阅读第一条错误信息，并检查依赖版本。"
+    },
+    {
+      "type": "code",
+      "title": "代码示例",
+      "language": "dart",
+      "code": "class Counter extends StatefulWidget {\n  const Counter({super.key});\n  @override\n  State<Counter> createState() => _CounterState();\n}\n\nclass _CounterState extends State<Counter> {\n  int value = 0;\n  @override\n  Widget build(BuildContext context) => TextButton(\n        onPressed: () => setState(() => value++),\n        child: Text('$value'),\n      );\n}"
+    },
+    {
+      "type": "quiz",
+      "question": "修改局部状态后要触发重绘应调用？",
+      "options": [
+        "setState",
+        "notifyListeners",
+        "rebuild"
+      ],
+      "answer": 0,
+      "explain": "StatefulWidget 内部使用 setState 触发重建。"
+    },
+    {
+      "type": "action",
+      "title": "动手试试",
+      "body": "实现一个计数器，并思考何时该用 Provider。"
+    }
+  ]
+}

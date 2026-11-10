@@ -47,6 +47,7 @@ DATA_DIR=${ROOT}/api/data
 JWT_SECRET=$(openssl rand -hex 32)
 CORS_ORIGIN=*
 GITHUB_REDIRECT_URI=https://api.lineregre.com/api/oauth/github/callback
+GITHUB_DEEP_LINK=slipe://gitoauth2
 GITEE_CLIENT_ID=
 GITEE_CLIENT_SECRET=
 GITEE_REDIRECT_URI=slipe://oauth/gitee/callback

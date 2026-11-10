@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../models/credits.dart';
 import '../providers/account_provider.dart';
+import 'wechat_pay_qr_dialog.dart';
 
 /// 打开「积分与充值」底部弹层
 Future<void> showCreditsSheet(BuildContext context) {
@@ -86,6 +86,7 @@ class CreditsPanel extends StatefulWidget {
 
 class _CreditsPanelState extends State<CreditsPanel> {
   bool _busy = false;
+  String _cycleId = 'month';
 
   @override
   void initState() {
@@ -157,37 +158,62 @@ class _CreditsPanelState extends State<CreditsPanel> {
     );
   }
 
-  void _buyPlan(CreditPlan plan) {
-    showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('购买「${plan.name}」'),
-        content: Text(
-          '${plan.credits} 积分 · ¥${plan.price.toStringAsFixed(plan.price == plan.price.roundToDouble() ? 0 : 1)}\n\n'
-          '${plan.description.isEmpty ? '' : '${plan.description}\n\n'}'
-          '目前通过激活码充值：完成购买后会得到一个激活码，'
-          '在「兑换激活码」处输入即可到账。',
-          style: const TextStyle(fontSize: 13, height: 1.5),
+  String _effectiveCycleId(AccountProvider account) {
+    final cycles = account.billing.cycles;
+    if (cycles.isEmpty) return 'month';
+    return cycles.any((c) => c.id == _cycleId) ? _cycleId : cycles.first.id;
+  }
+
+  MembershipCycle _cycleFor(AccountProvider account) {
+    final cycles = account.billing.cycles;
+    if (cycles.isEmpty) {
+      return const MembershipCycle(id: 'month', name: '月付');
+    }
+    final id = _effectiveCycleId(account);
+    return cycles.firstWhere((c) => c.id == id, orElse: () => cycles.first);
+  }
+
+  String _membershipLabel(AccountProvider account) {
+    final m = account.user?.membership;
+    if (m == null || !m.active) return '当前档位：Personal（免费）';
+    final exp = m.expiresAt;
+    final expText = exp == null
+        ? ''
+        : ' · ${exp.year}-${exp.month.toString().padLeft(2, '0')}-'
+            '${exp.day.toString().padLeft(2, '0')} 到期';
+    return '当前档位：${m.planName}$expText';
+  }
+
+  void _buyMembership(
+    AccountProvider account,
+    MembershipPlan plan,
+    MembershipCycle cycle,
+  ) {
+    if (plan.free) {
+      _toast('当前为免费档位，无需购买', ok: false);
+      return;
+    }
+    if (!account.billing.wechatPay.enabled) {
+      showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('微信支付暂不可用'),
+          content: const Text(
+            '管理员尚未完成微信支付配置。你可以先使用激活码充值，'
+            '或稍后再试。',
+            style: TextStyle(fontSize: 13, height: 1.5),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('知道了'),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Clipboard.setData(ClipboardData(text: plan.name));
-              Navigator.of(ctx).pop();
-            },
-            child: const Text('复制套餐名'),
-          ),
-          FilledButton(
-            onPressed: () {
-              Navigator.of(ctx).pop();
-              final account = context.read<AccountProvider>();
-              _redeem(account);
-            },
-            child: const Text('去兑换'),
-          ),
-        ],
-      ),
-    );
+      );
+      return;
+    }
+    showWechatPayQrDialog(context, plan: plan, cycle: cycle);
   }
 
   @override
@@ -261,6 +287,17 @@ class _CreditsPanelState extends State<CreditsPanel> {
                         color: isDark ? Colors.white54 : Colors.black54,
                       ),
                     ),
+                    const SizedBox(height: 3),
+                    Text(
+                      _membershipLabel(account),
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: isDark
+                            ? const Color(0xFF8AB4F8)
+                            : const Color(0xFF0175C2),
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -288,11 +325,11 @@ class _CreditsPanelState extends State<CreditsPanel> {
         ),
         const SizedBox(height: 18),
 
-        // 套餐
+        // 会员套餐
         Row(
           children: [
             const Text(
-              '充值套餐',
+              '会员套餐',
               style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
             ),
             const Spacer(),
@@ -303,7 +340,7 @@ class _CreditsPanelState extends State<CreditsPanel> {
             ),
           ],
         ),
-        const SizedBox(height: 6),
+        const SizedBox(height: 2),
         if (account.billing.plans.isEmpty)
           Text(
             '套餐信息加载中…',
@@ -312,19 +349,63 @@ class _CreditsPanelState extends State<CreditsPanel> {
               color: isDark ? Colors.white38 : Colors.black45,
             ),
           )
-        else
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              for (final plan in account.billing.plans)
-                _PlanCard(
-                  plan: plan,
-                  isDark: isDark,
-                  onTap: () => _buyPlan(plan),
-                ),
-            ],
+        else ...[
+          if (account.billing.cycles.isNotEmpty) ...[
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  for (final cycle in account.billing.cycles)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: ChoiceChip(
+                        label: Text(
+                          cycle.name,
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                        selected: _effectiveCycleId(account) == cycle.id,
+                        onSelected: (_) =>
+                            setState(() => _cycleId = cycle.id),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                for (final plan in account.billing.plans)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: _MembershipCard(
+                      plan: plan,
+                      cycle: _cycleFor(account),
+                      isDark: isDark,
+                      onTap: () => _buyMembership(
+                        account,
+                        plan,
+                        _cycleFor(account),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
           ),
+          if (!account.billing.wechatPay.enabled)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(
+                '微信支付暂不可用：可先使用激活码充值',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: isDark ? Colors.orange.shade200 : Colors.orange.shade800,
+                ),
+              ),
+            ),
+        ],
         const SizedBox(height: 20),
 
         // 流水
@@ -378,32 +459,35 @@ class _CreditsPanelState extends State<CreditsPanel> {
   }
 }
 
-class _PlanCard extends StatelessWidget {
-  const _PlanCard({
+class _MembershipCard extends StatelessWidget {
+  const _MembershipCard({
     required this.plan,
+    required this.cycle,
     required this.isDark,
     required this.onTap,
   });
 
-  final CreditPlan plan;
+  final MembershipPlan plan;
+  final MembershipCycle cycle;
   final bool isDark;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final primary = Theme.of(context).colorScheme.primary;
-    final price = plan.price == plan.price.roundToDouble()
-        ? plan.price.toStringAsFixed(0)
-        : plan.price.toStringAsFixed(1);
+    final price = plan.priceFor(cycle.id);
+    final priceText = price == price.roundToDouble()
+        ? price.toStringAsFixed(0)
+        : price.toStringAsFixed(2);
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(14),
       child: Container(
-        width: 152,
-        padding: const EdgeInsets.all(12),
+        width: 156,
+        padding: const EdgeInsets.all(13),
         decoration: BoxDecoration(
           color: isDark ? const Color(0xFF2A2A2C) : Colors.white,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(14),
           border: Border.all(
             color: plan.badge.isNotEmpty
                 ? primary.withValues(alpha: 0.6)
@@ -419,8 +503,8 @@ class _PlanCard extends StatelessWidget {
                   child: Text(
                     plan.name,
                     style: const TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
                 ),
@@ -439,26 +523,44 @@ class _PlanCard extends StatelessWidget {
                   ),
               ],
             ),
-            const SizedBox(height: 6),
+            const SizedBox(height: 8),
             Text(
-              '${plan.credits} 积分',
+              plan.free ? '免费' : '¥$priceText',
               style: TextStyle(
-                fontSize: 18,
+                fontSize: plan.free ? 18 : 20,
                 fontWeight: FontWeight.bold,
-                color: isDark ? Colors.white : Colors.black87,
+                color: plan.free
+                    ? (isDark ? Colors.white70 : Colors.black87)
+                    : const Color(0xFF07C160),
+              ),
+            ),
+            Text(
+              plan.free ? '基础功能' : '${cycle.name} · ${cycle.months} 个月',
+              style: TextStyle(
+                fontSize: 10,
+                color: isDark ? Colors.white38 : Colors.black45,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              plan.monthlyCredits > 0
+                  ? '每月 ${plan.monthlyCredits} 积分'
+                  : '每月不发放积分',
+              style: const TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
               ),
             ),
             const SizedBox(height: 2),
             Text(
-              '¥$price',
-              style: const TextStyle(
-                fontSize: 13,
-                color: Colors.amber,
-                fontWeight: FontWeight.w600,
+              '每日签到 ${plan.checkinReward} 积分',
+              style: TextStyle(
+                fontSize: 10,
+                color: isDark ? Colors.white54 : Colors.black54,
               ),
             ),
             if (plan.description.isNotEmpty) ...[
-              const SizedBox(height: 4),
+              const SizedBox(height: 6),
               Text(
                 plan.description,
                 maxLines: 2,
@@ -470,6 +572,18 @@ class _PlanCard extends StatelessWidget {
                 ),
               ),
             ],
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                onPressed: onTap,
+                style: FilledButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  backgroundColor: const Color(0xFF07C160),
+                ),
+                child: Text(plan.free ? '当前免费' : '微信支付'),
+              ),
+            ),
           ],
         ),
       ),

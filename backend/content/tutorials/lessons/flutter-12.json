@@ -1,0 +1,35 @@
+{
+  "id": "flutter-12",
+  "track": "flutter",
+  "title": "Flutter 表单与验证",
+  "summary": "Form + TextFormField + validator 完成提交前校验。",
+  "steps": [
+    {
+      "type": "text",
+      "title": "Flutter 表单与验证",
+      "body": "- Form + TextFormField + validator 完成提交前校验。\n- 先理解概念，再运行代码示例，最后完成随堂测验。\n- 遇到报错时优先阅读第一条错误信息，并检查依赖版本。"
+    },
+    {
+      "type": "code",
+      "title": "代码示例",
+      "language": "dart",
+      "code": "final formKey = GlobalKey<FormState>();\n\nForm(\n  key: formKey,\n  child: TextFormField(\n    validator: (v) => (v == null || v.isEmpty) ? '不能为空' : null,\n  ),\n);"
+    },
+    {
+      "type": "quiz",
+      "question": "触发表单校验应调用？",
+      "options": [
+        "formKey.currentState!.validate()",
+        "setState",
+        "Navigator.pop"
+      ],
+      "answer": 0,
+      "explain": "validate 会依次调用各字段的 validator。"
+    },
+    {
+      "type": "action",
+      "title": "动手试试",
+      "body": "做一个登录表单，校验手机号与密码。"
+    }
+  ]
+}

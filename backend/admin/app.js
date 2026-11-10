@@ -81,16 +81,38 @@ const app = Vue.createApp({
           maxUnzipFiles: 50,
           maxUnzipMb: 50,
         },
+        wechatPay: {
+          appId: '',
+          appSecret: '',
+          mchId: '',
+          serialNo: '',
+          apiV3Key: '',
+          publicKeyId: '',
+          privateKeyPem: '',
+          publicKeyPem: '',
+          privateKeyPath: '',
+          publicKeyPath: '',
+          notifyUrl: '',
+          pageBase: 'https://ser1996.niav.cn',
+        },
       },
       cfgInfo: {
         geetest: { captchaKeyMasked: '' },
         aliyun: { accessKeySecretMasked: '', devMode: true },
+        wechatPay: {
+          appSecretMasked: '',
+          apiV3KeyMasked: '',
+          privateKeyConfigured: false,
+          publicKeyConfigured: false,
+          ready: false,
+        },
         admin: { usingDefaultPassword: true },
       },
       pwdForm: { current: '', next: '' },
       loadingConfig: false,
       savingGee: false,
       savingAli: false,
+      savingWechatPay: false,
       savingPwd: false,
       savingPortal: false,
       savingAiUploads: false,
@@ -114,6 +136,32 @@ const app = Vue.createApp({
       loadingCommunity: false,
       communityDialog: false,
       communityPreview: null,
+
+      // 社区内容：Payload 包 / 帖子
+      communityTab: 'packages',
+      communityPosts: [],
+      communityPostStatus: 'pending',
+      loadingCommunityPosts: false,
+      communityPostDialog: false,
+      communityPostPreview: null,
+      communityReports: [],
+      loadingReports: false,
+
+      // 社区设置
+      communityCfg: {
+        keywordsText: '',
+        covenant: '',
+        firstPostReview: true,
+        maxPostsPerDay: 20,
+        updatedAt: '',
+      },
+      loadingCommunityCfg: false,
+      savingCommunityCfg: false,
+
+      // 支付订单
+      orders: [],
+      orderStatus: '',
+      loadingOrders: false,
 
       policies: {
         userAgreement: { title: '', content: '', version: '', updatedAt: '' },
@@ -289,6 +337,8 @@ const app = Vue.createApp({
       if (tab === 'docs') this.loadDocs();
       if (tab === 'releases') this.loadRelease();
       if (tab === 'community') this.loadCommunity();
+      if (tab === 'communitySettings') this.loadCommunityCfg();
+      if (tab === 'orders') this.loadOrders();
       if (tab === 'policies') this.loadPolicies();
     },
 
@@ -350,6 +400,30 @@ const app = Vue.createApp({
         };
         this.cfg.portal = { qqGroup: (data.portal && data.portal.qqGroup) || '' };
         if (data.aiUploads) this.cfg.aiUploads = { ...this.cfg.aiUploads, ...data.aiUploads };
+        if (data.wechatPay) {
+          const w = data.wechatPay;
+          this.cfg.wechatPay = {
+            appId: w.appId || '',
+            appSecret: '',
+            mchId: w.mchId || '',
+            serialNo: w.serialNo || '',
+            apiV3Key: '',
+            publicKeyId: w.publicKeyId || '',
+            privateKeyPem: '',
+            publicKeyPem: '',
+            privateKeyPath: w.privateKeyPath || '',
+            publicKeyPath: w.publicKeyPath || '',
+            notifyUrl: w.notifyUrl || '',
+            pageBase: w.pageBase || 'https://ser1996.niav.cn',
+          };
+          this.cfgInfo.wechatPay = {
+            appSecretMasked: w.appSecretMasked || '',
+            apiV3KeyMasked: w.apiV3KeyMasked || '',
+            privateKeyConfigured: Boolean(w.privateKeyConfigured),
+            publicKeyConfigured: Boolean(w.publicKeyConfigured),
+            ready: Boolean(w.ready),
+          };
+        }
       } catch (err) {
         this.handleError(err);
       } finally {
@@ -388,6 +462,23 @@ const app = Vue.createApp({
         this.handleError(err);
       } finally {
         this.savingAli = false;
+      }
+    },
+
+    async saveWechatPay() {
+      this.savingWechatPay = true;
+      try {
+        await request('/api/admin/config', {
+          method: 'PUT',
+          body: { wechatPay: { ...this.cfg.wechatPay } },
+        });
+        ElementPlus.ElMessage.success('微信支付配置已保存');
+        await this.loadConfig();
+        await this.loadStats();
+      } catch (err) {
+        this.handleError(err);
+      } finally {
+        this.savingWechatPay = false;
       }
     },
 
@@ -996,6 +1087,200 @@ const app = Vue.createApp({
       } catch (err) {
         this.handleError(err);
       }
+    },
+
+    onCommunityTabChange(tab) {
+      if (tab === 'posts') {
+        this.loadCommunityPosts();
+        this.loadReports();
+      } else {
+        this.loadCommunity();
+      }
+    },
+
+    communityPostStatusText(status) {
+      if (status === 'published') return '已发布';
+      if (status === 'rejected') return '已驳回';
+      if (status === 'hidden') return '已隐藏';
+      return '待审核';
+    },
+    communityPostStatusType(status) {
+      if (status === 'published') return 'success';
+      if (status === 'rejected' || status === 'hidden') return 'danger';
+      return 'warning';
+    },
+
+    async loadCommunityPosts() {
+      this.loadingCommunityPosts = true;
+      try {
+        const status = this.communityPostStatus || 'pending';
+        const data = await request(
+          `/api/admin/community/posts?status=${encodeURIComponent(status)}`,
+        );
+        this.communityPosts = data.posts || [];
+      } catch (err) {
+        this.handleError(err);
+      } finally {
+        this.loadingCommunityPosts = false;
+      }
+    },
+
+    openCommunityPost(row) {
+      if (!row) return;
+      this.communityPostPreview = { ...row };
+      this.communityPostDialog = true;
+    },
+
+    async approveCommunityPost(row) {
+      if (!row) return;
+      try {
+        await ElementPlus.ElMessageBox.confirm(
+          `通过后「${row.title}」将对所有用户可见，确定通过？`,
+          '审核通过',
+          { type: 'success', confirmButtonText: '通过并发布', cancelButtonText: '取消' },
+        );
+      } catch {
+        return;
+      }
+      try {
+        await request(
+          `/api/admin/community/posts/${encodeURIComponent(row.id)}/review`,
+          { method: 'POST', body: { action: 'approve', note: '' } },
+        );
+        ElementPlus.ElMessage.success('已通过，社区即时可见');
+        this.communityPostDialog = false;
+        await this.loadCommunityPosts();
+      } catch (err) {
+        this.handleError(err);
+      }
+    },
+
+    async rejectCommunityPost(row) {
+      if (!row) return;
+      let note = '';
+      try {
+        const result = await ElementPlus.ElMessageBox.prompt(
+          '请填写驳回原因（会展示给作者）',
+          '驳回帖子',
+          { confirmButtonText: '驳回', cancelButtonText: '取消', inputPlaceholder: '例如：包含广告引流内容' },
+        );
+        note = result.value || '';
+      } catch {
+        return;
+      }
+      try {
+        await request(
+          `/api/admin/community/posts/${encodeURIComponent(row.id)}/review`,
+          { method: 'POST', body: { action: 'reject', note } },
+        );
+        ElementPlus.ElMessage.success('已驳回');
+        this.communityPostDialog = false;
+        await this.loadCommunityPosts();
+      } catch (err) {
+        this.handleError(err);
+      }
+    },
+
+    async removeCommunityPost(row) {
+      if (!row) return;
+      try {
+        await ElementPlus.ElMessageBox.confirm(
+          `确定删除帖子「${row.title}」？评论会一并删除。`,
+          '删除确认',
+          { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' },
+        );
+      } catch {
+        return;
+      }
+      try {
+        await request(`/api/admin/community/posts/${encodeURIComponent(row.id)}`, {
+          method: 'DELETE',
+        });
+        ElementPlus.ElMessage.success('已删除');
+        this.communityPostDialog = false;
+        await this.loadCommunityPosts();
+      } catch (err) {
+        this.handleError(err);
+      }
+    },
+
+    async loadReports() {
+      this.loadingReports = true;
+      try {
+        const data = await request('/api/admin/community/reports?status=open');
+        this.communityReports = data.reports || [];
+      } catch (err) {
+        this.handleError(err);
+      } finally {
+        this.loadingReports = false;
+      }
+    },
+
+    async loadCommunityCfg() {
+      this.loadingCommunityCfg = true;
+      try {
+        const data = await request('/api/admin/community/settings');
+        const s = data.settings || {};
+        this.communityCfg = {
+          keywordsText: (s.keywords || []).join('\n'),
+          covenant: s.covenant || '',
+          firstPostReview: s.firstPostReview !== false,
+          maxPostsPerDay: Number(s.maxPostsPerDay) || 20,
+          updatedAt: s.updatedAt || '',
+        };
+      } catch (err) {
+        this.handleError(err);
+      } finally {
+        this.loadingCommunityCfg = false;
+      }
+    },
+
+    async saveCommunityCfg() {
+      this.savingCommunityCfg = true;
+      try {
+        const data = await request('/api/admin/community/settings', {
+          method: 'PUT',
+          body: {
+            keywords: this.communityCfg.keywordsText,
+            covenant: this.communityCfg.covenant,
+            firstPostReview: this.communityCfg.firstPostReview,
+            maxPostsPerDay: this.communityCfg.maxPostsPerDay,
+          },
+        });
+        const s = data.settings || {};
+        this.communityCfg.updatedAt = s.updatedAt || '';
+        ElementPlus.ElMessage.success('社区设置已保存，立即生效');
+      } catch (err) {
+        this.handleError(err);
+      } finally {
+        this.savingCommunityCfg = false;
+      }
+    },
+
+    async loadOrders() {
+      this.loadingOrders = true;
+      try {
+        const q = this.orderStatus ? `?status=${encodeURIComponent(this.orderStatus)}` : '';
+        const data = await request(`/api/admin/orders${q}`);
+        this.orders = data.orders || [];
+      } catch (err) {
+        this.handleError(err);
+      } finally {
+        this.loadingOrders = false;
+      }
+    },
+
+    orderStatusText(status) {
+      if (status === 'paid') return '已支付';
+      if (status === 'closed') return '已关闭';
+      if (status === 'mismatch') return '金额异常';
+      if (status === 'failed') return '失败';
+      return '待支付';
+    },
+    orderStatusType(status) {
+      if (status === 'paid') return 'success';
+      if (status === 'pending') return 'warning';
+      return 'danger';
     },
 
     async loadPolicies() {

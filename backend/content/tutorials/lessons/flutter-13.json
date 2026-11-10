@@ -1,0 +1,35 @@
+{
+  "id": "flutter-13",
+  "track": "flutter",
+  "title": "Flutter 主题与样式",
+  "summary": "ThemeData 与 ColorScheme 统一颜色、字体与组件样式。",
+  "steps": [
+    {
+      "type": "text",
+      "title": "Flutter 主题与样式",
+      "body": "- ThemeData 与 ColorScheme 统一颜色、字体与组件样式。\n- 先理解概念，再运行代码示例，最后完成随堂测验。\n- 遇到报错时优先阅读第一条错误信息，并检查依赖版本。"
+    },
+    {
+      "type": "code",
+      "title": "代码示例",
+      "language": "dart",
+      "code": "MaterialApp(\n  theme: ThemeData(\n    colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),\n    useMaterial3: true,\n  ),\n);"
+    },
+    {
+      "type": "quiz",
+      "question": "全局主色通常通过什么生成？",
+      "options": [
+        "ColorScheme.fromSeed",
+        "TextStyle",
+        "Padding"
+      ],
+      "answer": 0,
+      "explain": "fromSeed 会基于一个种子色生成协调的配色。"
+    },
+    {
+      "type": "action",
+      "title": "动手试试",
+      "body": "把应用主色换成你喜欢的颜色。"
+    }
+  ]
+}

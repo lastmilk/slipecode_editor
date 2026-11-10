@@ -317,6 +317,51 @@ class AccountProvider extends ChangeNotifier {
     }
   }
 
+  /// 创建微信支付订单（返回支付页链接，App 内渲染二维码）
+  Future<({WechatOrder order, String payUrl})> createWechatOrder({
+    required String planId,
+    required String cycleId,
+  }) async {
+    final token = _token;
+    if (!isSignedIn || token == null) {
+      throw const AccountException('请先登录 SLIPE 账号');
+    }
+    final result = await AccountService.instance.createWechatOrder(
+      token,
+      planId: planId,
+      cycleId: cycleId,
+    );
+    return (order: result.order, payUrl: result.payUrl);
+  }
+
+  /// 查询微信订单状态（服务端会主动向微信查单）
+  Future<({WechatOrder order, bool paid, int credits})> queryWechatOrder(
+    String outTradeNo,
+  ) async {
+    final token = _token;
+    if (!isSignedIn || token == null) {
+      throw const AccountException('请先登录 SLIPE 账号');
+    }
+    final result = await AccountService.instance.fetchWechatOrder(
+      token,
+      outTradeNo,
+    );
+    if (result.paid) _applyCredits(result.credits);
+    return (order: result.order, paid: result.paid, credits: result.credits);
+  }
+
+  /// 重新拉取账号信息（会员状态变更后使用）
+  Future<void> refreshUserInfo() async {
+    final token = _token;
+    if (!isSignedIn || token == null) return;
+    try {
+      _user = await AccountService.instance.me(token);
+      _safeNotify();
+    } catch (e) {
+      debugPrint('账号信息刷新失败：$e');
+    }
+  }
+
   /// 每日签到
   Future<(bool, String)> checkin() async {
     if (!isSignedIn) return (false, '请先登录');

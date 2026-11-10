@@ -1,0 +1,35 @@
+{
+  "id": "app-03",
+  "track": "app",
+  "title": "AI 助手与 VibeCoding",
+  "summary": "用 AI 面板生成代码，以及行首 `..` 触发的 VibeCoding。",
+  "steps": [
+    {
+      "type": "text",
+      "title": "AI 助手与 VibeCoding",
+      "body": "- AI 助手面板可以读取当前项目结构，按自然语言生成或修改代码。\n- 在代码行首输入 `..` 或 `。。` 并写上需求，可触发 VibeCoding。\n- 内置模型使用 SLIPE 积分计费；也可以配置自己的 API Key。\n- AI 生成的内容需要你自行检查，尤其是依赖版本与敏感权限。"
+    },
+    {
+      "type": "code",
+      "title": "代码示例",
+      "language": "dart",
+      "code": ".. 给首页加一个深色模式切换按钮"
+    },
+    {
+      "type": "quiz",
+      "question": "在代码行首输入什么可以触发 VibeCoding？",
+      "options": [
+        "..",
+        "//",
+        "##"
+      ],
+      "answer": 0,
+      "explain": "行首输入 `..` 或 `。。` 后会进入 VibeCoding 请求。"
+    },
+    {
+      "type": "action",
+      "title": "动手试试",
+      "body": "在任意 Dart 文件行首输入 `.. 添加一个打印当前时间的按钮`，观察 AI 的修改。"
+    }
+  ]
+}

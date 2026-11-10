@@ -38,6 +38,7 @@ class _CustomPayloadManagerScreenState
 
   Future<void> _openEditor({
     String kind = 'system',
+    RootPayloadSpec? root,
     SystemPayloadSpec? system,
     BlockPayloadSpec? block,
   }) async {
@@ -45,12 +46,19 @@ class _CustomPayloadManagerScreenState
       MaterialPageRoute(
         builder: (_) => CustomPayloadEditorScreen(
           kind: kind,
+          root: root,
           system: system,
           block: block,
         ),
       ),
     );
     setState(() {});
+  }
+
+  Future<void> _deleteRoot(RootPayloadSpec spec) async {
+    final ok = await _confirm('删除「${spec.name}」？');
+    if (ok != true) return;
+    await _service.removeRoot(spec.id);
   }
 
   Future<void> _deleteSystem(SystemPayloadSpec spec) async {
@@ -83,10 +91,14 @@ class _CustomPayloadManagerScreenState
         ),
       );
 
-  Future<void> _publish({SystemPayloadSpec? system, BlockPayloadSpec? block}) async {
+  Future<void> _publish({
+    RootPayloadSpec? root,
+    SystemPayloadSpec? system,
+    BlockPayloadSpec? block,
+  }) async {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final controller = TextEditingController(
-      text: system?.description ?? block?.description ?? '',
+      text: root?.description ?? system?.description ?? block?.description ?? '',
     );
     final readmeController = TextEditingController(
       text: block?.markdownTemplate ?? '',
@@ -94,7 +106,7 @@ class _CustomPayloadManagerScreenState
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('发布「${system?.name ?? block?.name ?? ''}」到社区'),
+        title: Text('发布「${root?.name ?? system?.name ?? block?.name ?? ''}」到社区'),
         content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -153,10 +165,12 @@ class _CustomPayloadManagerScreenState
     if (!mounted) return;
     try {
       await CommunityService.instance.publish(
-        kind: system != null ? 'system' : 'block',
-        name: system?.name ?? block?.name ?? '未命名 Payload',
+        kind: root != null
+            ? 'root'
+            : (system != null ? 'system' : 'block'),
+        name: root?.name ?? system?.name ?? block?.name ?? '未命名 Payload',
         description: description,
-        spec: system?.toMap() ?? block!.toMap(),
+        spec: root?.toMap() ?? system?.toMap() ?? block!.toMap(),
         readme: readme,
       );
       if (!mounted) return;
@@ -177,12 +191,18 @@ class _CustomPayloadManagerScreenState
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final roots = _service.rootPayloads;
     final systems = _service.systemPayloads;
     final blocks = _service.blockPayloads;
     return Scaffold(
       appBar: AppBar(
         title: const Text('我的 Payload'),
         actions: [
+          TextButton.icon(
+            onPressed: () => _openEditor(kind: 'root'),
+            icon: const Icon(Icons.add, size: 18),
+            label: const Text('镜像'),
+          ),
           TextButton.icon(
             onPressed: () => _openEditor(kind: 'block'),
             icon: const Icon(Icons.add, size: 18),
@@ -210,7 +230,8 @@ class _CustomPayloadManagerScreenState
               borderRadius: BorderRadius.circular(12),
             ),
             child: Text(
-              'Root Payload 由官方定义；System（端）与 Block（功能模块）可以自由创建。'
+              'Root（镜像）= 一组环境变量 + 一份 GitHub Actions workflow；'
+              'System（端）与 Block（功能模块）也可以自由创建。'
               '自定义条目会直接出现在设计稿编排器中，也可发布到社区共享。',
               style: TextStyle(
                 fontSize: 11,
@@ -219,6 +240,12 @@ class _CustomPayloadManagerScreenState
               ),
             ),
           ),
+          const SizedBox(height: 18),
+          _sectionHeader('Root Payload（构建镜像）', roots.length, isDark),
+          if (roots.isEmpty)
+            _emptyHint('还没有自定义镜像，点击右上角「＋镜像」创建', isDark)
+          else
+            for (final spec in roots) _buildRootCard(spec, isDark),
           const SizedBox(height: 18),
           _sectionHeader('System Payload（端）', systems.length, isDark),
           if (systems.isEmpty)
@@ -264,6 +291,44 @@ class _CustomPayloadManagerScreenState
                 fontSize: 11,
                 color: isDark ? Colors.white38 : Colors.black45)),
       );
+
+  Widget _buildRootCard(RootPayloadSpec spec, bool isDark) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 10),
+      child: ListTile(
+        leading: Icon(spec.icon, color: Colors.deepPurple),
+        title: Text(spec.name, style: const TextStyle(fontSize: 14)),
+        subtitle: Text(
+          '${spec.buildEnvLabel} · ${spec.envVars.length} 个环境变量'
+          '${spec.description.isEmpty ? '' : '\n${spec.description}'}',
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontSize: 11),
+        ),
+        isThreeLine: true,
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              tooltip: '发布到社区',
+              icon: const Icon(Icons.cloud_upload_outlined, size: 20),
+              onPressed: () => _publish(root: spec),
+            ),
+            IconButton(
+              tooltip: '编辑',
+              icon: const Icon(Icons.edit_outlined, size: 20),
+              onPressed: () => _openEditor(kind: 'root', root: spec),
+            ),
+            IconButton(
+              tooltip: '删除',
+              icon: const Icon(Icons.delete_outline, size: 20),
+              onPressed: () => _deleteRoot(spec),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
   Widget _buildSystemCard(SystemPayloadSpec spec, bool isDark) {
     return Card(

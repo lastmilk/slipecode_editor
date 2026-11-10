@@ -1,0 +1,35 @@
+{
+  "id": "flutter-06",
+  "track": "flutter",
+  "title": "Flutter Container",
+  "summary": "Container 组合了尺寸、背景、边框、圆角与内边距。",
+  "steps": [
+    {
+      "type": "text",
+      "title": "Flutter Container",
+      "body": "- Container 组合了尺寸、背景、边框、圆角与内边距。\n- 先理解概念，再运行代码示例，最后完成随堂测验。\n- 遇到报错时优先阅读第一条错误信息，并检查依赖版本。"
+    },
+    {
+      "type": "code",
+      "title": "代码示例",
+      "language": "dart",
+      "code": "Container(\n  width: 120,\n  height: 60,\n  padding: const EdgeInsets.all(12),\n  decoration: BoxDecoration(\n    color: Colors.blue,\n    borderRadius: BorderRadius.circular(12),\n  ),\n  child: const Text('卡片'),\n);"
+    },
+    {
+      "type": "quiz",
+      "question": "Container 的圆角应设置在哪里？",
+      "options": [
+        "decoration",
+        "child",
+        "alignment"
+      ],
+      "answer": 0,
+      "explain": "圆角属于装饰，放在 BoxDecoration 中。"
+    },
+    {
+      "type": "action",
+      "title": "动手试试",
+      "body": "做一个圆角渐变按钮卡片。"
+    }
+  ]
+}

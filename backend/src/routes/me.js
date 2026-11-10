@@ -5,16 +5,22 @@ import { join } from 'node:path';
 
 import {
   AVATAR_MAX_BYTES,
-  CHECKIN_REWARD,
   UPLOAD_BODY_LIMIT,
   WALLPAPER_MAX_BYTES,
+  activeMembership,
+  addMonths,
+  checkinRewardFor,
+  effectiveMembershipPlan,
+  membershipSnapshot,
 } from '../config.js';
 import { UPLOAD_DIR, getDb, saveDb, todayStr } from '../db.js';
 import { readJson, sendBytes, sendJson } from '../http.js';
 import { publicUser, requireUser } from '../security.js';
 
 export async function handleMe(req, res) {
-  sendJson(res, 200, { user: publicUser(requireUser(req)) });
+  const user = requireUser(req);
+  await settleMembershipCredits(user);
+  sendJson(res, 200, { user: publicUser(user) });
 }
 
 // ---------------------------------------------------------------------------
@@ -210,14 +216,59 @@ export function applyCredits(user, delta, type, note = '') {
   return after;
 }
 
+/**
+ * 结算会员月度积分：会员有效期内，每满一个月发放当月积分。
+ * 幂等：以 membership.nextCreditGrantAt 为游标，重复调用不会重复发放。
+ * 返回是否有积分入账（调用方需按需 saveDb）。
+ */
+export async function settleMembershipCredits(user) {
+  const membership = activeMembership(user);
+  if (!membership) return false;
+  const plan = effectiveMembershipPlan(user);
+  if (!plan.monthlyCredits) return false;
+
+  const now = Date.now();
+  const expiresAt = Date.parse(membership.expiresAt);
+  let cursor = Date.parse(membership.nextCreditGrantAt || '');
+
+  if (!Number.isFinite(cursor)) {
+    // 老数据/手动开通：从下个月开始发放，本次不补发
+    user.membership.nextCreditGrantAt = addMonths(now, 1).toISOString();
+    await saveDb();
+    return false;
+  }
+
+  let granted = 0;
+  let guard = 0;
+  // 最多补发 24 个月，避免异常数据造成超大金额
+  while (cursor <= now && cursor <= expiresAt && guard < 24) {
+    granted += plan.monthlyCredits;
+    cursor = addMonths(cursor, 1).getTime();
+    guard += 1;
+  }
+
+  if (guard > 0) {
+    user.membership.nextCreditGrantAt = new Date(cursor).toISOString();
+  }
+  if (!granted) {
+    if (guard > 0) await saveDb();
+    return false;
+  }
+  applyCredits(user, granted, 'membership', `${plan.name} 会员月度积分`);
+  await saveDb();
+  return true;
+}
+
 export async function handleGetCreditLogs(req, res) {
   const user = requireUser(req);
+  await settleMembershipCredits(user);
   const logs = Array.isArray(user.creditLogs) ? user.creditLogs.slice(-50).reverse() : [];
   sendJson(res, 200, { credits: getCredits(user), logs });
 }
 
 export async function handleCheckin(req, res) {
   const user = requireUser(req);
+  await settleMembershipCredits(user);
   const today = todayStr();
   if (user.lastCheckinDate === today) {
     return sendJson(res, 200, {
@@ -225,23 +276,31 @@ export async function handleCheckin(req, res) {
       message: '今日已签到',
       credits: getCredits(user),
       checkedInToday: true,
+      checkinReward: checkinRewardFor(user),
+      membership: membershipSnapshot(user),
     });
   }
+  const reward = checkinRewardFor(user);
   user.lastCheckinDate = today;
-  applyCredits(user, CHECKIN_REWARD, 'checkin', '每日签到');
+  applyCredits(user, reward, 'checkin', '每日签到');
   await saveDb();
   sendJson(res, 200, {
     ok: true,
-    message: `签到成功 +${CHECKIN_REWARD} 积分`,
+    message: `签到成功 +${reward} 积分`,
     credits: user.credits,
     checkedInToday: true,
+    checkinReward: reward,
+    membership: membershipSnapshot(user),
   });
 }
 
 export async function handleGetCredits(req, res) {
   const user = requireUser(req);
+  await settleMembershipCredits(user);
   sendJson(res, 200, {
     credits: getCredits(user),
     checkedInToday: user.lastCheckinDate === todayStr(),
+    checkinReward: checkinRewardFor(user),
+    membership: membershipSnapshot(user),
   });
 }

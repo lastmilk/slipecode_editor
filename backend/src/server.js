@@ -64,6 +64,17 @@ import {
   handleAdminDeleteActivationCode,
 } from './routes/billing.js';
 import { handleLlmChat, handleLlmModels } from './routes/llm.js';
+import {
+  handleAdminListOrders,
+  handleCreateWechatOrder,
+  handleGetWechatOrder,
+  handlePayConfirm,
+  handlePayJsapi,
+  handlePayOauth,
+  handlePayPage,
+  handlePayStatus,
+  handleWechatNotify,
+} from './routes/membership.js';
 import { handleAiLimits, handleAiUnzip } from './routes/ai_files.js';
 import {
   handleAdminRefreshGithubHosts,
@@ -127,6 +138,33 @@ import {
   handleMyCommunityPackages,
   handlePublishPackage,
 } from './routes/community.js';
+import {
+  handleAdminDeleteComment,
+  handleAdminDeletePost,
+  handleAdminGetCommunitySettings,
+  handleAdminListPosts,
+  handleAdminListReports,
+  handleAdminPutCommunitySettings,
+  handleAdminReviewPost,
+  handleAdminUserCommunityStatus,
+  handleCommunitySettingsPublic,
+  handleCovenant,
+  handleCreateComment,
+  handleCreatePost,
+  handleDeleteComment,
+  handleDeletePost,
+  handleGetPost,
+  handleListComments,
+  handleListFeed,
+  handleMyPosts,
+  handleReportPost,
+  handleToggleLike,
+} from './routes/forum.js';
+import {
+  TUTORIAL_ASSETS_DIR,
+  handleGetTutorial,
+  handleListTutorials,
+} from './routes/tutorials.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ADMIN_DIR = join(__dirname, '..', 'admin');
@@ -181,6 +219,18 @@ const ROUTES = {
   'GET /api/billing/plans': handleBillingPlans,
   'POST /api/billing/redeem': handleRedeemActivationCode,
 
+  // 会员：微信支付 JSAPI
+  'POST /api/billing/wechat/order': handleCreateWechatOrder,
+  'GET /api/billing/wechat/order': handleGetWechatOrder,
+  'POST /api/pay/wechat/notify': handleWechatNotify,
+
+  // 支付页面（必须在 ser1996.niav.cn 域名下访问）
+  'GET /pay': handlePayPage,
+  'GET /pay/oauth': handlePayOauth,
+  'GET /pay/api/jsapi': handlePayJsapi,
+  'GET /pay/api/status': handlePayStatus,
+  'POST /pay/api/confirm': handlePayConfirm,
+
   // LLM（/api/llm 作为 OpenAI 兼容 base，客户端会拼 /chat/completions）
   'GET /api/llm/models': handleLlmModels,
   'POST /api/llm/chat': handleLlmChat,
@@ -198,6 +248,16 @@ const ROUTES = {
   'POST /api/community/publish': handlePublishPackage,
   'GET /api/community/packages': handleListCommunity,
   'GET /api/community/mine': handleMyCommunityPackages,
+
+  // 社区论坛（帖子公开只读；发布 / 评论 / 点赞需登录）
+  'GET /api/community/feed': handleListFeed,
+  'POST /api/community/posts': handleCreatePost,
+  'GET /api/community/posts/mine': handleMyPosts,
+  'GET /api/community/covenant': handleCovenant,
+  'GET /api/community/settings': handleCommunitySettingsPublic,
+
+  // 社区教程（公开只读，资源按需下载）
+  'GET /api/tutorials': handleListTutorials,
 
   // 使用文档（公开只读）与门户信息
   'GET /api/docs': handleListDocs,
@@ -224,6 +284,7 @@ const ROUTES = {
   'GET /api/admin/users': handleAdminUsers,
   'GET /api/admin/activation-codes': handleAdminListActivationCodes,
   'POST /api/admin/activation-codes': handleAdminCreateActivationCodes,
+  'GET /api/admin/orders': handleAdminListOrders,
   'GET /api/admin/llm/models': handleAdminListModels,
   'POST /api/admin/llm/models': handleAdminCreateModel,
   'GET /api/admin/docs': handleAdminListDocs,
@@ -236,6 +297,10 @@ const ROUTES = {
 
   // 社区审核
   'GET /api/admin/community/packages': handleAdminListCommunity,
+  'GET /api/admin/community/posts': handleAdminListPosts,
+  'GET /api/admin/community/settings': handleAdminGetCommunitySettings,
+  'PUT /api/admin/community/settings': handleAdminPutCommunitySettings,
+  'GET /api/admin/community/reports': handleAdminListReports,
 };
 
 /** 带路径参数的路由（正则捕获，handler 第三个参数为正则 match） */
@@ -347,6 +412,81 @@ const DYNAMIC_ROUTES = [
     handler: (req, res, match) =>
       handleAdminDeleteCommunity(req, res, decodeURIComponent(match[1])),
   },
+  // 社区帖子
+  {
+    method: 'GET',
+    pattern: /^\/api\/community\/posts\/([^/]+)$/,
+    handler: (req, res, match) =>
+      handleGetPost(req, res, decodeURIComponent(match[1])),
+  },
+  {
+    method: 'DELETE',
+    pattern: /^\/api\/community\/posts\/([^/]+)$/,
+    handler: (req, res, match) =>
+      handleDeletePost(req, res, decodeURIComponent(match[1])),
+  },
+  {
+    method: 'POST',
+    pattern: /^\/api\/community\/posts\/([^/]+)\/like$/,
+    handler: (req, res, match) =>
+      handleToggleLike(req, res, decodeURIComponent(match[1])),
+  },
+  {
+    method: 'POST',
+    pattern: /^\/api\/community\/posts\/([^/]+)\/report$/,
+    handler: (req, res, match) =>
+      handleReportPost(req, res, decodeURIComponent(match[1])),
+  },
+  {
+    method: 'GET',
+    pattern: /^\/api\/community\/posts\/([^/]+)\/comments$/,
+    handler: (req, res, match) =>
+      handleListComments(req, res, decodeURIComponent(match[1])),
+  },
+  {
+    method: 'POST',
+    pattern: /^\/api\/community\/posts\/([^/]+)\/comments$/,
+    handler: (req, res, match) =>
+      handleCreateComment(req, res, decodeURIComponent(match[1])),
+  },
+  {
+    method: 'DELETE',
+    pattern: /^\/api\/community\/comments\/([^/]+)$/,
+    handler: (req, res, match) =>
+      handleDeleteComment(req, res, decodeURIComponent(match[1])),
+  },
+  // 教程
+  {
+    method: 'GET',
+    pattern: /^\/api\/tutorials\/([^/]+)$/,
+    handler: (req, res, match) =>
+      handleGetTutorial(req, res, decodeURIComponent(match[1])),
+  },
+  // 管理端：社区帖子 / 评论 / 用户状态
+  {
+    method: 'POST',
+    pattern: /^\/api\/admin\/community\/posts\/([^/]+)\/review$/,
+    handler: (req, res, match) =>
+      handleAdminReviewPost(req, res, decodeURIComponent(match[1])),
+  },
+  {
+    method: 'DELETE',
+    pattern: /^\/api\/admin\/community\/posts\/([^/]+)$/,
+    handler: (req, res, match) =>
+      handleAdminDeletePost(req, res, decodeURIComponent(match[1])),
+  },
+  {
+    method: 'DELETE',
+    pattern: /^\/api\/admin\/community\/comments\/([^/]+)$/,
+    handler: (req, res, match) =>
+      handleAdminDeleteComment(req, res, decodeURIComponent(match[1])),
+  },
+  {
+    method: 'POST',
+    pattern: /^\/api\/admin\/community\/users\/([^/]+)\/status$/,
+    handler: (req, res, match) =>
+      handleAdminUserCommunityStatus(req, res, decodeURIComponent(match[1])),
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -403,9 +543,20 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+    // 教程资源（按需下载，支持 Range 由 Nginx / 浏览器处理）
+    if (
+      (req.method === 'GET' || req.method === 'HEAD') &&
+      path.startsWith('/tutorial-assets/')
+    ) {
+      const rel = decodeURIComponent(path.slice('/tutorial-assets/'.length));
+      const ok = await serveStatic(req, res, TUTORIAL_ASSETS_DIR, rel);
+      if (!ok) sendJson(res, 404, { error: '教程资源不存在' });
+      return;
+    }
+
     // 2) 官网（slipe.cn / www.slipe.cn）
     if (isWebsiteHost(req) && (req.method === 'GET' || req.method === 'HEAD')) {
-      const isAsset = /\.(js|mjs|css|map|png|jpg|jpeg|svg|webp|ico|woff|woff2|ttf)$/i.test(path);
+      const isAsset = /\.(js|mjs|css|map|png|jpg|jpeg|svg|webp|ico|woff|woff2|ttf|txt)$/i.test(path);
       if (isAsset) {
         const ok = await serveStatic(req, res, WEBSITE_DIR, path.slice(1));
         if (ok) return;
@@ -420,7 +571,7 @@ const server = createServer(async (req, res) => {
     //    资源（含 /vendor、/styles.css、/app.js）无论哪个域名都从 admin 目录读取；
     //    页面入口：workadmin.* 任意路径、其它域名的 / 与 /admin。
     if (req.method === 'GET' || req.method === 'HEAD') {
-      const isAsset = /\.(js|mjs|css|map|png|jpg|jpeg|svg|webp|ico|woff|woff2|ttf)$/i.test(path);
+      const isAsset = /\.(js|mjs|css|map|png|jpg|jpeg|svg|webp|ico|woff|woff2|ttf|txt)$/i.test(path);
       if (isAsset) {
         const ok = await serveStatic(req, res, ADMIN_DIR, path.slice(1));
         if (ok) return;

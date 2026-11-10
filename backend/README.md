@@ -106,6 +106,44 @@ node src/server.js
 | `GET` | `/api/llm/models` | 需登录，返回可用模型列表（仅 `id`/`name`/`multiplier`，不含 `apiKey`） |
 | `POST` | `/api/llm/chat` | 需登录，OpenAI 兼容代理，body `{model, messages, temperature?}` |
 
+### 社区（论坛 / 教程）
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `GET` | `/api/community/feed` | 帖子流（仅已发布），`?tab=latest\|hot&q=&page=&pageSize=` |
+| `POST` | `/api/community/posts` | 需登录，发帖 `{title, content, tags?}`；首帖进入 `pending` |
+| `GET` | `/api/community/posts/:id` | 帖子详情（待审核仅作者可见） |
+| `DELETE` | `/api/community/posts/:id` | 作者删除自己的帖子 |
+| `POST` | `/api/community/posts/:id/like` | 点赞 / 取消点赞 |
+| `GET/POST` | `/api/community/posts/:id/comments` | 评论列表 / 发表评论 |
+| `POST` | `/api/community/posts/:id/report` | 举报帖子 |
+| `GET` | `/api/community/posts/mine` | 我的帖子（含待审核/驳回） |
+| `GET` | `/api/community/covenant` | 社区公约 Markdown |
+| `GET` | `/api/tutorials` | 教程清单（轨道 + 课程摘要） |
+| `GET` | `/api/tutorials/:id` | 单课完整步骤 |
+| `GET` | `/tutorial-assets/*` | 教程资源按需下载（目录 `DATA_DIR/tutorials/`） |
+
+管理端新增：
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `GET` | `/api/admin/community/posts` | 帖子审核列表 `?status=pending\|published\|rejected\|all` |
+| `POST` | `/api/admin/community/posts/:id/review` | `{action: approve\|reject, note}` |
+| `DELETE` | `/api/admin/community/posts/:id` | 删除帖子及评论 |
+| `DELETE` | `/api/admin/community/comments/:id` | 删除评论 |
+| `GET/PUT` | `/api/admin/community/settings` | 关键词、公约、首帖审核开关、每日发帖上限 |
+| `GET` | `/api/admin/community/reports` | 待处理举报 |
+| `POST` | `/api/admin/community/users/:id/status` | `{banned, mutedHours}` 禁言 / 封禁 |
+
+### 微信支付（会员）
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `POST` | `/api/billing/wechat/order` | 需登录，`{planId, cycleId}` → `{order, payUrl, appId}` |
+| `GET` | `/api/billing/wechat/order` | 需登录，`?outTradeNo=` 查询并结算 |
+| `POST` | `/api/pay/wechat/notify` | 微信支付回调（验签 + 解密 + 幂等入账） |
+| `GET` | `/pay?order=` | 微信内打开的充值页（网页授权 + JSAPI） |
+
 ### 积分规则
 
 - 每个用户有 `credits` 字段（默认 0），每日签到 `POST /api/checkin` 得 +100 积分，按服务器本地日期（`YYYY-MM-DD`）判断是否已签到（`lastCheckinDate`）。

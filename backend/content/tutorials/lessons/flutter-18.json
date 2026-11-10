@@ -1,0 +1,35 @@
+{
+  "id": "flutter-18",
+  "track": "flutter",
+  "title": "Flutter 平台特定代码",
+  "summary": "MethodChannel 让 Dart 调用 Android/iOS 原生能力。",
+  "steps": [
+    {
+      "type": "text",
+      "title": "Flutter 平台特定代码",
+      "body": "- MethodChannel 让 Dart 调用 Android/iOS 原生能力。\n- 先理解概念，再运行代码示例，最后完成随堂测验。\n- 遇到报错时优先阅读第一条错误信息，并检查依赖版本。"
+    },
+    {
+      "type": "code",
+      "title": "代码示例",
+      "language": "dart",
+      "code": "const channel = MethodChannel('app/native');\nfinal result = await channel.invokeMethod<String>('hello');"
+    },
+    {
+      "type": "quiz",
+      "question": "Dart 调用原生代码通常通过？",
+      "options": [
+        "MethodChannel",
+        "setState",
+        "ListView"
+      ],
+      "answer": 0,
+      "explain": "MethodChannel 是平台通道的常用实现。"
+    },
+    {
+      "type": "action",
+      "title": "动手试试",
+      "body": "写一个返回原生系统版本号的 MethodChannel。"
+    }
+  ]
+}

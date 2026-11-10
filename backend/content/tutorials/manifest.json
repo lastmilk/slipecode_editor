@@ -1,0 +1,399 @@
+{
+  "version": 1,
+  "updatedAt": "2026-11-10T16:26:23.210Z",
+  "tracks": [
+    {
+      "id": "app",
+      "name": "APP 基本操作",
+      "description": "从首页到云端构建，快速掌握 SLIPE 的日常使用。",
+      "lessons": [
+        {
+          "id": "app-01",
+          "title": "主界面与项目管理",
+          "summary": "认识 SLIPE 首页：项目列表、创建/打开项目与右划进入社区。",
+          "order": 1,
+          "durationMin": 8,
+          "stepCount": 3,
+          "tags": [
+            "入门",
+            "SLIPE"
+          ],
+          "assets": []
+        },
+        {
+          "id": "app-02",
+          "title": "编辑器与标签页",
+          "summary": "文件树、标签页、保存与快速查找的正确使用方式。",
+          "order": 2,
+          "durationMin": 8,
+          "stepCount": 3,
+          "tags": [
+            "入门",
+            "SLIPE"
+          ],
+          "assets": []
+        },
+        {
+          "id": "app-03",
+          "title": "AI 助手与 VibeCoding",
+          "summary": "用 AI 面板生成代码，以及行首 `..` 触发的 VibeCoding。",
+          "order": 3,
+          "durationMin": 8,
+          "stepCount": 4,
+          "tags": [
+            "入门",
+            "SLIPE"
+          ],
+          "assets": []
+        },
+        {
+          "id": "app-04",
+          "title": "云端构建与产物下载",
+          "summary": "通过 GitHub Actions / Gitee Go 构建 APK 并取回产物。",
+          "order": 4,
+          "durationMin": 8,
+          "stepCount": 3,
+          "tags": [
+            "入门",
+            "SLIPE"
+          ],
+          "assets": [
+            {
+              "id": "starter",
+              "name": "示例项目骨架",
+              "size": 517,
+              "url": "/tutorial-assets/app-04/starter.zip"
+            }
+          ]
+        },
+        {
+          "id": "app-05",
+          "title": "Git 仓库同步",
+          "summary": "把本地项目同步到 GitHub/Gitee，并处理常见冲突。",
+          "order": 5,
+          "durationMin": 8,
+          "stepCount": 3,
+          "tags": [
+            "入门",
+            "SLIPE"
+          ],
+          "assets": []
+        },
+        {
+          "id": "app-06",
+          "title": "偏好设置、账号与应用锁",
+          "summary": "主题、字体、壁纸、云同步、应用锁与账号安全。",
+          "order": 6,
+          "durationMin": 8,
+          "stepCount": 3,
+          "tags": [
+            "入门",
+            "SLIPE"
+          ],
+          "assets": []
+        }
+      ]
+    },
+    {
+      "id": "flutter",
+      "name": "Flutter 基础",
+      "description": "21 个主题，从第一个应用到打包发布。",
+      "lessons": [
+        {
+          "id": "flutter-01",
+          "title": "第一个 Flutter 应用",
+          "summary": "从 main() 与 runApp 开始，理解 Flutter 应用的最小结构。",
+          "order": 1,
+          "durationMin": 8,
+          "stepCount": 4,
+          "tags": [
+            "Flutter",
+            "基础"
+          ],
+          "assets": []
+        },
+        {
+          "id": "flutter-02",
+          "title": "Flutter 项目结构",
+          "summary": "认识 lib、android、ios、assets、pubspec.yaml 的职责。",
+          "order": 2,
+          "durationMin": 8,
+          "stepCount": 4,
+          "tags": [
+            "Flutter",
+            "基础"
+          ],
+          "assets": []
+        },
+        {
+          "id": "flutter-03",
+          "title": "Flutter Widget 基础",
+          "summary": "Widget 是界面的不可变描述，分为 Stateless 与 Stateful。",
+          "order": 3,
+          "durationMin": 8,
+          "stepCount": 4,
+          "tags": [
+            "Flutter",
+            "基础"
+          ],
+          "assets": [
+            {
+              "id": "widget-demo",
+              "name": "Widget 示例工程",
+              "size": 518,
+              "url": "/tutorial-assets/flutter-03/widget-demo.zip"
+            }
+          ]
+        },
+        {
+          "id": "flutter-04",
+          "title": "Flutter StatelessWidget",
+          "summary": "无状态组件适合只依赖入参的静态界面。",
+          "order": 4,
+          "durationMin": 8,
+          "stepCount": 4,
+          "tags": [
+            "Flutter",
+            "基础"
+          ],
+          "assets": []
+        },
+        {
+          "id": "flutter-05",
+          "title": "Flutter 布局基础",
+          "summary": "Row、Column、Expanded、Padding 是最常用的布局组合。",
+          "order": 5,
+          "durationMin": 8,
+          "stepCount": 4,
+          "tags": [
+            "Flutter",
+            "基础"
+          ],
+          "assets": []
+        },
+        {
+          "id": "flutter-06",
+          "title": "Flutter Container",
+          "summary": "Container 组合了尺寸、背景、边框、圆角与内边距。",
+          "order": 6,
+          "durationMin": 8,
+          "stepCount": 4,
+          "tags": [
+            "Flutter",
+            "基础"
+          ],
+          "assets": []
+        },
+        {
+          "id": "flutter-07",
+          "title": "Flutter ListView",
+          "summary": "ListView 用于滚动列表，builder 形式适合大量数据。",
+          "order": 7,
+          "durationMin": 8,
+          "stepCount": 4,
+          "tags": [
+            "Flutter",
+            "基础"
+          ],
+          "assets": []
+        },
+        {
+          "id": "flutter-08",
+          "title": "Flutter 用户输入",
+          "summary": "TextField 与 TextEditingController 处理文本输入。",
+          "order": 8,
+          "durationMin": 8,
+          "stepCount": 4,
+          "tags": [
+            "Flutter",
+            "基础"
+          ],
+          "assets": []
+        },
+        {
+          "id": "flutter-09",
+          "title": "Flutter 状态管理",
+          "summary": "setState 适合局部状态，跨页面共享可用 Provider。",
+          "order": 9,
+          "durationMin": 8,
+          "stepCount": 4,
+          "tags": [
+            "Flutter",
+            "基础"
+          ],
+          "assets": [
+            {
+              "id": "state-demo",
+              "name": "状态管理示例",
+              "size": 517,
+              "url": "/tutorial-assets/flutter-09/state-demo.zip"
+            }
+          ]
+        },
+        {
+          "id": "flutter-10",
+          "title": "Flutter HTTP 请求",
+          "summary": "使用 http 包请求接口，注意超时与异常处理。",
+          "order": 10,
+          "durationMin": 8,
+          "stepCount": 4,
+          "tags": [
+            "Flutter",
+            "基础"
+          ],
+          "assets": [
+            {
+              "id": "http-demo",
+              "name": "HTTP 请求示例",
+              "size": 480,
+              "url": "/tutorial-assets/flutter-10/http-demo.zip"
+            }
+          ]
+        },
+        {
+          "id": "flutter-11",
+          "title": "Flutter 导航与路由",
+          "summary": "Navigator.push/pop 管理页面栈，命名路由适合大型应用。",
+          "order": 11,
+          "durationMin": 8,
+          "stepCount": 4,
+          "tags": [
+            "Flutter",
+            "基础"
+          ],
+          "assets": []
+        },
+        {
+          "id": "flutter-12",
+          "title": "Flutter 表单与验证",
+          "summary": "Form + TextFormField + validator 完成提交前校验。",
+          "order": 12,
+          "durationMin": 8,
+          "stepCount": 4,
+          "tags": [
+            "Flutter",
+            "基础"
+          ],
+          "assets": []
+        },
+        {
+          "id": "flutter-13",
+          "title": "Flutter 主题与样式",
+          "summary": "ThemeData 与 ColorScheme 统一颜色、字体与组件样式。",
+          "order": 13,
+          "durationMin": 8,
+          "stepCount": 4,
+          "tags": [
+            "Flutter",
+            "基础"
+          ],
+          "assets": []
+        },
+        {
+          "id": "flutter-14",
+          "title": "Flutter 动画基础",
+          "summary": "AnimationController + Tween 驱动显式动画。",
+          "order": 14,
+          "durationMin": 8,
+          "stepCount": 4,
+          "tags": [
+            "Flutter",
+            "基础"
+          ],
+          "assets": []
+        },
+        {
+          "id": "flutter-15",
+          "title": "Flutter 本地存储",
+          "summary": "shared_preferences 存少量键值，sqflite 存结构化数据。",
+          "order": 15,
+          "durationMin": 8,
+          "stepCount": 4,
+          "tags": [
+            "Flutter",
+            "基础"
+          ],
+          "assets": []
+        },
+        {
+          "id": "flutter-16",
+          "title": "Flutter 图片与资源",
+          "summary": "Image.asset/network 与 pubspec assets 声明。",
+          "order": 16,
+          "durationMin": 8,
+          "stepCount": 4,
+          "tags": [
+            "Flutter",
+            "基础"
+          ],
+          "assets": []
+        },
+        {
+          "id": "flutter-17",
+          "title": "Flutter DevTools",
+          "summary": "用 DevTools 检查 Widget 树、性能、网络与内存。",
+          "order": 17,
+          "durationMin": 8,
+          "stepCount": 4,
+          "tags": [
+            "Flutter",
+            "基础"
+          ],
+          "assets": []
+        },
+        {
+          "id": "flutter-18",
+          "title": "Flutter 平台特定代码",
+          "summary": "MethodChannel 让 Dart 调用 Android/iOS 原生能力。",
+          "order": 18,
+          "durationMin": 8,
+          "stepCount": 4,
+          "tags": [
+            "Flutter",
+            "基础"
+          ],
+          "assets": []
+        },
+        {
+          "id": "flutter-19",
+          "title": "Flutter 测试",
+          "summary": "widget test 验证界面行为，unit test 验证纯逻辑。",
+          "order": 19,
+          "durationMin": 8,
+          "stepCount": 4,
+          "tags": [
+            "Flutter",
+            "基础"
+          ],
+          "assets": []
+        },
+        {
+          "id": "flutter-20",
+          "title": "Flutter 打包与发布",
+          "summary": "flutter build apk/appbundle，配置签名与版本号。",
+          "order": 20,
+          "durationMin": 8,
+          "stepCount": 4,
+          "tags": [
+            "Flutter",
+            "基础"
+          ],
+          "assets": []
+        },
+        {
+          "id": "flutter-21",
+          "title": "Flutter 最佳实践",
+          "summary": "拆分 Widget、避免 build 中做重活、统一状态与错误处理。",
+          "order": 21,
+          "durationMin": 8,
+          "stepCount": 4,
+          "tags": [
+            "Flutter",
+            "基础"
+          ],
+          "assets": []
+        }
+      ]
+    }
+  ]
+}

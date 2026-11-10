@@ -148,7 +148,12 @@ class LoaderProjectService {
       'org': org,
       if (draft != null) 'draftId': draft.id,
       if (draft != null) 'draftName': draft.name,
-      'root': {'id': rootSpec.id, 'params': rootParams},
+      'root': {
+        'id': rootSpec.id,
+        'params': rootParams,
+        if (rootSpec.envVars.isNotEmpty)
+          'envVars': rootSpec.envVars.map((e) => e.toMap()).toList(),
+      },
       'systems': [
         for (final s in normalized)
           {
@@ -215,10 +220,27 @@ dist/
 ''');
     yield '  + README.md\n  + .gitignore\n';
 
-    // 5) Root Payload 构建环境（workflow）
+    // 5) Root Payload 构建环境（workflow + 环境变量示例）
     final workflowPath = GitHubActionsTemplates.workflowPath;
     await _write(targetPath, workflowPath, rootSpec.resolveWorkflow());
     yield '  + $workflowPath\n';
+
+    if (rootSpec.envVars.isNotEmpty) {
+      final envExample = StringBuffer()
+        ..writeln('# 由 Root Payload「${rootSpec.name}」生成')
+        ..writeln('# Secret 变量请在 GitHub 仓库 Settings → Secrets 中配置')
+        ..writeln();
+      for (final env in rootSpec.envVars) {
+        if (env.description.isNotEmpty) {
+          envExample.writeln('# ${env.description}');
+        }
+        envExample.writeln(
+          '${env.key}=${env.secret ? '' : env.value}',
+        );
+      }
+      await _write(targetPath, '.env.example', envExample.toString());
+      yield '  + .env.example\n';
+    }
 
     // 6) 每个 System Payload：目录 + SYSTEM.md + blocks/*.md
     for (final s in normalized) {
@@ -271,8 +293,12 @@ dist/
           '（补齐 package.json / pubspec.yaml 等必需文件）；')
       ..writeln('3. 严格按每个 Block 的 .md 文本与其参数实现功能模块，'
           '组件库选择以各 SYSTEM.md 为准；')
-      ..writeln('4. 各端之间可共享的约定（主题色、接口基地址、凭据获取方式）保持一致；')
-      ..writeln('5. 全部完成后，输出每个端生成的文件清单与后续「实际构建」的注意事项。')
+      ..writeln(rootSpec.envVars.isEmpty
+          ? '4. 各端之间可共享的约定（主题色、接口基地址、凭据获取方式）保持一致；'
+          : '4. 环境变量与 Secrets 以 .github/workflows 与 .env.example 为准，'
+              '代码中通过环境变量读取，不要硬编码密钥；')
+      ..writeln('5. 各端之间可共享的约定（主题色、接口基地址、凭据获取方式）保持一致；')
+      ..writeln('6. 全部完成后，输出每个端生成的文件清单与后续「实际构建」的注意事项。')
       ..writeln()
       ..writeln('项目名：${manifest['name']}。当前项目根目录即工作目录。')
       ..writeln()
@@ -341,13 +367,27 @@ dist/
       ..writeln()
       ..writeln('## Root Payload：${rootSpec.name}（`${rootSpec.id}`）')
       ..writeln()
-      ..writeln('${rootSpec.description}')
+      ..writeln(rootSpec.description)
       ..writeln()
-      ..writeln('- 代码仓库：${rootParams['git_host']}')
+      ..writeln('- 代码仓库：${rootParams['git_host'] ?? 'github'}')
       ..writeln('- 构建环境：${rootSpec.buildEnvLabel}')
       ..writeln()
       ..writeln(_paramsTable(rootSpec.params, rootParams))
-      ..writeln()
+      ..writeln();
+    if (rootSpec.envVars.isNotEmpty) {
+      buffer
+        ..writeln('### 环境变量')
+        ..writeln()
+        ..writeln('| Key | 类型 | 说明 |')
+        ..writeln('| --- | --- | --- |');
+      for (final env in rootSpec.envVars) {
+        buffer.writeln(
+          '| `${env.key}` | ${env.secret ? 'Secret' : '明文'} | ${env.description} |',
+        );
+      }
+      buffer.writeln();
+    }
+    buffer
       ..writeln('## System Payload（共 ${systems.length} 个）')
       ..writeln();
     var i = 1;
