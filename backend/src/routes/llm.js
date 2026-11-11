@@ -317,10 +317,31 @@ export async function handleLlmChat(req, res) {
     });
   }
 
+  const { multiplier } = modelDefaults(config);
+
+  // 并发安全：同步预扣估算积分（在任何 await 之前完成），
+  // 避免多个并发请求同时通过余额检查而都消耗上游资源。
+  // 估算值取 promptTokens + 2000 补偿（覆盖 completion 的合理上限）。
+  const promptTokens = estimatePromptTokens(body.messages);
+  const reservedTokens = promptTokens + 2000;
+  const reservedCost = costForTokens(reservedTokens, multiplier);
+
   const balance = getCredits(user);
-  if (balance < MIN_BALANCE_FOR_CALL) {
-    return sendJson(res, 402, { error: '积分不足，请先充值', credits: balance });
+  if (balance < reservedCost) {
+    // 余额不足以覆盖保守估算时，只允许走最小成本调用（MIN_CALL_CREDITS）。
+    // 这避免了并发窗口内多个请求同时耗尽余额的漏洞。
+    if (balance < MIN_BALANCE_FOR_CALL) {
+      return sendJson(res, 402, { error: '积分不足，请先充值', credits: balance });
+    }
+    // 余额有限但 >= MIN_BALANCE_FOR_CALL，允许发起但按实际 tokens 结算
+    // （实际消耗可能超过余额，以 Math.max(0, ...) 兜底）。
   }
+
+  // 关键：这里必须是同步调用，不能有 await，确保预扣原子执行。
+  const beforeReserve = getCredits(user);
+  applyCredits(user, -reservedCost, 'llm_reserve', `${config.name} · 预估 ${reservedTokens} tokens`);
+  // 确认预扣成功（余额已减少），再放行后续异步操作。
+  // 这里故意不加 await saveDb() —— saveDb 是串行队列，我们在结束时会调一次。
 
   const upstreamBody = {
     model: config.model,
@@ -338,8 +359,6 @@ export async function handleLlmChat(req, res) {
     upstreamBody.stream_options = { include_usage: true };
   }
 
-  const { multiplier } = modelDefaults(config);
-
   let upstream;
   let channel;
   try {
@@ -351,6 +370,9 @@ export async function handleLlmChat(req, res) {
     upstream = picked.upstream;
     channel = picked.channel;
   } catch (err) {
+    // 上游连接失败，退还预扣
+    applyCredits(user, reservedCost, 'llm_refund', '上游不可用，退还预扣');
+    await saveDb();
     return sendJson(res, 502, {
       error: '无法连接上游模型服务',
       detail: String(err?.message || err).slice(0, 200),
@@ -365,6 +387,8 @@ export async function handleLlmChat(req, res) {
       detail = '';
     }
     markChannelFailure(config, channel, `HTTP ${upstream.status}: ${detail}`);
+    // 上游返回非 2xx，退还预扣（调用未消耗模型资源）
+    applyCredits(user, reservedCost, 'llm_refund', `上游返回 HTTP ${upstream.status}，退还预扣`);
     await saveDb();
     return sendJson(res, 502, {
       error: '上游模型调用失败',
@@ -383,6 +407,7 @@ export async function handleLlmChat(req, res) {
       upstream,
       multiplier,
       messages: body.messages,
+      reservedCost,
     });
   }
   return proxyJson({
@@ -393,6 +418,7 @@ export async function handleLlmChat(req, res) {
     upstream,
     multiplier,
     messages: body.messages,
+    reservedCost,
   });
 }
 
@@ -400,11 +426,14 @@ export async function handleLlmChat(req, res) {
 // 普通响应
 // ---------------------------------------------------------------------------
 
-async function proxyJson({ res, user, config, channel, upstream, multiplier, messages }) {
+async function proxyJson({ res, user, config, channel, upstream, multiplier, messages, reservedCost }) {
   let text;
   try {
     text = await upstream.text();
   } catch {
+    // 读取上游响应失败，退还预扣
+    applyCredits(user, reservedCost, 'llm_refund', '读取上游响应失败，退还预扣');
+    await saveDb();
     return sendJson(res, 502, { error: '读取上游响应失败' });
   }
 
@@ -415,6 +444,9 @@ async function proxyJson({ res, user, config, channel, upstream, multiplier, mes
     data = null;
   }
   if (!data) {
+    // 非 JSON 响应，退还预扣
+    applyCredits(user, reservedCost, 'llm_refund', '上游返回非 JSON，退还预扣');
+    await saveDb();
     return sendJson(res, 502, {
       error: '上游返回了非 JSON 响应',
       detail: text.slice(0, 300),
@@ -426,7 +458,13 @@ async function proxyJson({ res, user, config, channel, upstream, multiplier, mes
       ? data.usage.total_tokens
       : estimateTokens(messages, data);
   const cost = costForTokens(totalTokens, multiplier);
-  applyCredits(user, -cost, 'llm_usage', `${config.name} · ${totalTokens} tokens`);
+  // 多退少补：reservedCost 是预扣值，cost 是实际消耗
+  const diff = reservedCost - cost;
+  if (diff > 0) {
+    applyCredits(user, diff, 'llm_refund', `${config.name} · 多退 ${diff}`);
+  } else if (diff < 0) {
+    applyCredits(user, diff, 'llm_extra', `${config.name} · 补扣 ${-diff}`);
+  }
   recordChannelStat(config, channel, { ok: true, tokens: totalTokens });
   bumpStat('llmCalls');
   bumpStat('tokensUsed', totalTokens);
@@ -449,6 +487,7 @@ async function proxyStream({
   upstream,
   multiplier,
   messages,
+  reservedCost,
 }) {
   res.writeHead(200, {
     'Content-Type': 'text/event-stream; charset=utf-8',
@@ -471,6 +510,7 @@ async function proxyStream({
   let contentChars = 0;
   let reasoningChars = 0;
   let toolChars = 0;
+  let streamError = false;
 
   const write = (chunk) => {
     if (clientClosed || res.writableEnded) return;
@@ -523,6 +563,7 @@ async function proxyStream({
       if (result.forward) write(result.forward);
     }
   } catch (err) {
+    streamError = true;
     write(
       `data: ${JSON.stringify({
         choices: [],
@@ -539,8 +580,14 @@ async function proxyStream({
       ? usage.total_tokens
       : promptTokens + completionTokens;
   const cost = costForTokens(totalTokens, multiplier);
-  applyCredits(user, -cost, 'llm_usage', `${config.name} · ${totalTokens} tokens`);
-  recordChannelStat(config, channel, { ok: true, tokens: totalTokens });
+  // 多退少补
+  const diff = reservedCost - cost;
+  if (diff > 0) {
+    applyCredits(user, diff, 'llm_refund', `${config.name} · 多退 ${diff}`);
+  } else if (diff < 0) {
+    applyCredits(user, diff, 'llm_extra', `${config.name} · 补扣 ${-diff}`);
+  }
+  recordChannelStat(config, channel, { ok: !streamError, tokens: totalTokens });
   bumpStat('llmCalls');
   bumpStat('tokensUsed', totalTokens);
   await saveDb();
