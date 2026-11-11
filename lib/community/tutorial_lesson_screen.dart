@@ -1,10 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:provider/provider.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 
+import '../providers/editor_provider.dart';
+import '../providers/project_provider.dart';
+import '../screens/editor_screen.dart';
 import '../services/tutorial_service.dart';
 import 'community_theme.dart';
+import 'practice_catalog.dart';
+import 'practice_controller.dart';
 
 /// 交互式课程详情
 class TutorialLessonScreen extends StatefulWidget {
@@ -129,6 +135,34 @@ class _TutorialLessonScreenState extends State<TutorialLessonScreen> {
       _quizChecked = false;
     });
     await _saveProgress(_index - 1);
+  }
+
+  /// 进入实操：创建临时练习项目、打开编辑器并显示教学模式悬浮球
+  Future<void> _startPractice() async {
+    final lesson = _lesson;
+    if (lesson == null) return;
+    final spec = PracticeSpec.forLesson(lesson);
+    final controller = PracticeController.instance;
+    final editor = context.read<EditorProvider>();
+    try {
+      await controller.start(
+        context,
+        spec,
+        beforeCheck: () async {
+          await editor.saveAll();
+        },
+      );
+      final path = controller.projectPath;
+      if (path == null || !mounted) return;
+      await context.read<ProjectProvider>().openProject(path, kind: 'classic');
+      if (!mounted) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => const EditorScreen()),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      TToast.showFail('进入实操失败：$e', context: context);
+    }
   }
 
   @override
@@ -358,6 +392,21 @@ class _TutorialLessonScreenState extends State<TutorialLessonScreen> {
             ),
             const SizedBox(height: 10),
             _markdown(step.body),
+            if (_lesson?.track == 'flutter') ...[
+              const SizedBox(height: 14),
+              TButton(
+                child: const Text('进入实操'),
+                onPressed: _startPractice,
+              ),
+              const SizedBox(height: 6),
+              const Text(
+                '进入后会创建临时练习项目，并在右下角显示「教学模式」悬浮球。',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: CommunityTheme.textSecondary,
+                ),
+              ),
+            ],
           ],
         );
       default:

@@ -58,10 +58,10 @@ class AppConfig {
   /// Gitee OAuth 应用 Client ID（凭据在 .env 中留空，配置后即可启用）
   static String get giteeClientId => _env('GITEE_CLIENT_ID');
 
-  /// Gitee OAuth 回调深链
+  /// Gitee OAuth 回调地址（后端桥接页，再跳转 App 深链）
   static String get giteeRedirectUri => _env(
         'GITEE_OAUTH_REDIRECT_URI',
-        'slipe://oauth/gitee/callback',
+        'https://api.lineregre.com/api/oauth/gitee/callback',
       );
 
   /// Gitee 授权范围（projects 用于仓库读写）

@@ -11,6 +11,7 @@ import '../providers/ai_provider.dart';
 import '../providers/editor_provider.dart';
 import '../services/ai_change_journal.dart';
 import '../services/llm_service.dart';
+import '../widgets/ai_interaction_cards.dart';
 import '../widgets/credits_sheet.dart';
 import '../widgets/llm_model_bar.dart';
 import 'settings_screen.dart';
@@ -256,6 +257,26 @@ class _AiChatScreenState extends State<AiChatScreen> {
                 ),
         ),
 
+        // 阶段 TODO（AI 先规划再执行）
+        if (ai.todos.isNotEmpty) AiTodoPanel(todos: ai.todos, isDark: isDark),
+
+        // AI 提问（等待用户决策）
+        if (ai.pendingQuestion != null)
+          AiQuestionCard(
+            question: ai.pendingQuestion!,
+            isDark: isDark,
+            onSubmit: ai.answerPendingQuestion,
+            onCancel: ai.cancel,
+          ),
+
+        // 计划确认（/plan 模式）
+        if (ai.pendingPlan != null)
+          AiPlanConfirmCard(
+            plan: ai.pendingPlan!,
+            isDark: isDark,
+            onResolve: ai.resolvePlanConfirm,
+          ),
+
         // 错误提示
         if (ai.error != null)
           Padding(
@@ -284,6 +305,18 @@ class _AiChatScreenState extends State<AiChatScreen> {
                       ),
                       child: const Text(
                         '去充值',
+                        style: TextStyle(fontSize: 12),
+                      ),
+                    ),
+                  if (ai.canRetry)
+                    TextButton(
+                      onPressed: ai.retryLast,
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        minimumSize: const Size(0, 28),
+                      ),
+                      child: const Text(
+                        '重试',
                         style: TextStyle(fontSize: 12),
                       ),
                     ),
@@ -338,19 +371,22 @@ class _AiChatScreenState extends State<AiChatScreen> {
                   ),
                   const SizedBox(width: 8),
                   IconButton.filled(
-                    onPressed: ai.isThinking ? null : _send,
+                    onPressed: ai.isThinking ? ai.cancel : _send,
                     icon: ai.isThinking
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.white,
-                            ),
-                          )
+                        ? const Icon(Icons.stop_rounded, size: 18)
                         : const Icon(Icons.send, size: 18),
                   ),
                 ],
+              ),
+              const SizedBox(height: 4),
+              // 合规标识：AI 生成内容提示
+              Text(
+                '内容由 AI 生成，仅供参考',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 10,
+                  color: isDark ? Colors.white24 : const Color(0xFFB0B5BC),
+                ),
               ),
             ],
           ),

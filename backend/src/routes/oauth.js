@@ -267,6 +267,22 @@ function sendDeepLinkBridge(res, deepLink, params) {
   res.end(html);
 }
 
+/** Gitee 回调中转：Gitee → 本后端桥接页 → App 深链（App 再用 code 换 token） */
+export async function handleGiteeCallback(req, res) {
+  const url = new URL(req.url, 'http://localhost');
+  const params = {};
+  const state = url.searchParams.get('state');
+  const code = url.searchParams.get('code');
+  const error = url.searchParams.get('error');
+  const description = url.searchParams.get('error_description');
+  if (state) params.state = state;
+  if (code) params.code = code;
+  if (error) params.error = error;
+  if (description) params.error_description = description;
+  if (!code && !error) params.error = 'missing_code';
+  sendDeepLinkBridge(res, 'slipe://oauth/gitee/callback', params);
+}
+
 /** GitHub 回调中转：GitHub → 本后端 → 桥接页回 App 深链（带一次性 ticket） */
 export async function handleGithubCallback(req, res) {
   const url = new URL(req.url, 'http://localhost');

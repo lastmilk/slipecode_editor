@@ -48,9 +48,9 @@ JWT_SECRET=$(openssl rand -hex 32)
 CORS_ORIGIN=*
 GITHUB_REDIRECT_URI=https://api.lineregre.com/api/oauth/github/callback
 GITHUB_DEEP_LINK=slipe://gitoauth2
-GITEE_CLIENT_ID=
+GITEE_CLIENT_ID=44c8a6725c2e8af401b2c9fe43ad17fe2e0d5bf5a98b3fa2b8923ec8006b1d46
 GITEE_CLIENT_SECRET=
-GITEE_REDIRECT_URI=slipe://oauth/gitee/callback
+GITEE_REDIRECT_URI=https://api.lineregre.com/api/oauth/gitee/callback
 EOF
   chmod 600 "$APP/.env"
   echo "已生成 $APP/.env（含随机 JWT_SECRET）"

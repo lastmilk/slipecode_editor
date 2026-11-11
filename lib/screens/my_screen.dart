@@ -10,8 +10,6 @@ import '../providers/gitee_provider.dart';
 import '../providers/github_provider.dart';
 import '../providers/settings_provider.dart';
 import '../widgets/image_crop_dialog.dart';
-import '../widgets/main_bottom_nav.dart';
-import '../widgets/project_creation_flow.dart';
 import 'account_screen.dart';
 import 'authorization_screen.dart';
 import 'credit_logs_screen.dart';
@@ -233,10 +231,6 @@ class _MyScreenState extends State<MyScreen> {
         ],
       ),
       body: account.isSignedIn ? _buildProfile(account, isDark) : _buildSignedOut(isDark),
-      bottomNavigationBar: MainBottomNav(
-        current: MainTab.my,
-        onCenterTap: () => showCreateProjectFlow(context),
-      ),
     );
   }
 

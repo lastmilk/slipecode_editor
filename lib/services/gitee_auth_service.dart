@@ -161,10 +161,13 @@ class GiteeAuthService {
   }
 
   bool _isCallbackUri(Uri uri) {
-    final expected = Uri.parse(AppConfig.giteeRedirectUri);
-    if (uri.scheme == expected.scheme &&
-        uri.host == expected.host &&
-        uri.path == expected.path) {
+    // Gitee 回调先到后端桥接页，再由桥接页跳到 App 的固定深链；
+    // 该深链与 OAuth 的 redirect_uri（https 地址）是两回事。
+    const expected = 'slipe://oauth/gitee/callback';
+    final target = Uri.parse(expected);
+    if (uri.scheme == target.scheme &&
+        uri.host == target.host &&
+        uri.path == target.path) {
       return true;
     }
     // 兼容旧 scheme：slipecode://oauth/gitee/callback

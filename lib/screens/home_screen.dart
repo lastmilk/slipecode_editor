@@ -4,7 +4,6 @@ import 'dart:math';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../l10n/app_localizations.dart';
 import '../models/project.dart';
@@ -15,8 +14,6 @@ import '../services/loader_project_service.dart';
 import '../services/project_history_service.dart';
 import '../services/saying_service.dart';
 import '../widgets/app_background.dart';
-import '../widgets/main_bottom_nav.dart';
-import '../widgets/project_creation_flow.dart';
 import '../widgets/typewriter_text.dart';
 import 'design_draft_editor_screen.dart';
 import 'editor_screen.dart';
@@ -30,10 +27,10 @@ class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
   @override
-  State<HomeScreen> createState() => _HomeScreenState();
+  State<HomeScreen> createState() => HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen>
+class HomeScreenState extends State<HomeScreen>
     with TickerProviderStateMixin {
   List<Project> _history = [];
   String _saying = '';
@@ -70,33 +67,7 @@ class _HomeScreenState extends State<HomeScreen>
     // 项目默认存放在应用私有目录，外部项目通过系统文件选择器导入。
     _loadHistory();
     _loadSaying();
-    _showSwipeHintOnce();
   }
-
-  /// 首次进入首页时提示「右划进入社区」
-  Future<void> _showSwipeHintOnce() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      if (prefs.getBool('slipe_community_swipe_hint') == true) return;
-      await prefs.setBool('slipe_community_swipe_hint', true);
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('提示：在主界面右划可进入社区'),
-          duration: Duration(seconds: 4),
-        ),
-      );
-    } catch (_) {
-      // 提示失败不影响主流程
-    }
-  }
-
-  /// 右划进入社区（底部导航同样可以进入）
-  Future<void> _openCommunity() async {
-    openMainTab(context, MainTab.community);
-  }
-
-  double _dragStartX = 0;
 
   @override
   void dispose() {
@@ -147,6 +118,9 @@ class _HomeScreenState extends State<HomeScreen>
       _loadingHistory = false;
     });
   }
+
+  /// 供外部（底栏新建项目后）刷新项目列表
+  Future<void> reloadHistory() => _loadHistory();
 
   /// 打开列表条目：设计稿 → 图编排器；其余 → 磁盘项目
   Future<void> _openEntry(Project project) async {
@@ -291,18 +265,7 @@ class _HomeScreenState extends State<HomeScreen>
     final showBackground =
         AppBackground.shouldShow(settings, isIdeScreen: false);
 
-    return GestureDetector(
-      behavior: HitTestBehavior.translucent,
-      // 右划进入社区；只响应从左边缘开始的水平右滑，避免与横向筛选条冲突
-      onHorizontalDragStart: (details) {
-        _dragStartX = details.globalPosition.dx;
-      },
-      onHorizontalDragEnd: (details) {
-        if (_dragStartX <= 64 && (details.primaryVelocity ?? 0) > 300) {
-          _openCommunity();
-        }
-      },
-      child: Scaffold(
+    return Scaffold(
       body: AppBackground.wrap(
         isIdeScreen: false,
         child: Container(
@@ -410,15 +373,6 @@ class _HomeScreenState extends State<HomeScreen>
         ),
         ),
       ),
-      // 主界面底栏：首页 / 社区 / ＋ / 文档 / 我的
-      bottomNavigationBar: MainBottomNav(
-        current: MainTab.home,
-        onCenterTap: () => showCreateProjectFlow(
-          context,
-          onDone: _loadHistory,
-        ),
-      ),
-    ),
     );
   }
 

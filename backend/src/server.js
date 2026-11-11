@@ -99,6 +99,7 @@ import {
   handleUploadWallpaper,
 } from './routes/me.js';
 import {
+  handleGiteeCallback,
   handleGiteeRefresh,
   handleGiteeToken,
   handleGithubCallback,
@@ -211,6 +212,7 @@ const ROUTES = {
   // OAuth
   'POST /api/oauth/gitee/token': handleGiteeToken,
   'POST /api/oauth/gitee/refresh': handleGiteeRefresh,
+  'GET /api/oauth/gitee/callback': handleGiteeCallback,
   'POST /api/oauth/github/token': handleGithubToken,
   'GET /api/oauth/github/callback': handleGithubCallback,
 

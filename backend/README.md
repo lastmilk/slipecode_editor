@@ -46,7 +46,7 @@ npm start
 | `CORS_ORIGIN` | 否 | 允许的跨域来源，默认 `*` |
 | `GITEE_CLIENT_ID` | Gitee 必填 | Gitee 应用的 Client ID |
 | `GITEE_CLIENT_SECRET` | Gitee 必填 | Gitee 应用的 Client Secret |
-| `GITEE_REDIRECT_URI` | 否 | Gitee 回调地址，默认 `slipe://oauth/gitee/callback` |
+| `GITEE_REDIRECT_URI` | 否 | Gitee 回调地址，默认 `https://api.lineregre.com/api/oauth/gitee/callback`（后端桥接页再跳 `slipe://oauth/gitee/callback`） |
 | `GITHUB_CLIENT_ID` | GitHub 必填 | GitHub OAuth App 的 Client ID |
 | `GITHUB_CLIENT_SECRET` | GitHub 必填 | GitHub OAuth App 的 Client Secret |
 | `GITHUB_REDIRECT_URI` | 否 | GitHub OAuth App 里登记的 callback URL，默认 `https://api.lineregre.com/api/oauth/github/callback` |

@@ -71,6 +71,13 @@ class AiProvider extends ChangeNotifier {
       terminal: terminal,
     );
     _agent = AgentService(_project, _toolbox);
+    _toolbox
+      ..onAskUser = _askUser
+      ..onSubmitPlan = _submitPlan
+      ..onTodoUpdate = (todos) {
+        _todos = List.unmodifiable(todos);
+        _safeNotify();
+      };
   }
 
   final SettingsProvider _settings;
@@ -101,6 +108,16 @@ class AiProvider extends ChangeNotifier {
 
   /// 计划模式（/plan 指令开启）：AI 只制定计划，用户确认后再执行
   bool _planMode = false;
+
+  // 阶段 TODO / 用户提问 / 计划确认
+  List<AgentTodoItem> _todos = const [];
+  Map<String, dynamic>? _pendingQuestion;
+  Completer<String>? _questionCompleter;
+  Map<String, dynamic>? _pendingPlan;
+  Completer<bool>? _planCompleter;
+  bool _cancelRequested = false;
+  String? _lastUserText;
+  bool _planApprovedInRun = false;
 
   // 对话记录
   bool _historyLoaded = false;
@@ -139,6 +156,19 @@ class AiProvider extends ChangeNotifier {
 
   /// 是否为计划模式（/plan）：AI 只制定计划，不执行写操作
   bool get planMode => _planMode;
+
+  /// 当前任务的阶段 TODO
+  List<AgentTodoItem> get todos => _todos;
+
+  /// 等待用户回答的问题
+  Map<String, dynamic>? get pendingQuestion => _pendingQuestion;
+
+  /// 等待用户确认的计划
+  Map<String, dynamic>? get pendingPlan => _pendingPlan;
+
+  /// 是否可以在失败 / 中断后重试
+  bool get canRetry =>
+      _error != null && _lastUserText != null && !isThinking;
 
   /// VibeCoding 是否正在执行（编辑器需锁定）
   bool get vibeBusy => _vibeBusy;
@@ -363,6 +393,109 @@ class AiProvider extends ChangeNotifier {
     await sendMessage('计划已确认，请严格按照上述计划开始执行。');
   }
 
+  // ---------------------------------------------------------------------------
+  // 提问 / 计划确认 / 中断与重试
+  // ---------------------------------------------------------------------------
+
+  Future<String> _askUser(
+    String question,
+    List<String> options,
+    bool allowCustom,
+  ) {
+    _questionCompleter = Completer<String>();
+    _pendingQuestion = {
+      'question': question,
+      'options': options,
+      'allowCustom': allowCustom,
+    };
+    _safeNotify();
+    return _questionCompleter!.future;
+  }
+
+  /// 回答 AI 的提问，Agent 会带着答案继续执行
+  void answerPendingQuestion(String answer) {
+    final completer = _questionCompleter;
+    _pendingQuestion = null;
+    _questionCompleter = null;
+    final text = answer.trim();
+    if (completer != null && !completer.isCompleted) {
+      completer.complete(text.isEmpty ? '（用户未填写）' : text);
+    }
+    _safeNotify();
+  }
+
+  Future<bool> _submitPlan(String title, String markdown) {
+    _planCompleter = Completer<bool>();
+    _pendingPlan = {'title': title, 'markdown': markdown};
+    _safeNotify();
+    return _planCompleter!.future;
+  }
+
+  /// 用户确认 / 拒绝计划
+  void resolvePlanConfirm(bool approved) {
+    final completer = _planCompleter;
+    _pendingPlan = null;
+    _planCompleter = null;
+    if (completer != null && !completer.isCompleted) {
+      completer.complete(approved);
+    }
+    if (approved) {
+      _planMode = false;
+      _planApprovedInRun = true;
+    }
+    _safeNotify();
+  }
+
+  /// 强制中断当前生成（包括等待用户回答 / 确认计划的暂停状态）
+  void cancel() {
+    if (_status != AiStatus.thinking &&
+        _pendingQuestion == null &&
+        _pendingPlan == null) {
+      return;
+    }
+    _cancelRequested = true;
+    _pendingQuestion = null;
+    final question = _questionCompleter;
+    _questionCompleter = null;
+    if (question != null && !question.isCompleted) {
+      question.complete('用户已中断本次任务');
+    }
+    _pendingPlan = null;
+    final plan = _planCompleter;
+    _planCompleter = null;
+    if (plan != null && !plan.isCompleted) {
+      plan.complete(false);
+    }
+    _status = AiStatus.idle;
+    _isStreaming = false;
+    _streamingText = '';
+    _streamingReasoning = '';
+    _error = '已中断 AI 生成';
+    _safeNotify();
+  }
+
+  /// 重试上一条用户消息（生成失败或被中断后可用）
+  Future<void> retryLast() async {
+    final text = _lastUserText;
+    if (text == null || text.trim().isEmpty || isThinking) return;
+    // 回滚到最后一条用户消息之前，避免重复气泡
+    while (_timeline.isNotEmpty && _timeline.last is! ChatMessage) {
+      _timeline.removeLast();
+    }
+    if (_timeline.isNotEmpty &&
+        _timeline.last is ChatMessage &&
+        (_timeline.last as ChatMessage).role == ChatRole.user) {
+      _timeline.removeLast();
+    }
+    if (_messages.isNotEmpty && _messages.last.role == ChatRole.user) {
+      _messages.removeLast();
+    }
+    _error = null;
+    _status = AiStatus.idle;
+    _safeNotify();
+    await sendMessage(text);
+  }
+
   /// 发送一条用户消息，Agent 会自动调用工具完成任务（流式输出）
   ///
   /// [images] 为图片附件（多模态输入）；[attachmentContext] 为文本附件内容，
@@ -419,6 +552,12 @@ class AiProvider extends ChangeNotifier {
     _messages.add(userMessage);
     _timeline.add(userMessage);
     _steps.clear();
+    _todos = const [];
+    _pendingQuestion = null;
+    _pendingPlan = null;
+    _cancelRequested = false;
+    _lastUserText = text.trim();
+    _planApprovedInRun = false;
     _status = AiStatus.thinking;
     _error = null;
     _isStreaming = true;
@@ -526,6 +665,7 @@ class AiProvider extends ChangeNotifier {
         onReasoning: onReasoning,
         extraSystemPrompt: extraSkill,
         planOnly: planOnly,
+        isCancelled: () => _cancelRequested,
       );
       _isStreaming = false;
       _streamingText = '';
@@ -534,7 +674,7 @@ class AiProvider extends ChangeNotifier {
         role: ChatRole.assistant,
         content: result.content,
         reasoning: result.reasoning.isEmpty ? null : result.reasoning,
-        kind: planOnly ? 'plan' : 'normal',
+        kind: (planOnly && !_planApprovedInRun) ? 'plan' : 'normal',
         segments: _streamSegments.isEmpty
             ? null
             : List<ChatSegment>.from(_streamSegments),
@@ -550,7 +690,9 @@ class AiProvider extends ChangeNotifier {
             id: 'ai',
             kind: 'ai',
             title: 'SLIPE AI',
-            text: planOnly ? '计划已生成，等待确认' : '任务已完成',
+            text: (planOnly && !_planApprovedInRun)
+                ? '计划已生成，等待确认'
+                : '任务已完成',
           ),
         );
       }
@@ -558,9 +700,13 @@ class AiProvider extends ChangeNotifier {
       _isStreaming = false;
       _streamingText = '';
       _streamingReasoning = '';
-      _error = '$e';
+      _error = e is AgentCancelled ? '已中断 AI 生成' : '$e';
       _status = AiStatus.error;
       if (liveNotify) unawaited(LiveTaskService.instance.stop('ai'));
+    } finally {
+      _pendingQuestion = null;
+      _pendingPlan = null;
+      _cancelRequested = false;
     }
     _streamSegments.clear();
     _safeNotify();

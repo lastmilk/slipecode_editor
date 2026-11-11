@@ -17,7 +17,7 @@ import 'providers/github_provider.dart';
 import 'providers/project_provider.dart';
 import 'providers/settings_provider.dart';
 import 'providers/terminal_provider.dart';
-import 'screens/home_screen.dart';
+import 'screens/main_shell.dart';
 import 'services/app_globals.dart';
 import 'services/ai_extensions_service.dart';
 import 'services/custom_payload_service.dart';
@@ -232,7 +232,7 @@ class SLIPEApp extends StatelessWidget {
             // 政策门禁：未同意《用户协议》与《隐私政策》时弹窗确认，
             // 不同意则进入受限模式（应用锁之上、主页之下）
             home: AppLockGate(
-              child: PolicyGate(child: HomeScreen()),
+              child: PolicyGate(child: MainShell()),
             ),
           );
         },

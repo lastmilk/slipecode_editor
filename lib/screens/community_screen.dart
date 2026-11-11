@@ -8,17 +8,16 @@ import '../community/feed_tab.dart';
 import '../community/my_tab.dart';
 import '../community/payload_tab.dart';
 import '../community/tutorial_list_screen.dart';
-import '../widgets/main_bottom_nav.dart';
 
 /// 社区主页：推荐 / 教程 / Payload / 我的
 class CommunityScreen extends StatefulWidget {
   const CommunityScreen({super.key});
 
   @override
-  State<CommunityScreen> createState() => _CommunityScreenState();
+  State<CommunityScreen> createState() => CommunityScreenState();
 }
 
-class _CommunityScreenState extends State<CommunityScreen>
+class CommunityScreenState extends State<CommunityScreen>
     with SingleTickerProviderStateMixin {
   late final TabController _tab;
 
@@ -40,6 +39,9 @@ class _CommunityScreenState extends State<CommunityScreen>
       _tab.animateTo(0);
     }
   }
+
+  /// 供底栏中间的「发帖」按钮调用
+  Future<void> compose() => _compose();
 
   @override
   Widget build(BuildContext context) {
@@ -98,12 +100,6 @@ class _CommunityScreenState extends State<CommunityScreen>
             const PayloadTab(),
             const MyTab(),
           ],
-        ),
-        bottomNavigationBar: MainBottomNav(
-          current: MainTab.community,
-          centerIcon: Icons.edit_outlined,
-          centerLabel: '发帖',
-          onCenterTap: _compose,
         ),
       ),
     );

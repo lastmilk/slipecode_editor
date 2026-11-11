@@ -14,6 +14,7 @@ import '../providers/project_provider.dart';
 import '../services/git_host.dart';
 import '../services/github_api_service.dart' show WorkflowJob, WorkflowStep;
 import '../widgets/log_console.dart';
+import 'build_downloads_screen.dart';
 
 /// 云端构建页面
 ///
@@ -310,7 +311,19 @@ class _BuildScreenState extends State<BuildScreen> {
         !_repoSetupRunning;
 
     return Scaffold(
-      appBar: AppBar(title: Text(t('build.title'))),
+      appBar: AppBar(
+        title: Text(t('build.title')),
+        actions: [
+          IconButton(
+            tooltip: '构建产物下载',
+            icon: const Icon(Icons.download_for_offline_outlined),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const BuildDownloadsScreen()),
+            ),
+          ),
+          const SizedBox(width: 4),
+        ],
+      ),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: _buildCloudSection(

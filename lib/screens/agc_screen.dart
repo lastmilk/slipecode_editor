@@ -16,6 +16,7 @@ import '../services/ai_attachment_service.dart';
 import '../services/ai_extensions_service.dart';
 import '../services/conversation_service.dart';
 import '../services/llm_service.dart';
+import '../widgets/ai_interaction_cards.dart';
 import '../widgets/llm_model_bar.dart';
 import '../widgets/mcp_edit_dialog.dart';
 import 'settings_screen.dart';
@@ -274,6 +275,26 @@ class _AgcScreenState extends State<AgcScreen> {
                 ),
         ),
 
+        // 阶段 TODO（AI 先规划再执行）
+        if (ai.todos.isNotEmpty) AiTodoPanel(todos: ai.todos, isDark: isDark),
+
+        // AI 提问（等待用户决策）
+        if (ai.pendingQuestion != null)
+          AiQuestionCard(
+            question: ai.pendingQuestion!,
+            isDark: isDark,
+            onSubmit: ai.answerPendingQuestion,
+            onCancel: ai.cancel,
+          ),
+
+        // 计划确认（/plan 模式）
+        if (ai.pendingPlan != null)
+          AiPlanConfirmCard(
+            plan: ai.pendingPlan!,
+            isDark: isDark,
+            onResolve: ai.resolvePlanConfirm,
+          ),
+
         // 错误提示
         if (ai.error != null)
           Padding(
@@ -285,9 +306,25 @@ class _AgcScreenState extends State<AgcScreen> {
                 color: Colors.red.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(8),
               ),
-              child: Text(
-                ai.error!,
-                style: TextStyle(fontSize: 12, color: Colors.red.shade700),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      ai.error!,
+                      style:
+                          TextStyle(fontSize: 12, color: Colors.red.shade700),
+                    ),
+                  ),
+                  if (ai.canRetry)
+                    TextButton(
+                      onPressed: ai.retryLast,
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        minimumSize: const Size(0, 28),
+                      ),
+                      child: const Text('重试', style: TextStyle(fontSize: 12)),
+                    ),
+                ],
               ),
             ),
           ),
@@ -321,6 +358,7 @@ class _AgcScreenState extends State<AgcScreen> {
           controller: _inputController,
           busy: ai.isThinking,
           onSend: _send,
+          onStop: ai.cancel,
           onAttach: ai.isThinking ? null : _showAttachmentSheet,
         ),
       ],
@@ -1342,12 +1380,16 @@ class _AgcInputBar extends StatelessWidget {
     required this.controller,
     required this.busy,
     required this.onSend,
+    this.onStop,
     this.onAttach,
   });
 
   final TextEditingController controller;
   final bool busy;
   final VoidCallback onSend;
+
+  /// 中断当前 AI 生成
+  final VoidCallback? onStop;
 
   /// 选择附件（图片 / 文件）；为 null 时隐藏入口
   final VoidCallback? onAttach;
@@ -1359,7 +1401,10 @@ class _AgcInputBar extends StatelessWidget {
       top: false,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(12, 6, 12, 10),
-        child: Container(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
           padding: const EdgeInsets.fromLTRB(14, 4, 6, 4),
           decoration: BoxDecoration(
             color: isDark ? const Color(0xFF26262B) : Colors.white,
@@ -1417,21 +1462,24 @@ class _AgcInputBar extends StatelessWidget {
                     backgroundColor: const Color(0xFF2D6CF6),
                     minimumSize: const Size(38, 38),
                   ),
-                  onPressed: busy ? null : onSend,
+                  onPressed: busy ? onStop : onSend,
                   icon: busy
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
-                          ),
-                        )
+                      ? const Icon(Icons.stop_rounded, size: 18)
                       : const Icon(Icons.arrow_upward, size: 18),
                 ),
               ),
             ],
           ),
+        ),
+            const SizedBox(height: 4),
+            Text(
+              '内容由 AI 生成，仅供参考',
+              style: TextStyle(
+                fontSize: 10,
+                color: isDark ? Colors.white24 : const Color(0xFFB0B5BC),
+              ),
+            ),
+          ],
         ),
       ),
     );

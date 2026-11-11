@@ -1,40 +1,9 @@
 import 'package:flutter/material.dart';
 
-import '../screens/community_screen.dart';
-import '../screens/docs_screen.dart';
-import '../screens/my_screen.dart';
 import 'project_creation_flow.dart';
 
 /// 底部导航的四个主页面
 enum MainTab { home, community, docs, my }
-
-/// 切换到主页面
-///
-/// 采用「保留首页、替换上层页面」的方式切换，避免多次点击后
-/// 产生层层叠加的返回栈；首页本身则直接回退到栈底。
-void openMainTab(BuildContext context, MainTab tab) {
-  if (tab == MainTab.home) {
-    Navigator.of(context).popUntil((route) => route.isFirst);
-    return;
-  }
-  Navigator.of(context).pushAndRemoveUntil(
-    MaterialPageRoute(builder: (_) => _screenFor(tab)),
-    (route) => route.isFirst,
-  );
-}
-
-Widget _screenFor(MainTab tab) {
-  switch (tab) {
-    case MainTab.community:
-      return const CommunityScreen();
-    case MainTab.docs:
-      return const DocsScreen();
-    case MainTab.my:
-      return const MyScreen();
-    case MainTab.home:
-      return const SizedBox.shrink();
-  }
-}
 
 /// 主界面底栏（参考贝壳找房的结构：四个文字入口 + 中间凸起的圆形按钮）
 ///
@@ -43,6 +12,7 @@ class MainBottomNav extends StatelessWidget {
   const MainBottomNav({
     super.key,
     required this.current,
+    required this.onSelect,
     this.onCenterTap,
     this.centerIcon,
     this.centerLabel,
@@ -50,6 +20,9 @@ class MainBottomNav extends StatelessWidget {
 
   /// 当前所在主页面
   final MainTab current;
+
+  /// 点击四个主入口时回调（由 MainShell 负责切换页面）
+  final ValueChanged<MainTab> onSelect;
 
   /// 中间按钮的点击行为（不传则默认打开新建项目）
   final VoidCallback? onCenterTap;
@@ -98,11 +71,11 @@ class MainBottomNav extends StatelessWidget {
             children: [
               Row(
                 children: [
-                  _tab(context, MainTab.home, primary, isDark),
-                  _tab(context, MainTab.community, primary, isDark),
+                  _tab(MainTab.home, primary, isDark),
+                  _tab(MainTab.community, primary, isDark),
                   const SizedBox(width: 78),
-                  _tab(context, MainTab.docs, primary, isDark),
-                  _tab(context, MainTab.my, primary, isDark),
+                  _tab(MainTab.docs, primary, isDark),
+                  _tab(MainTab.my, primary, isDark),
                 ],
               ),
               Align(
@@ -120,7 +93,6 @@ class MainBottomNav extends StatelessWidget {
   }
 
   Widget _tab(
-    BuildContext context,
     MainTab tab,
     Color primary,
     bool isDark,
@@ -133,7 +105,7 @@ class MainBottomNav extends StatelessWidget {
 
     return Expanded(
       child: InkWell(
-        onTap: selected ? null : () => openMainTab(context, tab),
+        onTap: selected ? null : () => onSelect(tab),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [

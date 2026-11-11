@@ -13,6 +13,24 @@ import '../services/dart_class_template.dart';
 import '../services/external_mcp_manager.dart';
 import '../services/file_service.dart';
 
+/// 一条阶段任务（AI 在执行前先拆分 TODO，并逐步更新状态）
+class AgentTodoItem {
+  final String content;
+
+  /// pending / in_progress / completed
+  final String status;
+
+  const AgentTodoItem({required this.content, this.status = 'pending'});
+
+  bool get completed => status == 'completed';
+  bool get inProgress => status == 'in_progress';
+
+  factory AgentTodoItem.fromJson(Map<String, dynamic> json) => AgentTodoItem(
+        content: (json['content'] ?? '').toString(),
+        status: (json['status'] ?? 'pending').toString(),
+      );
+}
+
 /// 一次工具调用的展示记录
 ///
 /// [result] 保存工具返回给模型的原始文本，用于在对话流中显式展示执行结果。
@@ -86,6 +104,16 @@ class McpToolbox {
   /// 用户自行配置的第三方 MCP 服务器（可以为空）
   ExternalMcpManager? externalManager;
 
+  /// 向用户提问（由 UI 弹卡片并返回答案）
+  Future<String> Function(String question, List<String> options, bool allowCustom)?
+      onAskUser;
+
+  /// 计划确认（写入临时 Markdown 后询问用户是否执行）
+  Future<bool> Function(String title, String markdown)? onSubmitPlan;
+
+  /// TODO 清单更新回调
+  void Function(List<AgentTodoItem> todos)? onTodoUpdate;
+
   final FileService _fs = FileService();
 
   /// AI 改动默认直接落盘，但会登记到台账，用户可事后撤回
@@ -121,12 +149,14 @@ class McpToolbox {
       name.startsWith(ExternalMcpManager.toolPrefix);
 
   /// 供 LLM 使用的工具定义；[planOnly] 为 true 时只保留读取类工具
+  /// 以及提问 / TODO / 计划确认工具。
   List<Map<String, dynamic>> definitionsFor({bool planOnly = false}) {
     final all = definitions;
-    if (!planOnly) return all;
     return all.where((def) {
       final fn = def['function'];
       final name = fn is Map ? (fn['name'] ?? '').toString() : '';
+      if (name == 'submit_plan') return planOnly;
+      if (!planOnly) return true;
       return !isWriteTool(name);
     }).toList();
   }
@@ -469,6 +499,124 @@ class McpToolbox {
         if (build.isRunning) return '构建已在进行中';
         unawaited(build.startBuild(projectDir: _root!));
         return '已触发云端构建，可在「构建」页面查看进度';
+      },
+    ),
+    McpTool(
+      name: 'update_todo_list',
+      description:
+          '创建或更新本次任务的阶段 TODO 清单。开始执行前先拆分 3-7 个阶段，'
+          '每完成一个阶段就调用本工具更新状态（pending / in_progress / completed）。',
+      parameters: _object({
+        'todos': {
+          'type': 'array',
+          'description': '完整的 TODO 列表（每次传入全部条目）',
+          'items': {
+            'type': 'object',
+            'properties': {
+              'content': _string('阶段描述'),
+              'status': _string('pending / in_progress / completed'),
+            },
+            'required': ['content', 'status'],
+          },
+        },
+      }, required: ['todos']),
+      execute: (args) async {
+        final raw = args['todos'];
+        final todos = <AgentTodoItem>[];
+        if (raw is List) {
+          for (final item in raw) {
+            if (item is Map) {
+              final content = (item['content'] ?? '').toString().trim();
+              if (content.isEmpty) continue;
+              final status = (item['status'] ?? 'pending').toString();
+              todos.add(AgentTodoItem(
+                content: content,
+                status: ['pending', 'in_progress', 'completed'].contains(status)
+                    ? status
+                    : 'pending',
+              ));
+            }
+          }
+        }
+        if (todos.isEmpty) return '错误：todos 不能为空';
+        onTodoUpdate?.call(todos);
+        final done = todos.where((t) => t.completed).length;
+        return '任务清单已更新（$done/${todos.length} 完成）：\n'
+            '${todos.map((t) => '- [${t.status}] ${t.content}').join('\n')}';
+      },
+    ),
+    McpTool(
+      name: 'ask_user',
+      description:
+          '向用户提问，用于关键技术决策或需求不明确时。提问会暂停任务，'
+          '等待用户选择/输入后再继续。计划模式下应优先用于澄清需求。',
+      parameters: _object({
+        'question': _string('要问用户的问题'),
+        'options': {
+          'type': 'array',
+          'description': '可选项（0-5 个，可为空表示自由输入）',
+          'items': {'type': 'string'},
+        },
+        'allow_custom': {
+          'type': 'boolean',
+          'description': '是否允许用户自由输入（默认 true）',
+        },
+      }, required: ['question']),
+      execute: (args) async {
+        final question = (args['question'] ?? '').toString().trim();
+        if (question.isEmpty) return '错误：question 不能为空';
+        final ask = onAskUser;
+        if (ask == null) return '错误：当前环境不支持向用户提问';
+        final options = <String>[];
+        final raw = args['options'];
+        if (raw is List) {
+          for (final item in raw) {
+            final text = item.toString().trim();
+            if (text.isNotEmpty) options.add(text);
+          }
+        }
+        final allowCustom = args['allow_custom'] != false;
+        final answer = await ask(question, options, allowCustom);
+        return '用户回答：$answer';
+      },
+    ),
+    McpTool(
+      name: 'submit_plan',
+      description:
+          '计划模式下把规划文档写入临时 Markdown，并向用户发起「计划确认」。'
+          '用户确认后返回 PLAN_CONFIRMED，即可开始执行；被拒绝时返回 PLAN_REJECTED。',
+      parameters: _object({
+        'title': _string('计划标题'),
+        'markdown': _string('完整的 Markdown 规划文档'),
+      }, required: ['title', 'markdown']),
+      execute: (args) async {
+        final title = (args['title'] ?? '').toString().trim();
+        final markdown = (args['markdown'] ?? '').toString();
+        if (markdown.trim().isEmpty) return '错误：markdown 不能为空';
+        final submit = onSubmitPlan;
+        if (submit == null) return '错误：当前环境不支持计划确认';
+        final root = _root;
+        if (root != null) {
+          try {
+            final dir = Directory(p.join(root, '.slipe', 'plans'));
+            await dir.create(recursive: true);
+            final name =
+                'plan_${DateTime.now().millisecondsSinceEpoch}.md';
+            final header =
+                '# ${title.isEmpty ? '实施计划' : title}\n\n';
+            await File(p.join(dir.path, name))
+                .writeAsString('$header$markdown', flush: true);
+          } catch (_) {
+            // 临时文档写入失败不影响确认流程
+          }
+        }
+        final approved = await submit(
+          title.isEmpty ? '实施计划' : title,
+          markdown,
+        );
+        return approved
+            ? 'PLAN_CONFIRMED：用户已确认计划，请开始执行。'
+            : 'PLAN_REJECTED：用户暂不执行该计划，请等待进一步指示。';
       },
     ),
   ];

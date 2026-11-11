@@ -85,13 +85,21 @@ class AgentService {
     bool Function()? isCancelled,
   }) async {
     var system = await buildSystemPrompt(extraSkill: extraSystemPrompt);
+    system += '\n# 任务执行方式\n'
+        '- 开始执行前，先用 update_todo_list 把任务拆成 3-7 个阶段 TODO；\n'
+        '- 按 TODO 逐步执行，每完成一个阶段立刻调用 update_todo_list 更新状态；\n'
+        '- 需求明确时直接执行，不要为了提问而提问；仅当出现明显需求冲突、'
+        '关键技术决策缺失或信息不足时，才调用 ask_user 向用户提问；\n'
+        '- 回答用户时简洁说明改了什么、下一步做什么。\n';
     if (planOnly) {
       system += '\n# 计划模式（/plan）\n'
           '用户现在只需要一份实施计划，不要做任何实际修改：\n'
+          '- 可以先用 ask_user 澄清关键决策（技术方案、范围、兼容性等），一次问 1-3 个问题；\n'
           '- 可以使用读取类工具（读文件、列目录、搜索代码）来了解现状；\n'
           '- 禁止调用任何写入/修改/删除/构建/终端类工具，第三方 MCP 工具也全部禁用；\n'
-          '- 输出格式：目标 → 现状分析 → 分步实施计划（含涉及文件与改动要点）→ 风险与确认点。\n'
-          '计划要具体、可执行，等待用户确认后再进入实际执行。\n';
+          '- 计划写好后必须调用 submit_plan，把规划文档（目标 → 现状分析 → '
+          '分步实施计划 → 涉及文件 → 风险与确认点）写入临时 Markdown 并发起确认；\n'
+          '- 只有用户在确认卡片上点击「执行计划」后，才允许开始实际修改。\n';
     }
     final messages = <ChatMessage>[
       ChatMessage(role: ChatRole.system, content: system),
@@ -201,6 +209,10 @@ class AgentService {
         }
 
         final result = await toolbox.execute(name, args);
+        // 用户确认计划后，本次运行立即退出计划模式，允许继续执行写操作
+        if (name == 'submit_plan' && result.startsWith('PLAN_CONFIRMED')) {
+          planOnly = false;
+        }
         // 工具结果回填到 step，供对话流显式展示
         step
           ..result = result

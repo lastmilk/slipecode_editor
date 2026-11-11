@@ -215,11 +215,15 @@ class RunArtifact {
   final int sizeInBytes;
   final bool expired;
 
+  /// GitHub 返回的归档下载地址（需要带 token 请求）
+  final String archiveDownloadUrl;
+
   const RunArtifact({
     required this.id,
     required this.name,
     required this.sizeInBytes,
     required this.expired,
+    this.archiveDownloadUrl = '',
   });
 
   factory RunArtifact.fromJson(Map<String, dynamic> json) => RunArtifact(
@@ -227,6 +231,7 @@ class RunArtifact {
     name: json['name'] as String? ?? '',
     sizeInBytes: json['size_in_bytes'] as int? ?? 0,
     expired: json['expired'] as bool? ?? false,
+    archiveDownloadUrl: json['archive_download_url'] as String? ?? '',
   );
 }
 
@@ -654,6 +659,25 @@ class GitHubApiService {
     return runs.first;
   }
 
+  /// 列出仓库最近的 Actions 运行（构建产物下载页使用）
+  Future<List<WorkflowRun>> listRuns(
+    String fullName, {
+    int perPage = 20,
+    int page = 1,
+    String? workflowFile,
+  }) async {
+    final path = workflowFile == null || workflowFile.isEmpty
+        ? '/repos/$fullName/actions/runs'
+        : '/repos/$fullName/actions/workflows/${_workflowRef(workflowFile)}/runs';
+    final json = await _getJson(path, {
+      'per_page': '$perPage',
+      'page': '$page',
+    });
+    return (json['workflow_runs'] as List? ?? [])
+        .map((e) => WorkflowRun.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
   /// 获取运行详情
   Future<WorkflowRun> getRun(String fullName, int runId) async {
     final json = await _getJson('/repos/$fullName/actions/runs/$runId');
@@ -697,13 +721,25 @@ class GitHubApiService {
   ///
   /// 手动跟随 302，避免把 Authorization 头泄露给签名 URL 域名。
   Future<Uint8List> downloadArtifact(String fullName, int artifactId) async {
-    final request =
-        http.Request(
-            'GET',
-            _u('/repos/$fullName/actions/artifacts/$artifactId/zip'),
-          )
-          ..headers.addAll(_headers)
-          ..followRedirects = false;
+    return _downloadArtifactUrl(
+      _u('/repos/$fullName/actions/artifacts/$artifactId/zip'),
+    );
+  }
+
+  /// 通过 artifacts 返回的 archive_download_url 下载产物
+  Future<Uint8List> downloadArtifactByUrl(String archiveDownloadUrl) async {
+    final url = archiveDownloadUrl.trim();
+    if (url.isEmpty) {
+      throw const HttpExceptionWithBody('下载产物失败：缺少 archive_download_url', '');
+    }
+    return _downloadArtifactUrl(Uri.parse(url));
+  }
+
+  /// 手动跟随 302，避免把 Authorization 头泄露给签名 URL 域名。
+  Future<Uint8List> _downloadArtifactUrl(Uri url) async {
+    final request = http.Request('GET', url)
+      ..headers.addAll(_headers)
+      ..followRedirects = false;
     final streamed = await _client.send(request);
     if (streamed.statusCode != 302) {
       final body = await streamed.stream.bytesToString();
