@@ -83,14 +83,17 @@ import {
 } from './routes/github_hosts.js';
 import {
   handleCheckin,
+  handleDeleteAccount,
   handleDeleteWallpaper,
   handleGetAvatar,
   handleGetCreditLogs,
   handleGetCredits,
   handleGetSettings,
   handleGetWallpaper,
+  handleListDevices,
   handleMe,
   handlePutSettings,
+  handleRevokeDevice,
   handleUploadAvatar,
   handleUploadWallpaper,
 } from './routes/me.js';
@@ -214,6 +217,10 @@ const ROUTES = {
   'POST /api/checkin': handleCheckin,
   'GET /api/credits': handleGetCredits,
   'GET /api/credits/logs': handleGetCreditLogs,
+
+  // 账号：登录设备管理 / 注销账号
+  'GET /api/me/devices': handleListDevices,
+  'DELETE /api/me': handleDeleteAccount,
 
   // 商业化：充值套餐与激活码兑换
   'GET /api/billing/plans': handleBillingPlans,
@@ -405,6 +412,12 @@ const DYNAMIC_ROUTES = [
     pattern: /^\/api\/admin\/community\/packages\/([^/]+)\/review$/,
     handler: (req, res, match) =>
       handleAdminReviewCommunity(req, res, decodeURIComponent(match[1])),
+  },
+  {
+    method: 'DELETE',
+    pattern: /^\/api\/me\/devices\/([^/]+)$/,
+    handler: (req, res, match) =>
+      handleRevokeDevice(req, res, decodeURIComponent(match[1])),
   },
   {
     method: 'DELETE',

@@ -240,6 +240,9 @@ const DEFAULT_DB = {
   communityPosts: [],
   communityComments: [],
   communityReports: [],
+  // 登录设备（多端登录管理）与已撤销设备
+  loginDevices: [],
+  revokedDevices: [],
   communitySettings: {
     keywords: DEFAULT_COMMUNITY_KEYWORDS,
     covenant: DEFAULT_COMMUNITY_COVENANT,
@@ -349,6 +352,12 @@ export async function loadDb() {
         ? parsed.communityReports
         : [],
       communitySettings: mergeCommunitySettings(parsed.communitySettings),
+      loginDevices: Array.isArray(parsed.loginDevices)
+        ? parsed.loginDevices
+        : [],
+      revokedDevices: Array.isArray(parsed.revokedDevices)
+        ? parsed.revokedDevices
+        : [],
       activationCodes: Array.isArray(parsed.activationCodes)
         ? parsed.activationCodes
         : [],

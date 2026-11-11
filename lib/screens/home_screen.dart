@@ -8,9 +8,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../l10n/app_localizations.dart';
 import '../models/project.dart';
-import '../providers/account_provider.dart';
-import '../providers/gitee_provider.dart';
-import '../providers/github_provider.dart';
 import '../providers/project_provider.dart';
 import '../providers/settings_provider.dart';
 import '../services/design_draft_service.dart';
@@ -18,16 +15,12 @@ import '../services/loader_project_service.dart';
 import '../services/project_history_service.dart';
 import '../services/saying_service.dart';
 import '../widgets/app_background.dart';
-import '../widgets/github_user_drawer.dart';
+import '../widgets/main_bottom_nav.dart';
+import '../widgets/project_creation_flow.dart';
 import '../widgets/typewriter_text.dart';
-import 'account_screen.dart';
-import 'community_screen.dart';
-import 'create_loader_project_screen.dart';
-import 'create_project_screen.dart';
 import 'design_draft_editor_screen.dart';
 import 'editor_screen.dart';
 import 'settings_screen.dart';
-import 'docs_screen.dart';
 import 'repo_sync_screen.dart';
 
 /// 应用主页
@@ -98,24 +91,9 @@ class _HomeScreenState extends State<HomeScreen>
     }
   }
 
-  /// 右划进入社区（从右侧滑入）
+  /// 右划进入社区（底部导航同样可以进入）
   Future<void> _openCommunity() async {
-    await Navigator.of(context).push(
-      PageRouteBuilder(
-        transitionDuration: const Duration(milliseconds: 260),
-        pageBuilder: (_, animation, _) => const CommunityScreen(),
-        transitionsBuilder: (_, animation, _, child) {
-          final slide = Tween<Offset>(
-            begin: const Offset(1, 0),
-            end: Offset.zero,
-          ).animate(
-            CurvedAnimation(parent: animation, curve: Curves.easeOutCubic),
-          );
-          return SlideTransition(position: slide, child: child);
-        },
-      ),
-    );
-    if (mounted) _loadHistory();
+    openMainTab(context, MainTab.community);
   }
 
   double _dragStartX = 0;
@@ -266,85 +244,12 @@ class _HomeScreenState extends State<HomeScreen>
     await _openProjectPath(path);
   }
 
-  /// 新建入口：Loader 项目（推荐）/ 传统项目 / 设计稿
-  Future<void> _createNewProject() async {
-    final action = await showModalBottomSheet<String>(
-      context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (sheetContext) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Padding(
-              padding: EdgeInsets.fromLTRB(20, 16, 20, 4),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  '创建新项目',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                ),
-              ),
-            ),
-            ListTile(
-              leading: const Icon(Icons.rocket_launch_outlined,
-                  color: Colors.blueAccent),
-              title: const Text('创建 Loader 项目（推荐）'),
-              subtitle: const Text('采用设计稿组装三层 Payload，AI 无感完成项目'),
-              onTap: () => Navigator.pop(sheetContext, 'loader'),
-            ),
-            ListTile(
-              leading: const Icon(Icons.widgets_outlined),
-              title: const Text('创建传统项目'),
-              subtitle: const Text('Flutter / Android / Node / Web 等内置模板'),
-              onTap: () => Navigator.pop(sheetContext, 'classic'),
-            ),
-            ListTile(
-              leading: const Icon(Icons.design_services_outlined,
-                  color: Colors.teal),
-              title: const Text('创建设计稿'),
-              subtitle: const Text('先在可视化编辑器中编排 Payload，稍后用它生成项目'),
-              onTap: () => Navigator.pop(sheetContext, 'draft'),
-            ),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
+  /// 导入仓库（原项目同步里的入口，现与「打开项目」并排）
+  Future<void> _openRepoImport() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const RepoSyncScreen()),
     );
-    if (!mounted || action == null) return;
-
-    switch (action) {
-      case 'loader':
-        final created = await Navigator.of(context).push<bool>(
-          MaterialPageRoute(builder: (_) => const CreateLoaderProjectScreen()),
-        );
-        await _openCreatedProject(created);
-      case 'classic':
-        final created = await Navigator.of(context).push<bool>(
-          MaterialPageRoute(builder: (_) => const CreateProjectScreen()),
-        );
-        await _openCreatedProject(created);
-      case 'draft':
-        // 直接进入设计稿编辑器（新草稿）；已保存草稿可在编辑器右上角管理
-        await Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => const DesignDraftEditorScreen()),
-        );
-        _loadHistory();
-    }
-  }
-
-  /// 创建成功后打开编辑器并刷新历史
-  Future<void> _openCreatedProject(bool? created) async {
-    if (created == true && mounted) {
-      final provider = context.read<ProjectProvider>();
-      if (provider.projectPath != null) {
-        await Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => const EditorScreen()),
-        );
-      }
-      _loadHistory();
-    }
+    if (mounted) _loadHistory();
   }
 
   Future<void> _removeHistory(Project project) async {
@@ -355,75 +260,6 @@ class _HomeScreenState extends State<HomeScreen>
       await ProjectHistoryService.instance.remove(project.path);
     }
     await _loadHistory();
-  }
-
-  /// 登录入口（点击头像 / 右上角登录按钮）
-  ///
-  /// 已登录时直接进入账号页；未登录时弹出可选的登录方式。
-  void _showLoginSheet() {
-    final account = context.read<AccountProvider>();
-    final github = context.read<GitHubProvider>();
-    final gitee = context.read<GiteeProvider>();
-    if (account.isSignedIn || github.isSignedIn || gitee.isSignedIn) {
-      Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => const AccountScreen()),
-      );
-      return;
-    }
-
-    showModalBottomSheet<void>(
-      context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (sheetContext) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 4),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  t('home.loginSheetTitle'),
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                ),
-              ),
-            ),
-            ListTile(
-              leading: const Icon(Icons.account_circle),
-              title: Text(t('home.accountLogin')),
-              subtitle: Text(t('home.accountLoginSub')),
-              onTap: () {
-                Navigator.pop(sheetContext);
-                Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const AccountScreen()),
-                );
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.code),
-              title: const Text('GitHub'),
-              subtitle: Text(t('home.githubSub')),
-              onTap: () async {
-                Navigator.pop(sheetContext);
-                await github.signIn();
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.code_off),
-              title: const Text('Gitee'),
-              subtitle: Text(t('home.giteeSub')),
-              onTap: () async {
-                Navigator.pop(sheetContext);
-                await gitee.signIn();
-              },
-            ),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
-    );
   }
 
   Future<void> _confirmRemove(Project project) async {
@@ -455,9 +291,6 @@ class _HomeScreenState extends State<HomeScreen>
     final showBackground =
         AppBackground.shouldShow(settings, isIdeScreen: false);
 
-    // GitHub 已登录时，点击底部栏 GitHub 头像可弹出用户抽屉
-    final githubSignedIn = context.watch<GitHubProvider>().isSignedIn;
-
     return GestureDetector(
       behavior: HitTestBehavior.translucent,
       // 右划进入社区；只响应从左边缘开始的水平右滑，避免与横向筛选条冲突
@@ -470,8 +303,6 @@ class _HomeScreenState extends State<HomeScreen>
         }
       },
       child: Scaffold(
-      endDrawer: githubSignedIn ? const GitHubUserDrawer() : null,
-      endDrawerEnableOpenDragGesture: false,
       body: AppBackground.wrap(
         isIdeScreen: false,
         child: Container(
@@ -492,37 +323,10 @@ class _HomeScreenState extends State<HomeScreen>
             padding: const EdgeInsets.symmetric(horizontal: 24.0),
             child: Column(
               children: [
-                // 右上角入口：使用文档 / 偏好设置 / SLIPE 账号（登录后隐藏登录按钮）
+                // 右上角只保留偏好设置入口，其余功能已移到底栏 / 我的
                 Row(
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
-                    IconButton(
-                      tooltip: '社区',
-                      icon: const Icon(Icons.forum_outlined),
-                      onPressed: _openCommunity,
-                    ),
-                    IconButton(
-                      tooltip: '同步仓库',
-                      icon: const Icon(Icons.cloud_sync_outlined),
-                      onPressed: () async {
-                        await Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => const RepoSyncScreen(),
-                          ),
-                        );
-                        // 返回首页时刷新，展示刚拉取到本地的项目
-                        _loadHistory();
-                      },
-                    ),
-                    IconButton(
-                      tooltip: '使用文档',
-                      icon: const Icon(Icons.menu_book_outlined),
-                      onPressed: () => Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => const DocsScreen(),
-                        ),
-                      ),
-                    ),
                     IconButton(
                       tooltip: t('home.preferences'),
                       icon: const Icon(Icons.tune),
@@ -532,35 +336,10 @@ class _HomeScreenState extends State<HomeScreen>
                         ),
                       ),
                     ),
-                    Consumer<AccountProvider>(
-                      builder: (context, account, _) => Consumer2<
-                          GitHubProvider, GiteeProvider>(
-                        builder: (context, github, gitee, _) {
-                          final signedIn = account.isSignedIn ||
-                              github.isSignedIn ||
-                              gitee.isSignedIn;
-                          if (signedIn) return const SizedBox.shrink();
-                          return IconButton(
-                            tooltip: t('home.login'),
-                            icon: const Icon(Icons.login),
-                            onPressed: _showLoginSheet,
-                          );
-                        },
-                      ),
-                    ),
-                    IconButton(
-                      tooltip: t('home.account'),
-                      icon: const Icon(Icons.manage_accounts),
-                      onPressed: () => Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => const AccountScreen(),
-                        ),
-                      ),
-                    ),
                   ],
                 ),
 
-                // 头像 + 自定义标题（点击头像可登录）
+                // 头像 + 自定义标题（账号信息统一在「我的」中查看）
                 FadeTransition(
                   opacity: _logoFade,
                   child: Consumer<SettingsProvider>(
@@ -568,12 +347,9 @@ class _HomeScreenState extends State<HomeScreen>
                       final settings = settingsProvider.settings;
                       return Column(
                         children: [
-                          GestureDetector(
-                            onTap: _showLoginSheet,
-                            child: _HomeAvatar(
-                              avatarPath: settings.avatarPath,
-                              isDark: isDark,
-                            ),
+                          _HomeAvatar(
+                            avatarPath: settings.avatarPath,
+                            isDark: isDark,
                           ),
                           const SizedBox(height: 8),
                           Text(
@@ -627,40 +403,21 @@ class _HomeScreenState extends State<HomeScreen>
                   ),
                 ),
 
-                const SizedBox(height: 16),
-
-                // 创建 / 打开 并排按钮
-                Row(
-                  children: [
-                    Expanded(
-                      child: _ActionButton(
-                        icon: Icons.add,
-                        label: t('home.createProject'),
-                        onTap: _createNewProject,
-                        isDark: isDark,
-                        primary: true,
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: _ActionButton(
-                        icon: Icons.folder_open,
-                        label: t('home.openProject'),
-                        onTap: _openExistingProject,
-                        isDark: isDark,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 8),
               ],
             ),
           ),
         ),
         ),
       ),
-      // 底部 Git 平台登录状态栏（GitHub / Gitee）
-      bottomNavigationBar: const _GitStatusBar(),
+      // 主界面底栏：首页 / 社区 / ＋ / 文档 / 我的
+      bottomNavigationBar: MainBottomNav(
+        current: MainTab.home,
+        onCenterTap: () => showCreateProjectFlow(
+          context,
+          onDone: _loadHistory,
+        ),
+      ),
     ),
     );
   }
@@ -675,6 +432,37 @@ class _HomeScreenState extends State<HomeScreen>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        // 打开项目 / 导入仓库（位于一言文案与筛选条之间）
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            OutlinedButton.icon(
+              onPressed: _openExistingProject,
+              icon: const Icon(Icons.folder_open, size: 16),
+              label: Text(
+                t('home.openProject'),
+                style: const TextStyle(fontSize: 12),
+              ),
+              style: OutlinedButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              ),
+            ),
+            OutlinedButton.icon(
+              onPressed: _openRepoImport,
+              icon: const Icon(Icons.cloud_download_outlined, size: 16),
+              label: const Text('导入仓库', style: TextStyle(fontSize: 12)),
+              style: OutlinedButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
         _buildKindFilter(),
         const SizedBox(height: 8),
         Expanded(
@@ -1047,318 +835,6 @@ class _ProjectCard extends StatelessWidget {
           ),
         ),
       ),
-    );
-  }
-}
-
-/// 操作按钮（创建/打开）
-class _ActionButton extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-  final bool isDark;
-  final bool primary;
-
-  const _ActionButton({
-    required this.icon,
-    required this.label,
-    required this.onTap,
-    required this.isDark,
-    this.primary = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: primary
-          ? Colors.blueAccent
-          : (isDark ? const Color(0xFF2D2D30) : Colors.white),
-      borderRadius: BorderRadius.circular(12),
-      elevation: primary ? 4 : 1,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 16),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                icon,
-                color: primary ? Colors.white : Colors.blueAccent,
-                size: 22,
-              ),
-              const SizedBox(width: 8),
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
-                  color:
-                      primary ? Colors.white : (isDark ? Colors.white : Colors.black87),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// 底部 Git 平台登录状态栏（GitHub / Gitee 并排）
-class _GitStatusBar extends StatelessWidget {
-  const _GitStatusBar();
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-
-    return Container(
-      decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1B1B1D) : Colors.white,
-        border: Border(
-          top: BorderSide(
-            color: isDark ? const Color(0xFF3C3C3C) : const Color(0xFFDDDDDD),
-          ),
-        ),
-      ),
-      child: SafeArea(
-        top: false,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          child: Row(
-            children: [
-              Expanded(
-                child: Consumer<GitHubProvider>(
-                  builder: (context, github, _) => _HostAuthTile(
-                    icon: Icons.code,
-                    label: 'GitHub',
-                    color: isDark ? Colors.white : Colors.black87,
-                    isDark: isDark,
-                    signingIn:
-                        github.status == GitHubAuthStatus.signingIn,
-                    signedIn: github.isSignedIn,
-                    login: github.user?.login,
-                    avatarUrl: github.user?.avatarUrl,
-                    onSignIn: () => github.signIn().then((ok) {
-                      if (!ok && github.error != null && context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text(github.error!)),
-                        );
-                      }
-                    }),
-                    onSignOut: github.signOut,
-                    onCancel: github.cancelSignIn,
-                    // 已登录时点击头像区域弹出用户抽屉
-                    onTap: github.isSignedIn
-                        ? () => Scaffold.of(context).openEndDrawer()
-                        : null,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Consumer<GiteeProvider>(
-                  builder: (context, gitee, _) => _HostAuthTile(
-                    icon: Icons.cloud,
-                    label: 'Gitee',
-                    color: const Color(0xFFC71D23),
-                    isDark: isDark,
-                    signingIn: gitee.status == GiteeAuthStatus.signingIn,
-                    signedIn: gitee.isSignedIn,
-                    login: gitee.user?.login,
-                    avatarUrl: gitee.user?.avatarUrl,
-                    onSignIn: () => gitee.signIn().then((ok) {
-                      if (!ok && gitee.error != null && context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text(gitee.error!)),
-                        );
-                      }
-                    }),
-                    onSignOut: gitee.signOut,
-                    onCancel: gitee.cancelSignIn,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// 单个平台的登录状态小卡片
-class _HostAuthTile extends StatelessWidget {
-  const _HostAuthTile({
-    required this.icon,
-    required this.label,
-    required this.color,
-    required this.isDark,
-    required this.signingIn,
-    required this.signedIn,
-    required this.onSignIn,
-    required this.onSignOut,
-    required this.onCancel,
-    this.login,
-    this.avatarUrl,
-    this.onTap,
-  });
-
-  final IconData icon;
-  final String label;
-  final Color color;
-  final bool isDark;
-  final bool signingIn;
-  final bool signedIn;
-  final VoidCallback onSignIn;
-  final VoidCallback onSignOut;
-  final VoidCallback onCancel;
-  final String? login;
-  final String? avatarUrl;
-
-  /// 已登录状态下点击头像/信息区（如 GitHub 弹出用户抽屉）
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    if (signingIn) {
-      // 授权中点击可取消（例如浏览器被拦截、用户中途返回时不会一直转圈）
-      return _shell(
-        GestureDetector(
-          onTap: onCancel,
-          child: Tooltip(
-            message: t('common.cancel'),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const SizedBox(
-                  width: 14,
-                  height: 14,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
-                const SizedBox(width: 8),
-                Flexible(
-                  child: Text(
-                    '${t('home.signingIn')} $label…',
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 12),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
-    }
-    if (signedIn) {
-      return _shell(
-        Row(
-          children: [
-            // 头像与信息区可点击（如打开 GitHub 用户抽屉）
-            Expanded(
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: onTap,
-                child: Row(
-                  children: [
-                    CircleAvatar(
-                      radius: 13,
-                      backgroundColor: color.withValues(alpha: 0.2),
-                      backgroundImage: (avatarUrl ?? '').isNotEmpty
-                          ? NetworkImage(avatarUrl!)
-                          : null,
-                      child: (avatarUrl ?? '').isEmpty
-                          ? Icon(icon, size: 14, color: color)
-                          : null,
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            '@${login ?? ''}',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          Text(
-                            label,
-                            style: TextStyle(
-                              fontSize: 10,
-                              color: isDark ? Colors.white38 : Colors.black45,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            IconButton(
-              visualDensity: VisualDensity.compact,
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-              tooltip: '${t('home.signOut')} $label',
-              icon: Icon(
-                Icons.logout,
-                size: 16,
-                color: isDark ? Colors.white54 : Colors.black45,
-              ),
-              onPressed: onSignOut,
-            ),
-          ],
-        ),
-      );
-    }
-    return _shell(
-      SizedBox(
-        width: double.infinity,
-        child: TextButton(
-          onPressed: onSignIn,
-          style: TextButton.styleFrom(
-            foregroundColor: color,
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            visualDensity: VisualDensity.compact,
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(icon, size: 16),
-              const SizedBox(width: 6),
-              Flexible(
-                child: Text(
-                  '${t('home.login')} $label',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 12),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _shell(Widget child) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF262628) : const Color(0xFFF3F5F7),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: isDark ? const Color(0xFF3C3C3C) : const Color(0xFFE0E4E8),
-        ),
-      ),
-      child: child,
     );
   }
 }

@@ -15,7 +15,7 @@ import {
 } from '../config.js';
 import { UPLOAD_DIR, getDb, saveDb, todayStr } from '../db.js';
 import { readJson, sendBytes, sendJson } from '../http.js';
-import { publicUser, requireUser } from '../security.js';
+import { publicUser, requireUser, verifyPassword } from '../security.js';
 
 export async function handleMe(req, res) {
   const user = requireUser(req);
@@ -303,4 +303,73 @@ export async function handleGetCredits(req, res) {
     checkinReward: checkinRewardFor(user),
     membership: membershipSnapshot(user),
   });
+}
+
+// ---------------------------------------------------------------------------
+// 登录设备管理
+// ---------------------------------------------------------------------------
+
+export async function handleListDevices(req, res) {
+  const user = requireUser(req);
+  const db = getDb();
+  const devices = (db.loginDevices || [])
+    .filter((d) => d.userId === user.id)
+    .sort((a, b) =>
+      String(b.lastActiveAt || '').localeCompare(String(a.lastActiveAt || '')),
+    )
+    .map((d) => ({
+      id: d.id,
+      name: d.name || '未知设备',
+      platform: d.platform || '',
+      ip: d.ip || '',
+      createdAt: d.createdAt || '',
+      lastActiveAt: d.lastActiveAt || '',
+      current: d.id === req.authDeviceId,
+    }));
+  sendJson(res, 200, {
+    devices,
+    currentDeviceId: req.authDeviceId || '',
+  });
+}
+
+export async function handleRevokeDevice(req, res, id) {
+  const user = requireUser(req);
+  const db = getDb();
+  const device = (db.loginDevices || []).find(
+    (d) => d.id === id && d.userId === user.id,
+  );
+  if (!device) return sendJson(res, 404, { error: '设备不存在或已下线' });
+
+  db.loginDevices = db.loginDevices.filter((d) => d !== device);
+  if (!Array.isArray(db.revokedDevices)) db.revokedDevices = [];
+  if (!db.revokedDevices.includes(id)) db.revokedDevices.push(id);
+  await saveDb();
+  sendJson(res, 200, { ok: true, id });
+}
+
+/** 注销账号：需要密码确认，删除用户及其社区内容 */
+export async function handleDeleteAccount(req, res) {
+  const user = requireUser(req);
+  const body = await readJson(req);
+  const password = String(body.password || '');
+  if (!verifyPassword(password, user.passwordHash)) {
+    return sendJson(res, 403, { error: '密码不正确，无法注销账号' });
+  }
+
+  const db = getDb();
+  db.users = db.users.filter((u) => u.id !== user.id);
+  db.loginDevices = (db.loginDevices || []).filter(
+    (d) => d.userId !== user.id,
+  );
+  db.communityPosts = (db.communityPosts || []).filter(
+    (p) => p.authorId !== user.id,
+  );
+  db.communityComments = (db.communityComments || []).filter(
+    (c) => c.authorId !== user.id,
+  );
+  db.communityReports = (db.communityReports || []).filter(
+    (r) => r.reporterId !== user.id,
+  );
+  await saveDb();
+  sendJson(res, 200, { ok: true, message: '账号已注销' });
 }

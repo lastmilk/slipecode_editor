@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import '../config/app_config.dart';
 import '../models/credits.dart';
 import 'backend_http.dart';
+import 'device_info_service.dart';
 
 /// SLIPE 账号用户
 class AccountUser {
@@ -98,6 +99,38 @@ class AccountUser {
 }
 
 /// 账号接口异常
+/// 登录设备
+class LoginDevice {
+  final String id;
+  final String name;
+  final String platform;
+  final String ip;
+  final DateTime? createdAt;
+  final DateTime? lastActiveAt;
+  final bool current;
+
+  const LoginDevice({
+    required this.id,
+    required this.name,
+    this.platform = '',
+    this.ip = '',
+    this.createdAt,
+    this.lastActiveAt,
+    this.current = false,
+  });
+
+  factory LoginDevice.fromJson(Map<String, dynamic> json) => LoginDevice(
+        id: (json['id'] ?? '').toString(),
+        name: (json['name'] ?? '未知设备').toString(),
+        platform: (json['platform'] ?? '').toString(),
+        ip: (json['ip'] ?? '').toString(),
+        createdAt: DateTime.tryParse((json['createdAt'] ?? '').toString())?.toLocal(),
+        lastActiveAt:
+            DateTime.tryParse((json['lastActiveAt'] ?? '').toString())?.toLocal(),
+        current: json['current'] == true,
+      );
+}
+
 class AccountException implements Exception {
   final String message;
   const AccountException(this.message);
@@ -179,6 +212,7 @@ class AccountService {
     String captchaPlatform = 'android',
   }) async {
     _ensureConfigured();
+    final device = await DeviceInfoService.current();
     final res = await _client
         .post(
           _u('/api/auth/register'),
@@ -191,6 +225,7 @@ class AccountService {
             'smsCode': smsCode,
             'captcha': ?captcha,
             'captchaPlatform': captchaPlatform,
+            'device': device,
           }),
         )
         .timeout(const Duration(seconds: 30));
@@ -225,6 +260,7 @@ class AccountService {
     String captchaPlatform = 'android',
   }) async {
     _ensureConfigured();
+    final device = await DeviceInfoService.current();
     final res = await _client
         .post(
           _u('/api/auth/login'),
@@ -234,6 +270,7 @@ class AccountService {
             'password': password,
             'captcha': ?captcha,
             'captchaPlatform': captchaPlatform,
+            'device': device,
           }),
         )
         .timeout(const Duration(seconds: 30));
@@ -251,6 +288,48 @@ class AccountService {
         ? data['user'] as Map<String, dynamic>
         : data;
     return AccountUser.fromJson(user);
+  }
+
+  /// 拉取登录设备列表，返回 (设备列表, 当前设备 ID)
+  Future<(List<LoginDevice>, String)> fetchDevices(String token) async {
+    _ensureConfigured();
+    final res = await _client
+        .get(_u('/api/me/devices'), headers: _headers(token))
+        .timeout(const Duration(seconds: 20));
+    final data = await _decode(res, '获取登录设备失败');
+    final list = data['devices'];
+    final devices = list is List
+        ? list
+            .whereType<Map>()
+            .map((e) => LoginDevice.fromJson(Map<String, dynamic>.from(e)))
+            .toList()
+        : <LoginDevice>[];
+    return (devices, (data['currentDeviceId'] ?? '').toString());
+  }
+
+  /// 将指定设备移出登录
+  Future<void> revokeDevice(String token, String id) async {
+    _ensureConfigured();
+    final res = await _client
+        .delete(
+          _u('/api/me/devices/${Uri.encodeComponent(id)}'),
+          headers: _headers(token),
+        )
+        .timeout(const Duration(seconds: 20));
+    await _decode(res, '移除设备失败');
+  }
+
+  /// 注销账号（需要密码确认）
+  Future<void> deleteAccount(String token, String password) async {
+    _ensureConfigured();
+    final res = await _client
+        .delete(
+          _u('/api/me'),
+          headers: _headers(token),
+          body: jsonEncode({'password': password}),
+        )
+        .timeout(const Duration(seconds: 30));
+    await _decode(res, '注销账号失败');
   }
 
   /// 拉取云端设置；未设置过时返回 null

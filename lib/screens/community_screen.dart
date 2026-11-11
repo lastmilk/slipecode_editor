@@ -8,6 +8,7 @@ import '../community/feed_tab.dart';
 import '../community/my_tab.dart';
 import '../community/payload_tab.dart';
 import '../community/tutorial_list_screen.dart';
+import '../widgets/main_bottom_nav.dart';
 
 /// 社区主页：推荐 / 教程 / Payload / 我的
 class CommunityScreen extends StatefulWidget {
@@ -49,6 +50,7 @@ class _CommunityScreenState extends State<CommunityScreen>
         appBar: AppBar(
           backgroundColor: Colors.white,
           elevation: 0,
+          automaticallyImplyLeading: false,
           titleSpacing: 16,
           title: const Row(
             children: [
@@ -97,12 +99,11 @@ class _CommunityScreenState extends State<CommunityScreen>
             const MyTab(),
           ],
         ),
-        floatingActionButton: FloatingActionButton.extended(
-          onPressed: _compose,
-          backgroundColor: CommunityTheme.brand,
-          foregroundColor: Colors.white,
-          icon: const Icon(Icons.edit_outlined, size: 18),
-          label: const Text('发帖'),
+        bottomNavigationBar: MainBottomNav(
+          current: MainTab.community,
+          centerIcon: Icons.edit_outlined,
+          centerLabel: '发帖',
+          onCenterTap: _compose,
         ),
       ),
     );

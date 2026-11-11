@@ -21,15 +21,14 @@ import '../services/live_task_service.dart';
 import '../services/llm_presets.dart';
 import '../services/security_service.dart';
 import '../widgets/ai_floating_ball.dart';
-import '../widgets/credits_sheet.dart';
 import '../widgets/image_crop_dialog.dart';
 import '../widgets/mcp_edit_dialog.dart';
-import 'account_screen.dart';
 
 /// 偏好设置页面
 ///
-/// 按「外观 / 编辑器 / 项目与Git / AI模型 / AI助手 / 账号与同步」分 Tab，
-/// 顶部搜索框可跨 Tab 过滤设置项；登录 SLIPE 账号后设置可同步到其他设备。
+/// 按「外观 / 编辑器 / 项目与Git / AI模型 / AI助手 / 安全」分 Tab，
+/// 顶部搜索框可跨 Tab 过滤设置项。
+/// 账号、云同步与充值已迁移到「我的」页面。
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
 
@@ -50,7 +49,6 @@ class _SettingsScreenState extends State<SettingsScreen>
     t('settings.tab.llm'),
     t('settings.tab.ai'),
     t('settings.tab.security'),
-    t('settings.tab.account'),
   ];
 
   @override
@@ -84,7 +82,6 @@ class _SettingsScreenState extends State<SettingsScreen>
       _llmSections(settingsProvider, account, settings),
       _aiSections(settingsProvider, settings),
       _securitySections(settingsProvider, settings),
-      _accountSections(account, settingsProvider, settings, isDark),
     ];
 
     return Scaffold(
@@ -932,91 +929,6 @@ class _SettingsScreenState extends State<SettingsScreen>
           _SecurityCard(settingsProvider: sp, settings: settings),
         ),
       ]),
-    ];
-  }
-
-  List<_SectionData> _accountSections(
-    AccountProvider account,
-    SettingsProvider sp,
-    AppSettings settings,
-    bool isDark,
-  ) {
-    return [
-      _SectionData('积分与充值', [
-        _Entry(
-          '积分 充值 余额 签到 激活码 套餐 流水 credits billing',
-          const CreditsPanel(),
-        ),
-      ]),
-      _SectionData('账号', [
-        _Entry('账号同步状态 sync account login', _SyncCard(account: account)),
-        _Entry(
-          '头像 账号头像 avatar 上传 裁剪',
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            child: Row(
-              children: [
-                const Expanded(child: Text('头像（与账号绑定）')),
-                if (settings.avatarPath.isNotEmpty &&
-                    File(settings.avatarPath).existsSync())
-                  Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: ClipOval(
-                      child: Image.file(
-                        File(settings.avatarPath),
-                        width: 40,
-                        height: 40,
-                        fit: BoxFit.cover,
-                      ),
-                    ),
-                  ),
-                TextButton.icon(
-                  onPressed: _pickAvatar,
-                  icon: const Icon(Icons.image_outlined, size: 16),
-                  label: Text(settings.avatarPath.isEmpty ? '选择头像' : '更换'),
-                ),
-                if (settings.avatarPath.isNotEmpty)
-                  TextButton(
-                    onPressed: sp.clearAvatar,
-                    child: const Text('恢复默认'),
-                  ),
-              ],
-            ),
-          ),
-        ),
-        _Entry(
-          '头像说明 云端 avatar cloud',
-          const Padding(
-            padding: EdgeInsets.only(bottom: 4),
-            child: Text(
-              '登录后头像自动上传到云端（≤2MB），并同步到所有设备。',
-              style: TextStyle(fontSize: 11, color: Colors.grey),
-            ),
-          ),
-        ),
-      ]),
-      _SectionData('云同步', [
-        _Entry(
-          '同步网络策略 wifi 流量 network policy',
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('同步网络策略'),
-            subtitle: const Text('控制壁纸 / 对话记录等自动同步使用的网络'),
-            trailing: DropdownButton<String>(
-              value: settings.syncNetwork,
-              underline: const SizedBox.shrink(),
-              items: const [
-                DropdownMenuItem(value: 'wifi', child: Text('仅 Wi-Fi')),
-                DropdownMenuItem(value: 'any', child: Text('任意网络')),
-                DropdownMenuItem(value: 'never', child: Text('关闭自动同步')),
-              ],
-              onChanged: (value) {
-                if (value != null) sp.setSyncNetwork(value);
-              },
-            ),
-          ),
-        ),
-      ]),
       _SectionData('官方社群', [
         _Entry('官方 QQ 群 qq group community', const _QqGroupTile()),
       ]),
@@ -1075,46 +987,6 @@ class _SettingsScreenState extends State<SettingsScreen>
   // ---------------------------------------------------------------------------
   // 头像 / 壁纸选择（含自由剪裁与云端上传）
   // ---------------------------------------------------------------------------
-
-  /// 选择头像 → 1:1 裁剪为 512×512 → 本地保存 → 登录时上传云端
-  Future<void> _pickAvatar() async {
-    final settingsProvider = context.read<SettingsProvider>();
-    final account = context.read<AccountProvider>();
-    final messenger = ScaffoldMessenger.of(context);
-    try {
-      final result = await FilePicker.platform.pickFiles(
-        type: FileType.image,
-        dialogTitle: '选择头像',
-      );
-      final srcPath = result?.files.single.path;
-      if (srcPath == null || srcPath.isEmpty) return;
-
-      final docsDir = await getApplicationDocumentsDirectory();
-      if (!mounted) return;
-      final destPath =
-          '${docsDir.path}/avatars/avatar_${DateTime.now().millisecondsSinceEpoch}.png';
-      final cropped = await showImageCropDialog(
-        context,
-        sourcePath: srcPath,
-        aspectRatio: 1.0,
-        outputPath: destPath,
-      );
-      if (cropped == null) return;
-
-      await settingsProvider.setAvatarPath(cropped);
-      if (account.isSignedIn) {
-        final ok = await account.uploadAvatar(cropped);
-        messenger.showSnackBar(
-          SnackBar(
-            content: Text(ok ? '头像已同步到云端' : '头像已保存本机，云端上传失败'),
-            backgroundColor: ok ? Colors.green : Colors.orange,
-          ),
-        );
-      }
-    } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text('选择头像失败: $e')));
-    }
-  }
 
   /// 选择壁纸 → 静态图按屏幕比例裁剪，GIF/MP4 直接保存 → 符合条件时上传云端
   Future<void> _pickWallpaper() async {
@@ -1471,113 +1343,6 @@ class _SecurityCardState extends State<_SecurityCard> {
         ),
       ],
     );
-  }
-}
-
-/// 账号同步状态卡片
-class _SyncCard extends StatelessWidget {
-  const _SyncCard({required this.account});
-
-  final AccountProvider account;
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final signedIn = account.isSignedIn;
-
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: isDark
-              ? const [Color(0xFF1F3A4D), Color(0xFF1B2B36)]
-              : const [Color(0xFFE3F2FD), Color(0xFFF1F8FE)],
-        ),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: isDark ? const Color(0xFF2E5A75) : const Color(0xFFBBDEFB),
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(
-                signedIn ? Icons.cloud_done : Icons.cloud_off,
-                size: 20,
-                color: Colors.blueAccent,
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  signedIn
-                      ? '设置同步已开启（${account.user?.displayName ?? account.user?.email ?? ''}）'
-                      : '登录 SLIPE 账号以同步设置',
-                  style: const TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Text(
-            signedIn
-                ? (account.lastSyncAt == null
-                      ? '尚未同步，点右侧按钮立即同步'
-                      : '上次同步：${_format(account.lastSyncAt!)}')
-                : '账号与设置独立于 GitHub / Gitee，登录后可在多台设备间同步偏好设置。',
-            style: TextStyle(
-              fontSize: 11,
-              height: 1.4,
-              color: isDark ? Colors.white54 : Colors.black54,
-            ),
-          ),
-          if (account.error != null && signedIn) ...[
-            const SizedBox(height: 4),
-            Text(
-              account.error!,
-              style: const TextStyle(fontSize: 11, color: Colors.redAccent),
-            ),
-          ],
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              TextButton(
-                onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const AccountScreen()),
-                ),
-                child: Text(signedIn ? '管理账号' : '登录 / 注册'),
-              ),
-              if (signedIn) ...[
-                const Spacer(),
-                TextButton.icon(
-                  onPressed: () async {
-                    final ok = await context.read<AccountProvider>().syncNow();
-                    if (!context.mounted) return;
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(ok ? '设置已从云端同步' : '同步失败'),
-                        backgroundColor: ok ? Colors.green : Colors.redAccent,
-                      ),
-                    );
-                  },
-                  icon: const Icon(Icons.sync, size: 16),
-                  label: const Text('立即同步'),
-                ),
-              ],
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  static String _format(DateTime time) {
-    return '${time.month}月${time.day}日 ${time.hour.toString().padLeft(2, '0')}:'
-        '${time.minute.toString().padLeft(2, '0')}';
   }
 }
 

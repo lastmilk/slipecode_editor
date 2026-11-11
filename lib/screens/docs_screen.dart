@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 
 import '../services/docs_service.dart';
+import '../widgets/main_bottom_nav.dart';
 
 /// 使用文档列表页（只读，展示管理员发布的文档）
 class DocsScreen extends StatefulWidget {
@@ -47,11 +48,15 @@ class _DocsScreenState extends State<DocsScreen> {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return Scaffold(
-      appBar: AppBar(title: const Text('使用文档')),
+      appBar: AppBar(
+        title: const Text('使用文档'),
+        automaticallyImplyLeading: false,
+      ),
       body: RefreshIndicator(
         onRefresh: _load,
         child: _buildBody(isDark),
       ),
+      bottomNavigationBar: const MainBottomNav(current: MainTab.docs),
     );
   }
 

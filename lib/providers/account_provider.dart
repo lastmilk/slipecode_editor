@@ -37,6 +37,11 @@ class AccountProvider extends ChangeNotifier {
   bool _checkedInToday = false;
   bool _loadingCredits = false;
 
+  // 登录设备
+  List<LoginDevice> _devices = const [];
+  String _currentDeviceId = '';
+  bool _loadingDevices = false;
+
   AccountStatus get status => _status;
   AccountUser? get user => _user;
 
@@ -47,6 +52,9 @@ class AccountProvider extends ChangeNotifier {
   BillingInfo get billing => _billing;
   bool get checkedInToday => _checkedInToday;
   bool get loadingCredits => _loadingCredits;
+  List<LoginDevice> get devices => _devices;
+  String get currentDeviceId => _currentDeviceId;
+  bool get loadingDevices => _loadingDevices;
 
   /// 当前账号 token（用于 SLIPE 云端模型 / 同步接口）
   String? get token => _token;
@@ -183,6 +191,8 @@ class AccountProvider extends ChangeNotifier {
     _creditLogs = const [];
     _billing = const BillingInfo();
     _checkedInToday = false;
+    _devices = const [];
+    _currentDeviceId = '';
     // 退出账号后不再保留账号头像（避免首页仍显示已退出账号的头像）
     await _settings.clearAvatar();
     _safeNotify();
@@ -359,6 +369,53 @@ class AccountProvider extends ChangeNotifier {
       _safeNotify();
     } catch (e) {
       debugPrint('账号信息刷新失败：$e');
+    }
+  }
+
+  /// 拉取登录设备列表
+  Future<void> refreshDevices() async {
+    final token = _token;
+    if (!isSignedIn || token == null) return;
+    _loadingDevices = true;
+    _safeNotify();
+    try {
+      final (devices, currentId) =
+          await AccountService.instance.fetchDevices(token);
+      _devices = devices;
+      _currentDeviceId = currentId;
+      _error = null;
+    } catch (e) {
+      _error = '$e';
+    } finally {
+      _loadingDevices = false;
+      _safeNotify();
+    }
+  }
+
+  /// 将指定设备移出登录
+  Future<(bool, String)> revokeDevice(String id) async {
+    final token = _token;
+    if (!isSignedIn || token == null) return (false, '请先登录');
+    try {
+      await AccountService.instance.revokeDevice(token, id);
+      _devices = _devices.where((d) => d.id != id).toList();
+      _safeNotify();
+      return (true, '该设备已移出登录');
+    } catch (e) {
+      return (false, '$e');
+    }
+  }
+
+  /// 注销账号（需密码确认）
+  Future<(bool, String)> deleteAccount(String password) async {
+    final token = _token;
+    if (!isSignedIn || token == null) return (false, '请先登录');
+    try {
+      await AccountService.instance.deleteAccount(token, password);
+      await signOut();
+      return (true, '账号已注销');
+    } catch (e) {
+      return (false, '$e');
     }
   }
 

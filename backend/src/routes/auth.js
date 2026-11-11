@@ -40,6 +40,57 @@ function normalizePhone(value) {
   return String(value || '').replace(/[\s-]/g, '');
 }
 
+/**
+ * 记录/更新登录设备，返回设备 ID。
+ * 客户端在登录/注册 body.device 中传 {id, name, platform}。
+ */
+function registerDevice(req, body, userId, now) {
+  const db = getDb();
+  if (!Array.isArray(db.loginDevices)) db.loginDevices = [];
+  if (!Array.isArray(db.revokedDevices)) db.revokedDevices = [];
+
+  const raw = body.device && typeof body.device === 'object' ? body.device : {};
+  const id =
+    String(raw.id || '').trim().slice(0, 80) ||
+    `dev_${randomBytes(8).toString('hex')}`;
+  const name = String(raw.name || '').trim().slice(0, 80) || '未知设备';
+  const platform = String(raw.platform || '').trim().slice(0, 40);
+  const ip = remoteIp(req);
+  const userAgent = String(req.headers['user-agent'] || '').slice(0, 300);
+
+  let device = db.loginDevices.find((d) => d.id === id && d.userId === userId);
+  if (!device) {
+    device = {
+      id,
+      userId,
+      name,
+      platform,
+      ip,
+      userAgent,
+      createdAt: now,
+      lastActiveAt: now,
+    };
+    db.loginDevices.push(device);
+    // 单账号最多保留 20 台设备，超出的移除最久未活跃的
+    const mine = db.loginDevices
+      .filter((d) => d.userId === userId)
+      .sort((a, b) => String(a.lastActiveAt).localeCompare(String(b.lastActiveAt)));
+    while (mine.length > 20) {
+      const removed = mine.shift();
+      db.loginDevices = db.loginDevices.filter((d) => d !== removed);
+    }
+  } else {
+    device.name = name;
+    device.platform = platform;
+    device.ip = ip;
+    device.userAgent = userAgent;
+    device.lastActiveAt = now;
+  }
+
+  db.revokedDevices = db.revokedDevices.filter((v) => v !== id);
+  return id;
+}
+
 export async function handleRegister(req, res) {
   throttle(`register:${remoteIp(req)}`);
   const body = await readJson(req);
@@ -112,10 +163,14 @@ export async function handleRegister(req, res) {
     lastLoginAt: now,
   };
   db.users.push(user);
+  const deviceId = registerDevice(req, body, user.id, now);
   bumpStat('registers');
   await saveDb();
 
-  sendJson(res, 201, { token: issueUserToken(user.id), user: publicUser(user) });
+  sendJson(res, 201, {
+    token: issueUserToken(user.id, deviceId),
+    user: publicUser(user),
+  });
 }
 
 /** 发送注册短信验证码 */
@@ -168,8 +223,12 @@ export async function handleLogin(req, res) {
   }
   attempts.delete(`login:${email}`);
   user.lastLoginAt = new Date().toISOString();
+  const deviceId = registerDevice(req, body, user.id, user.lastLoginAt);
   bumpStat('logins');
   await saveDb();
 
-  sendJson(res, 200, { token: issueUserToken(user.id), user: publicUser(user) });
+  sendJson(res, 200, {
+    token: issueUserToken(user.id, deviceId),
+    user: publicUser(user),
+  });
 }

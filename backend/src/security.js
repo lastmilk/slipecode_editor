@@ -78,10 +78,11 @@ export function verifyToken(token) {
   }
 }
 
-export function issueUserToken(userId) {
+export function issueUserToken(userId, deviceId = '') {
   return signToken({
     sub: userId,
     exp: Math.floor(Date.now() / 1000) + TOKEN_TTL_SECONDS,
+    ...(deviceId ? { dvc: deviceId } : {}),
   });
 }
 
@@ -102,8 +103,13 @@ export function requireUser(req) {
   if (!payload || payload.role === 'admin') {
     throw httpError(401, '未登录或登录已过期');
   }
-  const user = getDb().users.find((u) => u.id === payload.sub);
+  const db = getDb();
+  if (payload.dvc && (db.revokedDevices || []).includes(payload.dvc)) {
+    throw httpError(401, '该设备已被移出登录，请重新登录');
+  }
+  const user = db.users.find((u) => u.id === payload.sub);
   if (!user) throw httpError(401, '账号不存在');
+  req.authDeviceId = payload.dvc || '';
   return user;
 }
 
