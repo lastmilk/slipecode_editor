@@ -44,7 +44,7 @@ function normalizePhone(value) {
  * 记录/更新登录设备，返回设备 ID。
  * 客户端在登录/注册 body.device 中传 {id, name, platform}。
  */
-function registerDevice(req, body, userId, now) {
+export function registerDevice(req, body, userId, now) {
   const db = getDb();
   if (!Array.isArray(db.loginDevices)) db.loginDevices = [];
   if (!Array.isArray(db.revokedDevices)) db.revokedDevices = [];

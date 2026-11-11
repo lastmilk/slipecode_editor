@@ -93,6 +93,7 @@ import {
   handleListDevices,
   handleMe,
   handlePutSettings,
+  handleRegisterDevice,
   handleRevokeDevice,
   handleUploadAvatar,
   handleUploadWallpaper,
@@ -220,6 +221,7 @@ const ROUTES = {
 
   // 账号：登录设备管理 / 注销账号
   'GET /api/me/devices': handleListDevices,
+  'POST /api/me/devices': handleRegisterDevice,
   'DELETE /api/me': handleDeleteAccount,
 
   // 商业化：充值套餐与激活码兑换

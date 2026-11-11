@@ -307,6 +307,23 @@ class AccountService {
     return (devices, (data['currentDeviceId'] ?? '').toString());
   }
 
+  /// 将当前设备登记到账号，返回可能更新过的 token
+  ///
+  /// 旧版本 token 不含设备声明，App 启动时会调用一次以补登记。
+  Future<String> registerDevice(String token) async {
+    _ensureConfigured();
+    final device = await DeviceInfoService.current();
+    final res = await _client
+        .post(
+          _u('/api/me/devices'),
+          headers: _headers(token),
+          body: jsonEncode({'device': device}),
+        )
+        .timeout(const Duration(seconds: 20));
+    final data = await _decode(res, '登记登录设备失败');
+    return (data['token'] ?? '').toString();
+  }
+
   /// 将指定设备移出登录
   Future<void> revokeDevice(String token, String id) async {
     _ensureConfigured();

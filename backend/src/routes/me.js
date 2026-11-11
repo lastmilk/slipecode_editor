@@ -15,7 +15,8 @@ import {
 } from '../config.js';
 import { UPLOAD_DIR, getDb, saveDb, todayStr } from '../db.js';
 import { readJson, sendBytes, sendJson } from '../http.js';
-import { publicUser, requireUser, verifyPassword } from '../security.js';
+import { publicUser, requireUser, verifyPassword, issueUserToken } from '../security.js';
+import { registerDevice } from './auth.js';
 
 export async function handleMe(req, res) {
   const user = requireUser(req);
@@ -308,6 +309,20 @@ export async function handleGetCredits(req, res) {
 // ---------------------------------------------------------------------------
 // 登录设备管理
 // ---------------------------------------------------------------------------
+
+/** 登记当前设备并返回带有设备声明的 token（供老版本 token 升级） */
+export async function handleRegisterDevice(req, res) {
+  const user = requireUser(req);
+  const body = await readJson(req);
+  const now = new Date().toISOString();
+  const deviceId = registerDevice(req, body, user.id, now);
+  await saveDb();
+  sendJson(res, 200, {
+    ok: true,
+    deviceId,
+    token: issueUserToken(user.id, deviceId),
+  });
+}
 
 export async function handleListDevices(req, res) {
   const user = requireUser(req);

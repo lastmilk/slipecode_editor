@@ -83,7 +83,19 @@ class AccountProvider extends ChangeNotifier {
       _user = await AccountService.instance
           .me(token)
           .timeout(const Duration(seconds: 10));
-      _token = token;
+      // 兼容升级前的 token：补登记当前设备，换取带设备声明的 token
+      var effectiveToken = token;
+      try {
+        final refreshed =
+            await AccountService.instance.registerDevice(token);
+        if (refreshed.isNotEmpty) {
+          await AccountService.instance.saveToken(refreshed);
+          effectiveToken = refreshed;
+        }
+      } catch (e) {
+        debugPrint('登录设备登记失败（可忽略）：$e');
+      }
+      _token = effectiveToken;
       _status = AccountStatus.signedIn;
       _safeNotify();
       await _syncAfterLogin();
