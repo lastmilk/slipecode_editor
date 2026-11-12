@@ -46,15 +46,31 @@ class _PolicyGateState extends State<PolicyGate> {
     }
     final accepted = sp.settings.policyAcceptedVersion;
     if (accepted.isEmpty) {
-      // 未同意过（或曾拒绝）→ 拉取最新政策并弹窗
+      // 未同意过（或曾拒绝）→ 拉取最新政策并弹窗。
+      // 注意：政策正文只是「查看」入口，是否加载成功不能阻止用户同意。
+      // 网络异常时使用空 bundle（仅展示政策链接）继续弹窗。
       final bundle = await PolicyService.instance.fetchPolicies();
       if (!mounted) return;
-      if (bundle != null && bundle.isNotEmpty) {
-        await _showPolicyDialog(bundle);
-      }
+      await _showPolicyDialog(bundle ?? _emptyBundle);
     }
     if (mounted) setState(() => _checked = true);
   }
+
+  /// 在网络不可用时的兜底：不包含正文，只有标题与政策链接
+  static const PolicyBundle _emptyBundle = PolicyBundle(
+    userAgreement: PolicyDocument(
+      title: '',
+      content: '',
+      version: '',
+      updatedAt: '',
+    ),
+    privacyPolicy: PolicyDocument(
+      title: '',
+      content: '',
+      version: '',
+      updatedAt: '',
+    ),
+  );
 
   Future<void> _showPolicyDialog(PolicyBundle bundle) async {
     final sp = context.read<SettingsProvider>();

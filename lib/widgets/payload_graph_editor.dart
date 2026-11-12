@@ -427,7 +427,7 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
               ),
               const Spacer(),
               Text(
-                '拖入画布添加',
+                '长按拖入画布',
                 style: TextStyle(
                   fontSize: 10,
                   color: isDark ? Colors.white38 : Colors.black45,
@@ -452,6 +452,9 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
 
   Widget _buildRootBar(bool isDark, {bool compact = false}) {
     final rootSpec = RootPayloadRegistry.byId(draft.root.specId);
+    final rootItems = RootPayloadRegistry.all.isEmpty
+        ? const <RootPayloadSpec>[RootPayloadRegistry.unset]
+        : RootPayloadRegistry.all;
     final dropdown = DropdownButtonHideUnderline(
       child: DropdownButton<String>(
         isExpanded: true,
@@ -461,11 +464,13 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
           color: isDark ? Colors.white : Colors.black87,
         ),
         items: [
-          for (final spec in RootPayloadRegistry.all)
+          for (final spec in rootItems)
             DropdownMenuItem(
               value: spec.id,
               child: Text(
-                '${spec.name} · ${spec.buildEnvLabel}',
+                spec.buildEnvLabel.isEmpty
+                    ? spec.name
+                    : '${spec.name} · ${spec.buildEnvLabel}',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
@@ -523,6 +528,21 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
                   ],
                 ),
                 dropdown,
+                const SizedBox(height: 2),
+                // RootPayload = 环境变量 + Actions 配置文档（由社区定义）
+                Text(
+                  rootSpec.id.isEmpty
+                      ? '暂无社区 Root Payload，请先在社区导入'
+                      : '${rootSpec.envVars.length} 个环境变量 · '
+                          '${rootSpec.workflowContent.isEmpty ? '内置 Actions 模板' : '自定义 Actions'}',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 9.5,
+                    height: 1.35,
+                    color: isDark ? Colors.white38 : Colors.black45,
+                  ),
+                ),
               ],
             )
           : Row(
@@ -1000,7 +1020,7 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
                   ),
                   const Spacer(),
                   Text(
-                    '拖入画布添加',
+                    '长按拖入画布',
                     style: TextStyle(
                       fontSize: 10,
                       color: isDark ? Colors.white38 : Colors.black45,
@@ -1012,11 +1032,11 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
           ),
           if (_drawerOpen)
             SizedBox(
-              height: 64,
+              height: 72,
               child: ListView.separated(
                 padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 8,
+                  horizontal: 16,
+                  vertical: 10,
                 ),
                 scrollDirection: Axis.horizontal,
                 itemCount: SystemPayloadRegistry.all.length + 1,
@@ -1031,9 +1051,12 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
   }
 
   /// 调色板条目（底部抽屉与横屏右侧边栏共用，拖拽数据格式保持一致）
+  ///
+  /// 使用「长按拖拽」而不是直接拖拽：避免与调色板自身横向/纵向滚动
+  /// 手势互相抢占（用户可以先正常滚动，长按后再拖入画布）。
   Widget _buildPaletteItem(int index, bool isDark) {
     if (index == SystemPayloadRegistry.all.length) {
-      return Draggable<String>(
+      return LongPressDraggable<String>(
         data: 'system:__custom__',
         feedback: Material(
           elevation: 6,
@@ -1064,7 +1087,7 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
       );
     }
     final spec = SystemPayloadRegistry.all[index];
-    return Draggable<String>(
+    return LongPressDraggable<String>(
       data: 'system:${spec.id}',
       feedback: Material(
         elevation: 6,

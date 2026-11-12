@@ -65,7 +65,7 @@ class L10n {
       'policy.dialogTitle': '用户协议与隐私政策',
       'policy.dialogBody':
           '欢迎使用 SLIPE。在使用云端构建、AI 助手、账号同步等联网功能前，'
-          '请阅读并同意以下协议：',
+          '请阅读并同意以下协议（点击链接查看全文，正文无法加载也不影响同意）：',
       'policy.userAgreementLink': '《用户协议》',
       'policy.privacyPolicyLink': '《隐私政策》',
       'policy.accept': '同意并继续',
@@ -534,7 +534,7 @@ class L10n {
       'policy.dialogTitle': '使用者協議與隱私政策',
       'policy.dialogBody':
           '歡迎使用 SLIPE。在使用雲端構建、AI 助手、帳號同步等聯網功能前，'
-          '請閱讀並同意以下協議：',
+          '請閱讀並同意以下協議（點擊連結查看全文，正文無法載入也不影響同意）：',
       'policy.userAgreementLink': '《使用者協議》',
       'policy.privacyPolicyLink': '《隱私政策》',
       'policy.accept': '同意並繼續',
@@ -997,7 +997,8 @@ class L10n {
       'policy.dialogTitle': 'User Agreement & Privacy Policy',
       'policy.dialogBody':
           'Welcome to SLIPE. Before using cloud builds, the AI assistant, '
-          'account sync and other online features, please read and accept:',
+          'account sync and other online features, please read and accept '
+          '(tap the links for the full text; you can still accept even if it cannot be loaded):',
       'policy.userAgreementLink': 'User Agreement',
       'policy.privacyPolicyLink': 'Privacy Policy',
       'policy.accept': 'Agree & Continue',

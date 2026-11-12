@@ -37,7 +37,7 @@ class _DesignDraftEditorScreenState extends State<DesignDraftEditorScreen> {
           name: '',
           createdAt: now,
           updatedAt: now,
-          root: RootPayloadInstance(specId: RootPayloadRegistry.all.first.id),
+          root: RootPayloadInstance(specId: RootPayloadRegistry.defaultId),
           systems: [],
         );
     _nameController = TextEditingController(text: _draft.name);

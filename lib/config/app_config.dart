@@ -8,6 +8,15 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 class AppConfig {
   AppConfig._();
 
+  /// 生产环境账号后端（公开信息）。
+  ///
+  /// 作为 .env 缺失 / 未被正确打包时的兜底：这些字段都不含 secret，
+  /// 即使资源加载失败也必须保证后端、OAuth 登录可用。
+  static const String defaultAccountBackend = 'https://api.lineregre.com';
+  static const String defaultGithubClientId = 'Ov23li26aNK8JhfG6weT';
+  static const String defaultGiteeClientId =
+      '44c8a6725c2e8af401b2c9fe43ad17fe2e0d5bf5a98b3fa2b8923ec8006b1d46';
+
   static String _env(String key, [String fallback = '']) {
     final value = dotenv.env[key];
     if (value == null || value.trim().isEmpty) return fallback;
@@ -19,7 +28,8 @@ class AppConfig {
   // ---------------------------------------------------------------------------
 
   /// GitHub OAuth App 的 Client ID（公开信息，非 secret）
-  static String get githubClientId => _env('GITHUB_CLIENT_ID');
+  static String get githubClientId =>
+      _env('GITHUB_CLIENT_ID', defaultGithubClientId);
 
   /// 是否已配置 GitHub Client ID
   ///
@@ -55,8 +65,9 @@ class AppConfig {
   // Gitee
   // ---------------------------------------------------------------------------
 
-  /// Gitee OAuth 应用 Client ID（凭据在 .env 中留空，配置后即可启用）
-  static String get giteeClientId => _env('GITEE_CLIENT_ID');
+  /// Gitee OAuth 应用 Client ID（公开信息，配置后即可启用）
+  static String get giteeClientId =>
+      _env('GITEE_CLIENT_ID', defaultGiteeClientId);
 
   /// Gitee OAuth 回调地址（后端桥接页，再跳转 App 深链）
   static String get giteeRedirectUri => _env(
@@ -85,7 +96,8 @@ class AppConfig {
 
   /// 自建账号后端地址，例如 https://api.example.com
   static String get accountBackendBase =>
-      _env('ACCOUNT_BACKEND_BASE_URL').replaceAll(RegExp(r'/+$'), '');
+      _env('ACCOUNT_BACKEND_BASE_URL', defaultAccountBackend)
+          .replaceAll(RegExp(r'/+$'), '');
 
   /// 是否已配置账号后端
   static bool get isAccountBackendConfigured => accountBackendBase.isNotEmpty;

@@ -56,6 +56,27 @@ class MainActivity : FlutterFragmentActivity() {
         pendingAiProject = intent.getStringExtra(AiOverlayService.EXTRA_AI_PROJECT)
     }
 
+    /// 用系统文件管理器 / 安装器打开本地文件。
+    /// 文件位于应用私有目录（app_flutter），通过 root-path 的 FileProvider 授权读取。
+    private fun openFileWithSystem(path: String, mime: String): Boolean {
+        val file = File(path)
+        if (!file.exists()) return false
+        val uri = androidx.core.content.FileProvider.getUriForFile(
+            this,
+            "$packageName.fileprovider",
+            file
+        )
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, mime)
+            addFlags(
+                Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+            )
+        }
+        startActivity(intent)
+        return true
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
@@ -90,28 +111,37 @@ class MainActivity : FlutterFragmentActivity() {
                         result.success(System.getProperty("os.arch"))
                     }
 
+                    // 用系统文件管理器 / 安装器打开本地文件（不再尝试静默安装）。
+                    // 产物位于应用私有目录，必须通过 FileProvider 授权。
+                    "openFile" -> {
+                        val path = call.argument<String>("path")
+                        val mime = call.argument<String>("mime")
+                            ?: "application/vnd.android.package-archive"
+                        if (path == null) {
+                            result.error("bad_args", "path is null", null)
+                        } else {
+                            try {
+                                result.success(openFileWithSystem(path, mime))
+                            } catch (e: Exception) {
+                                Log.e("SLIPE", "openFile failed", e)
+                                result.error("open_failed", e.message, null)
+                            }
+                        }
+                    }
+
+                    // 兼容旧调用：等价于 openFile + APK MIME
                     "installApk" -> {
                         val path = call.argument<String>("path")
                         if (path == null) {
                             result.error("bad_args", "path is null", null)
                         } else {
                             try {
-                                val intent = android.content.Intent(android.content.Intent.ACTION_VIEW)
-                                val uri = androidx.core.content.FileProvider.getUriForFile(
-                                    this,
-                                    "$packageName.fileprovider",
-                                    File(path)
+                                result.success(
+                                    openFileWithSystem(
+                                        path,
+                                        "application/vnd.android.package-archive"
+                                    )
                                 )
-                                intent.setDataAndType(
-                                    uri,
-                                    "application/vnd.android.package-archive"
-                                )
-                                intent.addFlags(
-                                    android.content.Intent.FLAG_ACTIVITY_NEW_TASK or
-                                        android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
-                                )
-                                startActivity(intent)
-                                result.success(true)
                             } catch (e: Exception) {
                                 Log.e("SLIPE", "installApk failed", e)
                                 result.error("install_failed", e.message, null)

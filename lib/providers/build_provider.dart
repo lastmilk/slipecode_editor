@@ -407,7 +407,6 @@ class BuildProvider extends ChangeNotifier {
     WorkflowRun finalRun = run;
     BuildWatch? watch;
     if (_watchId.isNotEmpty) {
-      _append('已切换服务端进度同步（每 4 秒轮询）');
       watch = await _pollServerWatch(run);
       if (watch != null) {
         finalRun = WorkflowRun(
@@ -425,8 +424,7 @@ class BuildProvider extends ChangeNotifier {
       }
     }
     if (watch == null) {
-      // 未登录 / 服务端不可用：回退为直连 GitHub 轮询
-      _append('服务端进度不可用，回退为直连 GitHub 轮询');
+      // 未登录 / 服务端不可用：回退为直连 GitHub 轮询（静默兜底）
       finalRun = await BuildService.instance.waitForCompletion(
         api,
         repo,
@@ -479,7 +477,7 @@ class BuildProvider extends ChangeNotifier {
     _append(t('build.log.getArtifact'));
     final relay = settings?.buildServerRelay ?? true;
     if (relay && _account?.isSignedIn == true && _watchId.isNotEmpty) {
-      _append(t('build.log.relayFirst'));
+      // 先由服务端中转下载，客户端无感（失败则静默回退直连 GitHub）
       final path = await _downloadArtifactFromServer(projectDir);
       if (path != null) {
         _artifactPath = path;
@@ -488,7 +486,6 @@ class BuildProvider extends ChangeNotifier {
         _append(t('build.log.successDuration', {'duration': _durationText()}));
         return;
       }
-      _append(t('build.log.relayFallback'));
     }
 
     final artifacts = await api.listArtifacts(repo, finalRun.id);
@@ -605,14 +602,10 @@ class BuildProvider extends ChangeNotifier {
         id: _watchId,
       );
       if (watch != null && watch.artifactReady) break;
-      if (watch != null && watch.error.isNotEmpty) {
-        _append(t('build.log.relayDownloadFailed', {'error': watch.error}));
-        return null;
-      }
+      if (watch != null && watch.error.isNotEmpty) return null;
       await Future.delayed(const Duration(seconds: 8));
     }
     if (watch == null || !watch.artifactReady) return null;
-    _append(t('build.log.relayReady', {'name': watch.artifactName}));
     final bytes = await BuildWatchService.instance.downloadArtifact(
       accountToken: token,
       id: _watchId,
@@ -836,15 +829,10 @@ class BuildProvider extends ChangeNotifier {
     _safeNotify();
   }
 
-  /// 安装构建产物 APK
+  /// 打开构建产物（APK 交给系统安装器，其余交给文件管理器）
   Future<bool> installArtifact() async {
     if (_artifactPath == null) return false;
-    if (!_artifactPath!.endsWith('.apk')) {
-      _error = t('build.error.notInstallable');
-      _safeNotify();
-      return false;
-    }
-    return BuildService.instance.installApk(_artifactPath!);
+    return BuildService.instance.openArtifact(_artifactPath!);
   }
 
   void clearLogs() {

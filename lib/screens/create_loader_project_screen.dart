@@ -116,7 +116,7 @@ class _CreateLoaderProjectScreenState extends State<CreateLoaderProjectScreen> {
         name: '',
         createdAt: DateTime.now(),
         updatedAt: DateTime.now(),
-        root: RootPayloadInstance(specId: RootPayloadRegistry.all.first.id),
+        root: RootPayloadInstance(specId: RootPayloadRegistry.defaultId),
         systems: [],
       );
 

@@ -3,4 +3,6 @@
     <external-path name="external" path="." />
     <files-path name="files" path="." />
     <cache-path name="cache" path="." />
+    <!-- 构建产物保存在应用私有目录 app_flutter 下，需要用 root-path 才能分享给系统安装器 -->
+    <root-path name="root" path="." />
 </paths>

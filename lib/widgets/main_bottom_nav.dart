@@ -36,7 +36,7 @@ class MainBottomNav extends StatelessWidget {
   static const _items = <MainTab, (String, IconData, IconData)>{
     MainTab.home: ('首页', Icons.home_outlined, Icons.home_rounded),
     MainTab.community: ('社区', Icons.forum_outlined, Icons.forum_rounded),
-    MainTab.docs: ('文档', Icons.menu_book_outlined, Icons.menu_book_rounded),
+    MainTab.docs: ('知识库', Icons.menu_book_outlined, Icons.menu_book_rounded),
     MainTab.my: ('我的', Icons.person_outline_rounded, Icons.person_rounded),
   };
 

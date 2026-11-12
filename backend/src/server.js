@@ -88,10 +88,12 @@ import {
   handleGetAvatar,
   handleGetCreditLogs,
   handleGetCredits,
+  handleGetKnowledge,
   handleGetSettings,
   handleGetWallpaper,
   handleListDevices,
   handleMe,
+  handlePutKnowledge,
   handlePutSettings,
   handleRegisterDevice,
   handleRevokeDevice,
@@ -193,6 +195,9 @@ const ROUTES = {
   // 偏好 / 项目 / 对话
   'GET /api/settings': handleGetSettings,
   'PUT /api/settings': handlePutSettings,
+  // 私人知识库（跨端同步）
+  'GET /api/me/knowledge': handleGetKnowledge,
+  'PUT /api/me/knowledge': handlePutKnowledge,
   'GET /api/projects': handleGetProjects,
   'PUT /api/projects': handlePutProjects,
   'GET /api/chat/history': handleGetChatHistory,

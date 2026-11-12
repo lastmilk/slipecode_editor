@@ -12,6 +12,7 @@ import '../providers/settings_provider.dart';
 import '../services/design_draft_service.dart';
 import '../services/loader_project_service.dart';
 import '../services/project_history_service.dart';
+import '../services/project_trash_service.dart';
 import '../services/saying_service.dart';
 import '../widgets/app_background.dart';
 import '../widgets/typewriter_text.dart';
@@ -237,24 +238,262 @@ class HomeScreenState extends State<HomeScreen>
   }
 
   Future<void> _confirmRemove(Project project) async {
-    final ok = await showDialog<bool>(
+    final action = await showModalBottomSheet<String>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text(t('home.removeTitle')),
-        content: Text(t('home.removeBody', {'name': project.name})),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: Text(t('common.cancel')),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: Text(t('home.remove')),
-          ),
-        ],
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.folder_outlined),
+              title: Text(project.name),
+              subtitle: Text(
+                project.path,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 11),
+              ),
+              dense: true,
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.playlist_remove),
+              title: const Text('仅从列表移除'),
+              subtitle: const Text('磁盘文件保留，可随时重新打开'),
+              onTap: () => Navigator.of(ctx).pop('remove'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.delete_forever, color: Colors.red),
+              title: Text(
+                project.kind == 'draft' ? '删除设计稿' : '删除项目（从磁盘）',
+                style: const TextStyle(color: Colors.red),
+              ),
+              subtitle: Text(
+                project.kind == 'draft'
+                    ? '设计稿数据将被直接删除'
+                    : '项目目录将移入回收站，可随时还原',
+                style: const TextStyle(fontSize: 11),
+              ),
+              onTap: () => Navigator.of(ctx).pop('delete'),
+            ),
+          ],
+        ),
       ),
     );
-    if (ok == true) await _removeHistory(project);
+    if (!mounted || action == null) return;
+    if (action == 'remove') {
+      await _removeHistory(project);
+    } else if (action == 'delete') {
+      await _deleteProject(project);
+    }
+  }
+
+  /// 手动输入确认短语后才允许从磁盘删除
+  Future<bool> _confirmTypedDelete(Project project) async {
+    const phrase = '我知道我在干什么';
+    final controller = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) {
+          final matched = controller.text.trim() == phrase;
+          return AlertDialog(
+            title: Text(
+              project.kind == 'draft' ? '删除设计稿' : '删除项目',
+              style: const TextStyle(color: Colors.red),
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  project.kind == 'draft'
+                      ? '该操作会直接删除设计稿数据，且无法恢复。'
+                      : '该操作会把项目目录从原路径移入应用回收站，'
+                          '可通过「还原项目」恢复。',
+                  style: const TextStyle(fontSize: 12, height: 1.5),
+                ),
+                const SizedBox(height: 8),
+                if (project.kind != 'draft')
+                  Text(
+                    project.path,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                const SizedBox(height: 14),
+                Text(
+                  '请输入「$phrase」以确认：',
+                  style: const TextStyle(fontSize: 12),
+                ),
+                const SizedBox(height: 6),
+                TextField(
+                  controller: controller,
+                  autofocus: true,
+                  onChanged: (_) => setDialogState(() {}),
+                  decoration: const InputDecoration(
+                    isDense: true,
+                    hintText: '我知道我在干什么',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(false),
+                child: Text(t('common.cancel')),
+              ),
+              FilledButton(
+                style: FilledButton.styleFrom(backgroundColor: Colors.red),
+                onPressed: matched
+                    ? () => Navigator.of(dialogContext).pop(true)
+                    : null,
+                child: const Text('确认删除'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+    controller.dispose();
+    return ok == true;
+  }
+
+  /// 删除项目：设计稿直接删除；磁盘项目移入回收站
+  Future<void> _deleteProject(Project project) async {
+    if (!await _confirmTypedDelete(project)) return;
+    if (project.kind == 'draft' && project.path.startsWith('draft:')) {
+      await DesignDraftService.instance
+          .delete(project.path.substring('draft:'.length));
+    } else {
+      final moved = await ProjectTrashService.instance.moveToTrash(project);
+      if (!moved) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('项目目录不存在或删除失败')),
+          );
+        }
+        return;
+      }
+      await ProjectHistoryService.instance.remove(project.path);
+    }
+    await _loadHistory();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            project.kind == 'draft'
+                ? '设计稿已删除'
+                : '项目已移入回收站，可在「还原项目」中恢复',
+          ),
+        ),
+      );
+    }
+  }
+
+  /// 还原项目：从回收站移回原路径并重新加入列表
+  Future<void> _restoreTrashed(TrashedProject entry) async {
+    final path = await ProjectTrashService.instance.restore(entry);
+    if (path == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('还原失败：回收站中找不到该项目')),
+        );
+      }
+      return;
+    }
+    await ProjectHistoryService.instance.touch(
+      path,
+      name: entry.name,
+      kind: entry.kind,
+    );
+    await _loadHistory();
+  }
+
+  /// 打开回收站列表
+  Future<void> _openTrash() async {
+    final items = await ProjectTrashService.instance.list();
+    if (!mounted) return;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (ctx) => SafeArea(
+        child: SizedBox(
+          height: MediaQuery.sizeOf(ctx).height * 0.6,
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                child: Row(
+                  children: [
+                    const Icon(Icons.restore, size: 18),
+                    const SizedBox(width: 8),
+                    const Text(
+                      '还原项目',
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const Spacer(),
+                    Text(
+                      '${items.length} 个',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: isDark ? Colors.white38 : Colors.black45,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1),
+              Expanded(
+                child: items.isEmpty
+                    ? Center(
+                        child: Text(
+                          '回收站是空的',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: isDark ? Colors.white38 : Colors.black45,
+                          ),
+                        ),
+                      )
+                    : ListView.builder(
+                        itemCount: items.length,
+                        itemBuilder: (context, index) {
+                          final entry = items[index];
+                          return ListTile(
+                            leading: const Icon(Icons.folder_delete_outlined),
+                            title: Text(entry.name),
+                            subtitle: Text(
+                              '原路径：${entry.originalPath}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontSize: 11),
+                            ),
+                            trailing: TextButton(
+                              onPressed: () async {
+                                Navigator.of(ctx).pop();
+                                await _restoreTrashed(entry);
+                              },
+                              child: const Text('还原'),
+                            ),
+                          );
+                        },
+                      ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -264,6 +503,8 @@ class HomeScreenState extends State<HomeScreen>
     final settings = context.watch<SettingsProvider>().settings;
     final showBackground =
         AppBackground.shouldShow(settings, isIdeScreen: false);
+    final isLandscape =
+        MediaQuery.orientationOf(context) == Orientation.landscape;
 
     return Scaffold(
       body: AppBackground.wrap(
@@ -283,96 +524,156 @@ class HomeScreenState extends State<HomeScreen>
           ),
         child: SafeArea(
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24.0),
-            child: Column(
-              children: [
-                // 右上角只保留偏好设置入口，其余功能已移到底栏 / 我的
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    IconButton(
-                      tooltip: t('home.preferences'),
-                      icon: const Icon(Icons.tune),
-                      onPressed: () => Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => const SettingsScreen(),
+            padding: EdgeInsets.symmetric(
+              horizontal: isLandscape ? 16.0 : 24.0,
+            ),
+            // 横屏：左侧头像 + 标题 + 文案，右侧项目列表
+            child: isLandscape
+                ? Row(
+                    children: [
+                      SizedBox(
+                        width: min(320.0,
+                            MediaQuery.sizeOf(context).width * 0.36),
+                        child: Column(
+                          children: [
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  IconButton(
+                                    tooltip: '还原项目',
+                                    icon: const Icon(Icons.restore),
+                                    onPressed: _openTrash,
+                                  ),
+                                  IconButton(
+                                    tooltip: t('home.preferences'),
+                                    icon: const Icon(Icons.tune),
+                                    onPressed: () =>
+                                        Navigator.of(context).push(
+                                      MaterialPageRoute(
+                                        builder: (_) => const SettingsScreen(),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Expanded(
+                              child: Center(child: _buildHero(isDark)),
+                            ),
+                          ],
                         ),
                       ),
-                    ),
-                  ],
-                ),
-
-                // 头像 + 自定义标题（账号信息统一在「我的」中查看）
-                FadeTransition(
-                  opacity: _logoFade,
-                  child: Consumer<SettingsProvider>(
-                    builder: (context, settingsProvider, _) {
-                      final settings = settingsProvider.settings;
-                      return Column(
+                      VerticalDivider(
+                        width: 17,
+                        thickness: 1,
+                        color: isDark ? Colors.white10 : Colors.black12,
+                      ),
+                      Expanded(child: _buildHistoryList(isDark)),
+                    ],
+                  )
+                : Column(
+                    children: [
+                      // 右上角只保留偏好设置入口，其余功能已移到底栏 / 我的
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
                         children: [
-                          _HomeAvatar(
-                            avatarPath: settings.avatarPath,
-                            isDark: isDark,
+                          IconButton(
+                            tooltip: '还原项目',
+                            icon: const Icon(Icons.restore),
+                            onPressed: _openTrash,
                           ),
-                          const SizedBox(height: 8),
-                          Text(
-                            settings.homeTitle,
-                            style: TextStyle(
-                              fontSize: 30,
-                              fontWeight: FontWeight.bold,
-                              letterSpacing: 1.2,
-                              color: isDark ? Colors.white : Colors.black87,
+                          IconButton(
+                            tooltip: t('home.preferences'),
+                            icon: const Icon(Icons.tune),
+                            onPressed: () => Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => const SettingsScreen(),
+                              ),
                             ),
                           ),
                         ],
-                      );
-                    },
+                      ),
+                      _buildHero(isDark),
+                      const SizedBox(height: 12),
+                      _buildSaying(isDark),
+                      const SizedBox(height: 12),
+                      // 项目历史列表
+                      Expanded(
+                        child: SlideTransition(
+                          position: _listSlide,
+                          child: FadeTransition(
+                            opacity: _entranceController,
+                            child: _buildHistoryList(isDark),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                    ],
                   ),
-                ),
-                const SizedBox(height: 12),
-
-                // 随机语句（打字机效果，可在偏好设置中关闭）
-                Consumer<SettingsProvider>(
-                  builder: (context, settings, _) {
-                    if (!settings.settings.showSaying) {
-                      return const SizedBox.shrink();
-                    }
-                    return SizedBox(
-                      height: 48,
-                      child: _saying.isEmpty
-                          ? const SizedBox.shrink()
-                          : TypewriterText(
-                              text: _saying,
-                              style: TextStyle(
-                                fontSize: 13,
-                                height: 1.4,
-                                color:
-                                    isDark ? Colors.white60 : Colors.black54,
-                              ),
-                            ),
-                    );
-                  },
-                ),
-                const SizedBox(height: 12),
-
-                // 项目历史列表
-                Expanded(
-                  child: SlideTransition(
-                    position: _listSlide,
-                    child: FadeTransition(
-                      opacity: _entranceController,
-                      child: _buildHistoryList(isDark),
-                    ),
-                  ),
-                ),
-
-                const SizedBox(height: 8),
-              ],
-            ),
           ),
         ),
         ),
       ),
+    );
+  }
+
+  /// 头像 + 自定义标题（账号信息统一在「我的」中查看）
+  Widget _buildHero(bool isDark) {
+    return FadeTransition(
+      opacity: _logoFade,
+      child: Consumer<SettingsProvider>(
+        builder: (context, settingsProvider, _) {
+          final settings = settingsProvider.settings;
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _HomeAvatar(
+                avatarPath: settings.avatarPath,
+                isDark: isDark,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                settings.homeTitle,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 30,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 1.2,
+                  color: isDark ? Colors.white : Colors.black87,
+                ),
+              ),
+              const SizedBox(height: 10),
+              _buildSaying(isDark),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  /// 随机语句（打字机效果，可在偏好设置中关闭）
+  Widget _buildSaying(bool isDark) {
+    return Consumer<SettingsProvider>(
+      builder: (context, settings, _) {
+        if (!settings.settings.showSaying) {
+          return const SizedBox.shrink();
+        }
+        return SizedBox(
+          height: 48,
+          child: _saying.isEmpty
+              ? const SizedBox.shrink()
+              : TypewriterText(
+                  text: _saying,
+                  style: TextStyle(
+                    fontSize: 13,
+                    height: 1.4,
+                    color: isDark ? Colors.white60 : Colors.black54,
+                  ),
+                ),
+        );
+      },
     );
   }
 

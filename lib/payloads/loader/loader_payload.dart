@@ -427,30 +427,8 @@ class BlockPayloadSpec {
 }
 
 /// ---------------------------------------------------------------------------
-/// 内置 Root Payload
+/// Root Payload（由社区定义：环境变量 + GitHub Actions workflow）
 /// ---------------------------------------------------------------------------
-
-const _paramGitHost = PayloadParamDef(
-  'git_host',
-  '代码仓库',
-  defaultValue: 'github',
-  type: PayloadParamType.select,
-  options: ['github', 'gitee', 'none'],
-);
-const _paramGeetest = PayloadParamDef(
-  'use_geetest',
-  '接入极验',
-  hint: '行为验证 / 人机校验',
-  defaultValue: 'true',
-  type: PayloadParamType.bool,
-);
-const _paramAliyun = PayloadParamDef(
-  'use_aliyun',
-  '接入阿里云',
-  hint: '短信 / OSS / 凭据部署',
-  defaultValue: 'true',
-  type: PayloadParamType.bool,
-);
 
 /// Node 云镜像的默认 workflow（Node 20 构建环境）
 const String kLoaderNodeWorkflow = r'''
@@ -504,63 +482,43 @@ jobs:
 class RootPayloadRegistry {
   RootPayloadRegistry._();
 
-  /// 官方内置 Root Payload（不可删除）
-  static const List<RootPayloadSpec> builtin = [
-    RootPayloadSpec(
-      id: 'flutter_cloud',
-      name: 'Flutter 云镜像',
-      description: 'GitHub 仓库 + 极验/阿里云凭据 + Flutter 构建环境，适合移动应用类项目',
-      icon: Icons.flutter_dash,
-      buildEnv: 'flutter',
-      buildEnvLabel: 'Flutter (stable)',
-      workflowContent: '', // 运行时取 GitHubActionsTemplates.flutterBuildWorkflow
-      params: [
-        _paramGitHost,
-        _paramGeetest,
-        _paramAliyun,
-        PayloadParamDef(
-          'flutter_channel',
-          'Flutter 通道',
-          defaultValue: 'stable',
-          type: PayloadParamType.select,
-          options: ['stable', 'beta'],
-        ),
-      ],
-    ),
-    RootPayloadSpec(
-      id: 'node_cloud',
-      name: 'Node.js 云镜像',
-      description: 'GitHub 仓库 + 极验/阿里云凭据 + Node.js 20 构建环境，适合多端 Web 项目',
-      icon: Icons.dns_outlined,
-      buildEnv: 'node',
-      buildEnvLabel: 'Node.js 20',
-      workflowContent: kLoaderNodeWorkflow,
-      params: [
-        _paramGitHost,
-        _paramGeetest,
-        _paramAliyun,
-        PayloadParamDef(
-          'node_version',
-          'Node 版本',
-          defaultValue: '20',
-        ),
-      ],
-    ),
-  ];
+  /// 官方不再内置 Root Payload：
+  /// Root 的定义（环境变量 + Actions workflow）完全由社区 Payload 负责，
+  /// 通过自定义 Payload 管理器导入 / 创建。
+  static const List<RootPayloadSpec> builtin = [];
+
+  /// 未选择 / 尚未导入社区 Root 时的占位项
+  static const RootPayloadSpec unset = RootPayloadSpec(
+    id: '',
+    name: '未选择 Root Payload',
+    description: 'Root Payload 由社区提供，请先在设计稿右侧选择或导入社区 Root Payload',
+    icon: Icons.inventory_2_outlined,
+    buildEnv: '',
+    buildEnvLabel: '',
+    workflowContent: '',
+    params: [],
+    isBuiltin: false,
+  );
 
   static RootPayloadSpec byId(String? id) {
     for (final spec in all) {
       if (spec.id == id) return spec;
     }
-    return all.first;
+    return all.isNotEmpty ? all.first : unset;
   }
 
   static final List<RootPayloadSpec> _custom = [];
 
-  /// 内置 + 用户自定义（顺序：内置在前，自定义在后）
-  static List<RootPayloadSpec> get all => [...builtin, ..._custom];
+  /// 内置（已清空）+ 用户自定义（顺序：自定义在前）
+  static List<RootPayloadSpec> get all => [..._custom];
 
   static List<RootPayloadSpec> get custom => List.unmodifiable(_custom);
+
+  /// 是否已有可用的社区 Root Payload
+  static bool get hasAny => _custom.isNotEmpty;
+
+  /// 新建设计稿 / Loader 项目时的默认 Root id（没有则为空字符串）
+  static String get defaultId => _custom.isEmpty ? '' : _custom.first.id;
 
   /// 注入用户自定义 Root（由 CustomPayloadService 调用）
   static void setCustom(List<RootPayloadSpec> specs) {

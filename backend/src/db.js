@@ -230,6 +230,8 @@ const DEFAULT_DB = {
   chatHistory: {},
   // AI 多会话（跨端同步）：{ [userId]: Conversation[] }
   conversations: {},
+  // 私人知识库（跨端同步）：{ [userId]: KnowledgeEntry[] }
+  knowledge: {},
   // 管理员发布的使用文档（Markdown）
   docs: [],
   // 官网下载的最新安装包元数据（文件存 DATA_DIR/releases/）
@@ -337,6 +339,10 @@ export async function loadDb() {
       conversations:
         parsed.conversations && typeof parsed.conversations === 'object'
           ? parsed.conversations
+          : {},
+      knowledge:
+        parsed.knowledge && typeof parsed.knowledge === 'object'
+          ? parsed.knowledge
           : {},
       docs: Array.isArray(parsed.docs) ? parsed.docs : [],
       release:

@@ -694,6 +694,46 @@ class AccountService {
     return const [];
   }
 
+  /// 拉取云端知识库（登录用户）
+  Future<({List<Map<String, dynamic>> items, DateTime? updatedAt})?>
+      fetchKnowledge(String token) async {
+    _ensureConfigured();
+    final res = await _client
+        .get(_u('/api/me/knowledge'), headers: _headers(token))
+        .timeout(const Duration(seconds: 20));
+    final data = await _decode(res, '获取知识库失败');
+    final raw = data['items'];
+    final items = <Map<String, dynamic>>[
+      if (raw is List)
+        for (final item in raw)
+          if (item is Map) Map<String, dynamic>.from(item),
+    ];
+    return (
+      items: items,
+      updatedAt: DateTime.tryParse((data['updatedAt'] ?? '').toString()),
+    );
+  }
+
+  /// 上传云端知识库（登录用户，整体覆盖）
+  Future<void> pushKnowledge(
+    String token,
+    List<Map<String, dynamic>> items, {
+    DateTime? updatedAt,
+  }) async {
+    _ensureConfigured();
+    final res = await _client
+        .put(
+          _u('/api/me/knowledge'),
+          headers: _headers(token),
+          body: jsonEncode({
+            'items': items,
+            if (updatedAt != null) 'updatedAt': updatedAt.toIso8601String(),
+          }),
+        )
+        .timeout(const Duration(seconds: 30));
+    await _decode(res, '保存知识库失败');
+  }
+
   Future<BillingInfo> fetchBillingPlans() async {
     _ensureConfigured();
     final res = await _client

@@ -238,17 +238,26 @@ class BuildService {
     return null;
   }
 
-  /// 通过系统安装器安装 APK
-  Future<bool> installApk(String apkPath) async {
+  /// 用系统文件管理器 / 安装器打开构建产物
+  ///
+  /// 不再尝试静默安装：交给系统处理（APK 会进入安装器，其余类型由
+  /// 文件管理器选择打开方式）。
+  Future<bool> openArtifact(String path) async {
     try {
-      final ok = await _channel.invokeMethod<bool>('installApk', {
-        'path': apkPath,
+      final ok = await _channel.invokeMethod<bool>('openFile', {
+        'path': path,
+        'mime': path.toLowerCase().endsWith('.apk')
+            ? 'application/vnd.android.package-archive'
+            : '*/*',
       });
       return ok ?? false;
     } catch (_) {
       return false;
     }
   }
+
+  /// 通过系统安装器安装 APK（保留旧接口，等价于 [openArtifact]）
+  Future<bool> installApk(String apkPath) => openArtifact(apkPath);
 
   void _throwIfCancelled(bool Function()? isCancelled) {
     if (isCancelled?.call() == true) {

@@ -22,6 +22,7 @@ import 'services/app_globals.dart';
 import 'services/ai_extensions_service.dart';
 import 'services/custom_payload_service.dart';
 import 'services/github_hosts_service.dart';
+import 'services/knowledge_service.dart';
 import 'services/oauth_link_bus.dart';
 import 'services/overlay_service.dart';
 import 'services/project_history_service.dart';
@@ -42,6 +43,9 @@ Future<void> main() async {
   // 偏好设置先加载，决定首帧主题
   final settingsProvider = SettingsProvider();
   await settingsProvider.load();
+
+  // 私人知识库：首屏前加载本地缓存，登录后由文档页触发云端同步
+  await KnowledgeService.instance.ensureLoaded();
 
   // 第三方 MCP / 外源 Skill 的本地配置（仅本机保存）
   await AiExtensionsService.instance.ensureLoaded();

@@ -54,6 +54,57 @@ export async function handlePutSettings(req, res) {
 }
 
 // ---------------------------------------------------------------------------
+// 私人知识库（多设备同步）
+// ---------------------------------------------------------------------------
+
+export async function handleGetKnowledge(req, res) {
+  const user = requireUser(req);
+  const stored = getDb().knowledge?.[user.id];
+  // 兼容旧格式（直接存数组）
+  const items = Array.isArray(stored) ? stored : stored?.items;
+  const updatedAt = Array.isArray(stored)
+    ? ''
+    : (stored?.updatedAt || '');
+  sendJson(res, 200, {
+    items: Array.isArray(items) ? items : [],
+    updatedAt,
+  });
+}
+
+export async function handlePutKnowledge(req, res) {
+  const user = requireUser(req);
+  const body = await readJson(req);
+  const items = body.items;
+  if (!Array.isArray(items)) {
+    return sendJson(res, 400, { error: 'items 必须是数组' });
+  }
+  if (items.length > 500) {
+    return sendJson(res, 400, { error: '知识库条目过多（上限 500 条）' });
+  }
+  if (JSON.stringify(items).length > 1024 * 1024) {
+    return sendJson(res, 400, { error: '知识库内容过大（上限 1MB）' });
+  }
+  const updatedAt =
+    typeof body.updatedAt === 'string' && body.updatedAt
+      ? body.updatedAt
+      : new Date().toISOString();
+  const db = getDb();
+  if (!db.knowledge || typeof db.knowledge !== 'object') db.knowledge = {};
+  db.knowledge[user.id] = {
+    items: items.map((item) =>
+      item && typeof item === 'object' ? item : { content: String(item) },
+    ),
+    updatedAt,
+  };
+  await saveDb();
+  sendJson(res, 200, {
+    ok: true,
+    items: db.knowledge[user.id].items,
+    updatedAt,
+  });
+}
+
+// ---------------------------------------------------------------------------
 // 头像 / 壁纸
 // ---------------------------------------------------------------------------
 

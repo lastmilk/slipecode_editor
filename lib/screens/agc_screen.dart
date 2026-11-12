@@ -15,6 +15,7 @@ import '../services/ai_change_journal.dart';
 import '../services/ai_attachment_service.dart';
 import '../services/ai_extensions_service.dart';
 import '../services/conversation_service.dart';
+import '../services/knowledge_service.dart';
 import '../services/llm_service.dart';
 import '../widgets/ai_interaction_cards.dart';
 import '../widgets/llm_model_bar.dart';
@@ -49,6 +50,12 @@ class _AgcScreenState extends State<AgcScreen> {
   /// 待发送的文本附件
   final List<AiTextAttachment> _pendingFiles = [];
 
+  /// /exp：本轮是否把私人知识库作为参考上下文
+  bool _knowledgeEnabled = false;
+
+  /// /expmod：本轮完成后是否把经验写入知识库
+  bool _writeKnowledgeAfterRun = false;
+
   @override
   void initState() {
     super.initState();
@@ -82,6 +89,16 @@ class _AgcScreenState extends State<AgcScreen> {
       case '/plan':
         context.read<AiProvider>().setPlanMode(true);
         break;
+      case '/exp':
+        setState(() => _knowledgeEnabled = !_knowledgeEnabled);
+        _showSnack(
+          _knowledgeEnabled ? '已开启：本轮将参考知识库经验' : '已关闭知识库参考',
+        );
+        break;
+      case '/expmod':
+        setState(() => _writeKnowledgeAfterRun = true);
+        _showSnack('本轮完成后会把 AI 的经验写入知识库');
+        break;
     }
   }
 
@@ -107,13 +124,17 @@ class _AgcScreenState extends State<AgcScreen> {
       return;
     }
     // 直接发送「/」指令时同样生效（如用户未点选面板，直接输入 /plan 回车）
-    if (text == '/plan') {
+    if (text == '/plan' || text == '/exp' || text == '/expmod') {
       _runSlashCommand(text);
       return;
     }
     final images = List<ChatImageAttachment>.from(_pendingImages);
     final files = List<AiTextAttachment>.from(_pendingFiles);
-    final attachmentContext = AiAttachmentService.composeContext(files);
+    // /exp：把私人知识库作为参考上下文（仅发给模型，不显示在气泡中）
+    final knowledgeContext =
+        _knowledgeEnabled ? KnowledgeService.instance.buildContext() : '';
+    final attachmentContext =
+        '${AiAttachmentService.composeContext(files)}$knowledgeContext';
     final attachmentNames = [
       ...images.map((e) => e.name),
       ...files.map((e) => e.name),
@@ -130,6 +151,32 @@ class _AgcScreenState extends State<AgcScreen> {
       attachmentNames: attachmentNames,
     );
     _scrollToBottom();
+    if (_writeKnowledgeAfterRun) {
+      await _saveExperienceToKnowledge();
+    }
+  }
+
+  /// /expmod：把本轮 AI 的最终回复沉淀为一条知识库经验
+  Future<void> _saveExperienceToKnowledge() async {
+    final ai = context.read<AiProvider>();
+    ChatMessage? lastAssistant;
+    for (final message in ai.messages.reversed) {
+      if (message.role == ChatRole.assistant &&
+          message.content.trim().isNotEmpty) {
+        lastAssistant = message;
+        break;
+      }
+    }
+    if (lastAssistant == null) return;
+    await KnowledgeService.instance.saveExperience(lastAssistant.content);
+    if (!mounted) return;
+    final account = context.read<AccountProvider>();
+    if (account.isSignedIn) {
+      await KnowledgeService.instance.sync(account.token);
+    }
+    if (!mounted) return;
+    setState(() => _writeKnowledgeAfterRun = false);
+    _showSnack('本次经验已写入知识库');
   }
 
   /// 选择附件类型（图片 / 文件）
@@ -335,6 +382,12 @@ class _AgcScreenState extends State<AgcScreen> {
         // 计划模式提示条（/plan 指令开启）
         if (ai.planMode) _buildPlanChip(isDark),
 
+        // 知识库参考提示条（/exp 指令开启）
+        if (_knowledgeEnabled) _buildKnowledgeChip(isDark),
+
+        // 经验写入提示条（/expmod 指令开启）
+        if (_writeKnowledgeAfterRun) _buildExpmodChip(isDark),
+
         // 模型与积分栏
         Padding(
           padding: const EdgeInsets.fromLTRB(14, 2, 14, 0),
@@ -424,6 +477,61 @@ class _AgcScreenState extends State<AgcScreen> {
             iconSize: 15,
             onPressed: () => context.read<AiProvider>().setPlanMode(false),
             icon: const Icon(Icons.close, color: Color(0xFF7C4DFF)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 知识库提示条：本轮会参考私人知识库经验
+  Widget _buildKnowledgeChip(bool isDark) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(14, 5, 6, 5),
+      color: Colors.teal.withValues(alpha: 0.10),
+      child: Row(
+        children: [
+          const Icon(Icons.auto_stories_outlined,
+              size: 15, color: Colors.teal),
+          const SizedBox(width: 6),
+          const Expanded(
+            child: Text(
+              '知识库参考：本轮会把私人知识库经验提供给 AI',
+              style: TextStyle(fontSize: 11, color: Colors.teal),
+            ),
+          ),
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            iconSize: 15,
+            onPressed: () => setState(() => _knowledgeEnabled = false),
+            icon: const Icon(Icons.close, color: Colors.teal),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// /expmod 提示条：完成后写入知识库
+  Widget _buildExpmodChip(bool isDark) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(14, 5, 6, 5),
+      color: Colors.purple.withValues(alpha: 0.10),
+      child: Row(
+        children: [
+          const Icon(Icons.auto_awesome, size: 15, color: Colors.purple),
+          const SizedBox(width: 6),
+          const Expanded(
+            child: Text(
+              '本轮完成后会把 AI 的经验写入私人知识库',
+              style: TextStyle(fontSize: 11, color: Colors.purple),
+            ),
+          ),
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            iconSize: 15,
+            onPressed: () => setState(() => _writeKnowledgeAfterRun = false),
+            icon: const Icon(Icons.close, color: Colors.purple),
           ),
         ],
       ),
@@ -1199,6 +1307,18 @@ class _SlashCommandPanel extends StatelessWidget {
       '计划模式',
       'AI 先制定实施计划，确认后再执行',
       Icons.format_list_numbered,
+    ),
+    (
+      '/exp',
+      '参考知识库',
+      '本轮把私人知识库经验提供给 AI 参考',
+      Icons.auto_stories_outlined,
+    ),
+    (
+      '/expmod',
+      '写入知识库',
+      '本轮完成后把 AI 的经验写入私人知识库',
+      Icons.auto_awesome,
     ),
   ];
 

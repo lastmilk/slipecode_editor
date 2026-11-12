@@ -10,6 +10,7 @@ import '../providers/account_provider.dart';
 import '../providers/ai_provider.dart';
 import '../providers/editor_provider.dart';
 import '../services/ai_change_journal.dart';
+import '../services/knowledge_service.dart';
 import '../services/llm_service.dart';
 import '../widgets/ai_interaction_cards.dart';
 import '../widgets/credits_sheet.dart';
@@ -32,6 +33,12 @@ class AiChatScreen extends StatefulWidget {
 class _AiChatScreenState extends State<AiChatScreen> {
   final TextEditingController _inputController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
+
+  /// /exp：本轮参考私人知识库
+  bool _useKnowledge = false;
+
+  /// /expmod：本轮完成后写入知识库
+  bool _writeExperience = false;
 
   @override
   void initState() {
@@ -65,8 +72,52 @@ class _AiChatScreenState extends State<AiChatScreen> {
     final text = _inputController.text.trim();
     if (text.isEmpty) return;
     _inputController.clear();
-    await context.read<AiProvider>().sendMessage(text);
+    if (text == '/exp') {
+      setState(() => _useKnowledge = !_useKnowledge);
+      _snack(_useKnowledge ? '已开启知识库参考' : '已关闭知识库参考');
+      return;
+    }
+    if (text == '/expmod') {
+      setState(() => _writeExperience = true);
+      _snack('本轮完成后会写入知识库');
+      return;
+    }
+    final knowledgeContext =
+        _useKnowledge ? KnowledgeService.instance.buildContext() : '';
+    await context.read<AiProvider>().sendMessage(
+      text,
+      attachmentContext: knowledgeContext,
+    );
     _scrollToBottom();
+    if (_writeExperience) {
+      if (!mounted) return;
+      final ai = context.read<AiProvider>();
+      ChatMessage? lastAssistant;
+      for (final message in ai.messages.reversed) {
+        if (message.role == ChatRole.assistant &&
+            message.content.trim().isNotEmpty) {
+          lastAssistant = message;
+          break;
+        }
+      }
+      if (lastAssistant != null) {
+        await KnowledgeService.instance.saveExperience(lastAssistant.content);
+        if (!mounted) return;
+        final account = context.read<AccountProvider>();
+        if (account.isSignedIn) {
+          await KnowledgeService.instance.sync(account.token);
+        }
+        if (mounted) setState(() => _writeExperience = false);
+        _snack('本次经验已写入知识库');
+      }
+    }
+  }
+
+  void _snack(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), duration: const Duration(seconds: 2)),
+    );
   }
 
   @override
