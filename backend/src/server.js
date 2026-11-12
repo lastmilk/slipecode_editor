@@ -76,6 +76,7 @@ import {
   handleWechatNotify,
 } from './routes/membership.js';
 import { handleAiLimits, handleAiUnzip } from './routes/ai_files.js';
+import { handleAiSearch } from './routes/search.js';
 import {
   handleAdminRefreshGithubHosts,
   handleGetGithubHosts,
@@ -255,6 +256,8 @@ const ROUTES = {
   // AI 附件（Zip 云端解压 / 上传限制）
   'GET /api/ai/limits': handleAiLimits,
   'POST /api/ai/files/unzip': handleAiUnzip,
+  // 联网搜索（代理 DeepSeek Search API）
+  'POST /api/ai/search': handleAiSearch,
 
   // GitHub 专用 Hosts（应用内使用，不影响系统网络）
   'GET /api/github-hosts': handleGetGithubHosts,

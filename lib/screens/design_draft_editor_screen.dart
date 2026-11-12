@@ -4,6 +4,7 @@ import '../models/design_draft.dart';
 import '../payloads/loader/loader_payload.dart';
 import '../services/design_draft_service.dart';
 import '../widgets/payload_graph_editor.dart';
+import 'design_ai_screen.dart';
 import 'design_draft_list_screen.dart';
 
 /// 设计稿编辑器
@@ -123,6 +124,24 @@ class _DesignDraftEditorScreenState extends State<DesignDraftEditorScreen> {
             ),
           ),
           actions: [
+            IconButton(
+              tooltip: 'AI 编排设计稿',
+              icon: const Icon(Icons.auto_awesome),
+              onPressed: () async {
+                await Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => DesignAiScreen(
+                      draft: _draft,
+                      onChanged: _markDirty,
+                      onSaved: () {
+                        if (mounted) setState(() {});
+                      },
+                    ),
+                  ),
+                );
+                if (mounted) setState(() {});
+              },
+            ),
             IconButton(
               tooltip: '我的设计稿',
               icon: const Icon(Icons.folder_copy_outlined),

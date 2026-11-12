@@ -16,6 +16,12 @@ class AiExtensionsService extends ChangeNotifier {
 
   static const _storageKey = 'slipe_ai_extensions_v1';
 
+  /// 当前作用域（null = 全局；非空 = 某个项目独立的 MCP/Skills）
+  String? _scopeKey;
+
+  String get _storageKeyForScope =>
+      _scopeKey == null ? _storageKey : '${_storageKey}_$_scopeKey';
+
   bool _loaded = false;
   List<McpServerConfig> _servers = const [];
   List<ImportedSkill> _skills = const [];
@@ -42,10 +48,17 @@ class AiExtensionsService extends ChangeNotifier {
         .join('|');
   }
 
-  Future<void> ensureLoaded() async {
-    if (_loaded) return;
+  /// 加载配置
+  ///
+  /// [scopeKey] 为空表示全局配置；非空时加载该项目独立的 MCP/Skills。
+  Future<void> ensureLoaded({String? scopeKey}) async {
+    if (_loaded && _scopeKey == scopeKey) return;
+    _scopeKey = scopeKey;
+    _loaded = false;
     final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(_storageKey);
+    final raw = prefs.getString(_storageKeyForScope);
+    _servers = const [];
+    _skills = const [];
     if (raw != null && raw.isNotEmpty) {
       try {
         final data = jsonDecode(raw);
@@ -79,7 +92,7 @@ class AiExtensionsService extends ChangeNotifier {
   Future<void> _persist() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(
-      _storageKey,
+      _storageKeyForScope,
       jsonEncode({
         'servers': _servers.map((e) => e.toJson()).toList(),
         'skills': _skills.map((e) => e.toJson()).toList(),

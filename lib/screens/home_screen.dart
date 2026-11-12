@@ -232,6 +232,8 @@ class HomeScreenState extends State<HomeScreen>
       await DesignDraftService.instance
           .delete(project.path.substring('draft:'.length));
     } else {
+      // 仅从列表移除：磁盘保留，记录到回收站以便还原
+      await ProjectTrashService.instance.rememberRemoved(project);
       await ProjectHistoryService.instance.remove(project.path);
     }
     await _loadHistory();
@@ -272,7 +274,7 @@ class HomeScreenState extends State<HomeScreen>
               subtitle: Text(
                 project.kind == 'draft'
                     ? '设计稿数据将被直接删除'
-                    : '项目目录将移入回收站，可随时还原',
+                    : '永久删除磁盘目录（不可恢复）',
                 style: const TextStyle(fontSize: 11),
               ),
               onTap: () => Navigator.of(ctx).pop('delete'),
@@ -310,8 +312,8 @@ class HomeScreenState extends State<HomeScreen>
                 Text(
                   project.kind == 'draft'
                       ? '该操作会直接删除设计稿数据，且无法恢复。'
-                      : '该操作会把项目目录从原路径移入应用回收站，'
-                          '可通过「还原项目」恢复。',
+                      : '该操作会永久删除磁盘上的项目目录，无法恢复。\n'
+                          '如果只是想暂时隐藏，请选择「仅从列表移除」。',
                   style: const TextStyle(fontSize: 12, height: 1.5),
                 ),
                 const SizedBox(height: 8),
@@ -364,60 +366,99 @@ class HomeScreenState extends State<HomeScreen>
     return ok == true;
   }
 
-  /// 删除项目：设计稿直接删除；磁盘项目移入回收站
+  /// 删除项目：设计稿直接删除；磁盘项目永久删除目录
   Future<void> _deleteProject(Project project) async {
     if (!await _confirmTypedDelete(project)) return;
     if (project.kind == 'draft' && project.path.startsWith('draft:')) {
       await DesignDraftService.instance
           .delete(project.path.substring('draft:'.length));
     } else {
-      final moved = await ProjectTrashService.instance.moveToTrash(project);
-      if (!moved) {
+      final dir = Directory(project.path);
+      if (!dir.existsSync()) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('项目目录不存在或删除失败')),
+            const SnackBar(content: Text('项目目录不存在，已仅清理列表记录')),
           );
         }
-        return;
+      } else {
+        try {
+          await dir.delete(recursive: true);
+        } catch (e) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('删除失败：$e')),
+            );
+          }
+          return;
+        }
       }
       await ProjectHistoryService.instance.remove(project.path);
+      await ProjectTrashService.instance.forgetPath(project.path);
     }
     await _loadHistory();
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            project.kind == 'draft'
-                ? '设计稿已删除'
-                : '项目已移入回收站，可在「还原项目」中恢复',
+            project.kind == 'draft' ? '设计稿已删除' : '项目已从磁盘永久删除',
           ),
         ),
       );
     }
   }
 
-  /// 还原项目：从回收站移回原路径并重新加入列表
-  Future<void> _restoreTrashed(TrashedProject entry) async {
-    final path = await ProjectTrashService.instance.restore(entry);
-    if (path == null) {
+  /// 还原项目：把「仅从列表移除」的项目重新加入列表（磁盘文件保留在原路径）
+  Future<void> _restoreTrashed(RemovedProject entry) async {
+    final ok = await ProjectTrashService.instance.restore(entry);
+    if (!ok) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('还原失败：回收站中找不到该项目')),
+          const SnackBar(content: Text('还原失败：项目目录已不存在')),
         );
       }
       return;
     }
     await ProjectHistoryService.instance.touch(
-      path,
+      entry.path,
       name: entry.name,
       kind: entry.kind,
     );
     await _loadHistory();
   }
 
+  /// 从「已移除」列表永久删除磁盘目录（释放空间）
+  Future<void> _deleteRemovedEntry(RemovedProject entry) async {
+    final project = Project(
+      name: entry.name,
+      path: entry.path,
+      createdAt: entry.removedAt,
+      kind: entry.kind,
+    );
+    if (!await _confirmTypedDelete(project)) return;
+    final dir = Directory(entry.path);
+    if (dir.existsSync()) {
+      try {
+        await dir.delete(recursive: true);
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('删除失败：$e')),
+          );
+        }
+        return;
+      }
+    }
+    await ProjectTrashService.instance.forget(entry.id);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('项目已从磁盘永久删除')),
+      );
+    }
+  }
+
   /// 打开回收站列表
   Future<void> _openTrash() async {
-    final items = await ProjectTrashService.instance.list();
+    final items = await ProjectTrashService.instance.listRestorable();
     if (!mounted) return;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     await showModalBottomSheet<void>(
@@ -458,7 +499,7 @@ class HomeScreenState extends State<HomeScreen>
                 child: items.isEmpty
                     ? Center(
                         child: Text(
-                          '回收站是空的',
+                          '暂无可还原的项目（仅从列表移除的项目会出现在这里）',
                           style: TextStyle(
                             fontSize: 12,
                             color: isDark ? Colors.white38 : Colors.black45,
@@ -473,17 +514,34 @@ class HomeScreenState extends State<HomeScreen>
                             leading: const Icon(Icons.folder_delete_outlined),
                             title: Text(entry.name),
                             subtitle: Text(
-                              '原路径：${entry.originalPath}',
+                              '项目路径：${entry.path}',
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(fontSize: 11),
                             ),
-                            trailing: TextButton(
-                              onPressed: () async {
-                                Navigator.of(ctx).pop();
-                                await _restoreTrashed(entry);
-                              },
-                              child: const Text('还原'),
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                IconButton(
+                                  tooltip: '永久删除（释放磁盘空间）',
+                                  icon: const Icon(
+                                    Icons.delete_forever,
+                                    size: 20,
+                                    color: Colors.red,
+                                  ),
+                                  onPressed: () async {
+                                    Navigator.of(ctx).pop();
+                                    await _deleteRemovedEntry(entry);
+                                  },
+                                ),
+                                TextButton(
+                                  onPressed: () async {
+                                    Navigator.of(ctx).pop();
+                                    await _restoreTrashed(entry);
+                                  },
+                                  child: const Text('还原'),
+                                ),
+                              ],
                             ),
                           );
                         },
@@ -560,7 +618,16 @@ class HomeScreenState extends State<HomeScreen>
                               ),
                             ),
                             Expanded(
-                              child: Center(child: _buildHero(isDark)),
+                              child: Center(
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    _buildHero(isDark),
+                                    const SizedBox(height: 16),
+                                    _buildSaying(isDark),
+                                  ],
+                                ),
+                              ),
                             ),
                           ],
                         ),
@@ -644,8 +711,6 @@ class HomeScreenState extends State<HomeScreen>
                   color: isDark ? Colors.white : Colors.black87,
                 ),
               ),
-              const SizedBox(height: 10),
-              _buildSaying(isDark),
             ],
           );
         },

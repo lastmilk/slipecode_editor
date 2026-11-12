@@ -3,13 +3,16 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../agent/agent_service.dart';
+import '../agent/design_tools.dart';
 import '../agent/mcp_tools.dart';
 import '../config/app_config.dart';
 import '../l10n/app_localizations.dart';
 import '../models/app_settings.dart';
 import '../models/chat_segment.dart';
 import '../models/credits.dart';
+import '../models/design_draft.dart';
 import '../models/llm_profile.dart';
+import '../payloads/loader/loader_payload.dart';
 import '../providers/account_provider.dart';
 import '../providers/build_provider.dart';
 import '../providers/editor_provider.dart';
@@ -18,9 +21,12 @@ import '../providers/settings_provider.dart';
 import '../providers/terminal_provider.dart';
 import '../services/ai_extensions_service.dart';
 import '../services/conversation_service.dart';
+import '../services/design_draft_service.dart';
 import '../services/external_mcp_manager.dart';
 import '../services/live_task_service.dart';
 import '../services/llm_service.dart';
+import '../services/project_agent_settings_service.dart';
+import '../services/web_search_service.dart';
 
 /// AI 助手状态
 enum AiStatus { idle, thinking, error }
@@ -109,6 +115,16 @@ class AiProvider extends ChangeNotifier {
   /// 计划模式（/plan 指令开启）：AI 只制定计划，用户确认后再执行
   bool _planMode = false;
 
+  /// /design：先创建并编排设计稿，再执行实现
+  bool _designMode = false;
+  DesignDraft? _designDraft;
+
+  /// /search：本轮启用联网搜索工具
+  bool _searchMode = false;
+
+  /// /mcpadd：本轮允许 AI 自行添加 MCP / Skill
+  bool _mcpAddMode = false;
+
   // 阶段 TODO / 用户提问 / 计划确认
   List<AgentTodoItem> _todos = const [];
   Map<String, dynamic>? _pendingQuestion;
@@ -157,6 +173,21 @@ class AiProvider extends ChangeNotifier {
   /// 是否为计划模式（/plan）：AI 只制定计划，不执行写操作
   bool get planMode => _planMode;
 
+  /// 是否为设计稿优先模式（/design）
+  bool get designMode => _designMode;
+
+  /// /design 创建的设计稿（供 UI 提示 / 跳转）
+  DesignDraft? get designDraft => _designDraft;
+
+  /// 是否启用联网搜索（/search）
+  bool get searchMode => _searchMode;
+
+  /// 当前是否允许 AI 自行添加 MCP/Skill（/mcpadd）
+  bool get mcpAddMode => _mcpAddMode;
+
+  /// 最近一次用户请求（用于经验标题）
+  String? get lastUserRequest => _lastUserText;
+
   /// 当前任务的阶段 TODO
   List<AgentTodoItem> get todos => _todos;
 
@@ -181,6 +212,13 @@ class AiProvider extends ChangeNotifier {
 
   /// 当前模型展示名称
   String get currentModelName => _resolveLlm()?.name ?? '未选择模型';
+
+  /// 供独立 Agent（设计稿 AI）复用的模型配置
+  ({String apiBase, String apiKey, String model})? get llmTarget {
+    final llm = _resolveLlm();
+    if (llm == null) return null;
+    return (apiBase: llm.apiBase, apiKey: llm.apiKey, model: llm.model);
+  }
 
   /// 当前是否使用内置模型
   bool get isUsingBuiltinModel => _resolveLlm()?.builtin ?? false;
@@ -255,7 +293,14 @@ class AiProvider extends ChangeNotifier {
   /// 加载用户配置的第三方 MCP 与外源 Skill
   Future<String> _prepareExtensions() async {
     final extensions = AiExtensionsService.instance;
-    await extensions.ensureLoaded();
+    await ProjectAgentSettingsService.instance.ensureLoaded();
+    final path = _project.projectPath;
+    final isolated = ProjectAgentSettingsService.instance.isIsolated(path);
+    await extensions.ensureLoaded(
+      scopeKey: isolated && path != null && path.isNotEmpty
+          ? ProjectAgentSettingsService.scopeKeyFor(path)
+          : null,
+    );
     try {
       _toolbox.externalManager = ExternalMcpManager.instance;
       await ExternalMcpManager.instance.configure(extensions.enabledServers);
@@ -263,6 +308,13 @@ class AiProvider extends ChangeNotifier {
       debugPrint('第三方 MCP 初始化失败：$e');
     }
     return extensions.enabledSkillsText;
+  }
+
+  /// 当前项目作用域（每个项目独立的 AI 会话）
+  String get _projectScope {
+    final path = _project.projectPath;
+    if (path == null || path.isEmpty) return 'global';
+    return ProjectAgentSettingsService.scopeKeyFor(path);
   }
 
   void _safeNotify() {
@@ -273,6 +325,51 @@ class AiProvider extends ChangeNotifier {
   Future<void> refreshMcpTools() async {
     await _prepareExtensions();
     _safeNotify();
+  }
+
+  /// /expmod：让 AI 按固定复盘规范总结本轮项目完成过程
+  ///
+  /// 与「直接保存最后一条回复」不同，这里会额外发起一次非流式总结，
+  /// 产出结构化经验文档（背景/步骤/决策/踩坑/可复用经验/验证方式）。
+  Future<String?> summarizeExperienceForKnowledge() async {
+    final llm = _resolveLlm();
+    if (llm == null) return null;
+    final recent = _messages.length > 30
+        ? _messages.sublist(_messages.length - 30)
+        : _messages;
+    final transcript = recent
+        .where((m) => m.role != ChatRole.tool && m.content.trim().isNotEmpty)
+        .map((m) => '${m.role == ChatRole.user ? '用户' : 'AI'}：${m.content}')
+        .join('\n\n');
+    if (transcript.trim().isEmpty) return null;
+    const spec = '你是项目经验沉淀助手。请根据下面的项目任务对话，'
+        '输出一份可直接存入团队知识库的中文 Markdown 经验文档，严格按以下结构：\n'
+        '# 背景与目标\n'
+        '# 实施方案与步骤\n'
+        '# 关键决策与原因\n'
+        '# 遇到的问题与解决方式\n'
+        '# 可复用的经验（要点清单）\n'
+        '# 验证方式\n'
+        '# 适用场景与注意事项\n'
+        '要求：只输出文档正文；如实归纳，不要编造未发生的内容；总长度不超过 1200 字。';
+    try {
+      return await LlmService.instance.chat(
+        apiBase: llm.apiBase,
+        apiKey: llm.apiKey,
+        model: llm.model,
+        messages: [
+          const ChatMessage(role: ChatRole.system, content: spec),
+          ChatMessage(
+            role: ChatRole.user,
+            content: '对话记录：\n\n$transcript',
+          ),
+        ],
+        temperature: 0.3,
+      );
+    } catch (e) {
+      debugPrint('生成经验总结失败：$e');
+      return null;
+    }
   }
 
   /// 清空当前会话消息（会话本身保留在列表中）
@@ -307,6 +404,7 @@ class AiProvider extends ChangeNotifier {
       token: _account.token,
       cloudEnabled: _s.chatCloudSync && _account.isSignedIn,
       settings: _s,
+      scope: _projectScope,
     );
   }
 
@@ -384,6 +482,28 @@ class AiProvider extends ChangeNotifier {
   void setPlanMode(bool value) {
     if (_planMode == value) return;
     _planMode = value;
+    _safeNotify();
+  }
+
+  /// 开启 / 关闭设计稿优先模式（/design）
+  void setDesignMode(bool value) {
+    if (_designMode == value) return;
+    _designMode = value;
+    if (!value) _designDraft = null;
+    _safeNotify();
+  }
+
+  /// 开启 / 关闭联网搜索（/search）
+  void setSearchMode(bool value) {
+    if (_searchMode == value) return;
+    _searchMode = value;
+    _safeNotify();
+  }
+
+  /// 开启 / 关闭 AI 自行添加 MCP/Skill（/mcpadd）
+  void setMcpAddMode(bool value) {
+    if (_mcpAddMode == value) return;
+    _mcpAddMode = value;
     _safeNotify();
   }
 
@@ -537,6 +657,29 @@ class AiProvider extends ChangeNotifier {
 
     final extraSkill = await _prepareExtensions();
 
+    // 指令附带的动态 MCP 工具（/design /search /mcpadd）
+    final extraTools = <McpTool>[];
+    var commandContext = '';
+    if (_searchMode) {
+      extraTools.add(_buildWebSearchTool());
+    }
+    if (_mcpAddMode) {
+      extraTools.addAll(_buildMcpAddTools());
+    }
+    if (_designMode) {
+      _designDraft ??= await _createAiDesignDraft(text);
+      final toolkit = DesignToolkit(
+        draft: _designDraft!,
+        onChanged: () {},
+      );
+      extraTools.addAll(toolkit.tools);
+      commandContext = '\n\n[设计稿优先模式]\n'
+          '请先使用 design_* 工具完善设计稿（id=${_designDraft!.id}），'
+          '设计完成后基于该蓝图继续执行用户的实现需求。\n'
+          '${toolkit.summary}';
+    }
+    _toolbox.setExtraTools(extraTools);
+
     // 确保有当前会话（首条消息自动生成会话标题）
     ConversationService.instance.ensureCurrent(firstUserText: text);
 
@@ -546,7 +689,9 @@ class AiProvider extends ChangeNotifier {
     final userMessage = ChatMessage(
       role: ChatRole.user,
       content: displayContent.trim(),
-      apiContent: attachmentContext.isEmpty ? null : '$text$attachmentContext',
+      apiContent: (attachmentContext.isEmpty && commandContext.isEmpty)
+          ? null
+          : '$text$attachmentContext$commandContext',
       images: images,
     );
     _messages.add(userMessage);
@@ -825,6 +970,171 @@ class AiProvider extends ChangeNotifier {
     if (!_vibeBusy) return;
     _vibeCancelled = true;
     _safeNotify();
+  }
+
+  /// 切换项目后重置对话、作用域与指令模式（每个项目独立会话）
+  Future<void> handleProjectChanged() async {
+    _messages.clear();
+    _timeline.clear();
+    _steps.clear();
+    _streamSegments.clear();
+    _streamingText = '';
+    _streamingReasoning = '';
+    _isStreaming = false;
+    _status = AiStatus.idle;
+    _error = null;
+    _todos = const [];
+    _pendingQuestion = null;
+    _pendingPlan = null;
+    _historyLoaded = false;
+    _designDraft = null;
+    _designMode = false;
+    _searchMode = false;
+    _mcpAddMode = false;
+    _safeNotify();
+    await ensureCloudHistoryLoaded();
+  }
+
+  /// 创建一份 AI 设计稿（/design 指令首次触发时）
+  Future<DesignDraft> _createAiDesignDraft(String text) async {
+    final now = DateTime.now();
+    final raw = text.trim().replaceAll('\n', ' ');
+    final suffix = raw.isEmpty
+        ? ''
+        : ' · ${raw.length > 18 ? '${raw.substring(0, 18)}…' : raw}';
+    final draft = DesignDraft(
+      id: 'draft_${now.microsecondsSinceEpoch}',
+      name: 'AI 设计稿$suffix',
+      createdAt: now,
+      updatedAt: now,
+      root: RootPayloadInstance(specId: RootPayloadRegistry.defaultId),
+      systems: [],
+    );
+    await DesignDraftService.instance.save(draft);
+    return draft;
+  }
+
+  /// /search：联网搜索工具
+  McpTool _buildWebSearchTool() {
+    return McpTool(
+      name: 'web_search',
+      description: '联网搜索网页资料（需要登录 SLIPE 账号）。适合查询最新文档、版本信息、报错资料。',
+      parameters: {
+        'type': 'object',
+        'properties': {
+          'query': {'type': 'string', 'description': '搜索词（1-128 字符）'},
+          'count': {
+            'type': 'integer',
+            'description': '返回条数，默认 5，最多 10',
+          },
+        },
+        'required': ['query'],
+      },
+      execute: (args) async {
+        final token = _account.token;
+        if (token == null || !_account.isSignedIn) {
+          return '错误：联网搜索需要先登录 SLIPE 账号';
+        }
+        final query = (args['query'] ?? '').toString().trim();
+        if (query.isEmpty) return '错误：缺少搜索词';
+        final count = ((args['count'] as num?)?.toInt() ?? 5).clamp(1, 10);
+        try {
+          final hits = await WebSearchService.instance.search(
+            accountToken: token,
+            query: query,
+            count: count,
+          );
+          return WebSearchService.formatHits(hits, query);
+        } catch (e) {
+          return '错误：$e';
+        }
+      },
+    );
+  }
+
+  /// /mcpadd：允许 AI 自行注册 MCP 服务器 / Skill
+  List<McpTool> _buildMcpAddTools() {
+    return [
+      McpTool(
+        name: 'add_mcp_server',
+        description: '添加一个外源 MCP 服务器（http/sse 填 url，stdio 填 command 与 args）。',
+        parameters: {
+          'type': 'object',
+          'properties': {
+            'name': {'type': 'string', 'description': '服务器名称'},
+            'transport': {
+              'type': 'string',
+              'description': 'http / sse / stdio，默认 http',
+            },
+            'url': {'type': 'string', 'description': 'http/sse 的地址'},
+            'command': {'type': 'string', 'description': 'stdio 命令，如 npx'},
+            'args': {
+              'type': 'array',
+              'items': {'type': 'string'},
+              'description': 'stdio 命令参数',
+            },
+          },
+          'required': ['name'],
+        },
+        execute: (args) async {
+          final name = (args['name'] ?? '').toString().trim();
+          if (name.isEmpty) return '错误：缺少服务器名称';
+          var transport = (args['transport'] ?? '').toString().trim();
+          final url = (args['url'] ?? '').toString().trim();
+          final command = (args['command'] ?? '').toString().trim();
+          if (transport.isEmpty) {
+            transport = command.isNotEmpty ? 'stdio' : 'http';
+          }
+          if (transport != 'stdio' && url.isEmpty) {
+            return '错误：http/sse 服务器需要 url';
+          }
+          if (transport == 'stdio' && command.isEmpty) {
+            return '错误：stdio 服务器需要 command';
+          }
+          final rawArgs = args['args'];
+          final cmdArgs = rawArgs is List
+              ? rawArgs.map((e) => e.toString()).toList()
+              : rawArgs is String && rawArgs.trim().isNotEmpty
+                  ? rawArgs.trim().split(RegExp(r'\s+'))
+                  : <String>[];
+          await AiExtensionsService.instance.addServer(
+            name: name,
+            transport: transport,
+            url: url,
+            command: command,
+            args: cmdArgs,
+          );
+          await ExternalMcpManager.instance.refresh(
+            AiExtensionsService.instance.enabledServers,
+          );
+          return '已添加 MCP 服务器「$name」（$transport）';
+        },
+      ),
+      McpTool(
+        name: 'add_skill',
+        description: '添加一个外源 Skill（一段会追加到系统提示词的经验/规范文本）。',
+        parameters: {
+          'type': 'object',
+          'properties': {
+            'name': {'type': 'string', 'description': 'Skill 名称'},
+            'content': {'type': 'string', 'description': 'Skill 正文（Markdown）'},
+          },
+          'required': ['name', 'content'],
+        },
+        execute: (args) async {
+          final name = (args['name'] ?? '').toString().trim();
+          final content = (args['content'] ?? '').toString().trim();
+          if (name.isEmpty || content.isEmpty) {
+            return '错误：name 与 content 不能为空';
+          }
+          await AiExtensionsService.instance.addSkill(
+            name: name,
+            content: content,
+          );
+          return '已添加 Skill「$name」';
+        },
+      ),
+    ];
   }
 
   @override

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as p;
 
 import '../l10n/app_localizations.dart';
@@ -104,6 +105,16 @@ class McpToolbox {
   /// 用户自行配置的第三方 MCP 服务器（可以为空）
   ExternalMcpManager? externalManager;
 
+  /// 按指令临时注入的工具（/design、/search、/mcpadd）
+  final List<McpTool> _extraTools = [];
+
+  /// 替换本轮动态工具
+  void setExtraTools(List<McpTool> tools) {
+    _extraTools
+      ..clear()
+      ..addAll(tools);
+  }
+
   /// 向用户提问（由 UI 弹卡片并返回答案）
   Future<String> Function(String question, List<String> options, bool allowCustom)?
       onAskUser;
@@ -123,7 +134,7 @@ class McpToolbox {
   ///
   /// 终端工具仅在桌面端（本地 shell 可用）时暴露给模型。
   List<Map<String, dynamic>> get definitions => [
-        ...tools
+        ...[...tools, ..._extraTools]
             .where((tool) =>
                 tool.name != 'run_terminal_command' || _terminalReady)
             .map((tool) => tool.toDefinition()),
@@ -172,7 +183,9 @@ class McpToolbox {
       if (manager == null) return '错误：第三方 MCP 未初始化';
       return manager.execute(name, args);
     }
-    final tool = tools.where((t) => t.name == name).firstOrNull;
+    final tool = [...tools, ..._extraTools]
+        .where((t) => t.name == name)
+        .firstOrNull;
     if (tool == null) return '错误：未知工具 $name';
     try {
       return await tool.execute(args);
@@ -617,6 +630,47 @@ class McpToolbox {
         return approved
             ? 'PLAN_CONFIRMED：用户已确认计划，请开始执行。'
             : 'PLAN_REJECTED：用户暂不执行该计划，请等待进一步指示。';
+      },
+    ),
+    McpTool(
+      name: 'download',
+      description: '从外部 HTTP/HTTPS 链接下载资源到项目目录（默认 downloads/，单文件上限 50MB）。',
+      parameters: _object(
+        {
+          'url': _string('下载地址（必须含 host 的 http/https URL）'),
+          'path': _string('保存到项目内的相对路径，缺省为 downloads/<文件名>'),
+        },
+        required: ['url'],
+      ),
+      execute: (args) async {
+        if (_root == null) return '当前没有打开项目';
+        final url = Uri.tryParse((args['url'] ?? '').toString().trim());
+        if (url == null ||
+            !(url.scheme == 'http' || url.scheme == 'https') ||
+            url.host.isEmpty) {
+          return '错误：无效的下载 URL';
+        }
+        final custom = (args['path'] ?? '').toString().trim();
+        final fileName = custom.isNotEmpty
+            ? p.basename(custom)
+            : (url.pathSegments.isNotEmpty &&
+                    url.pathSegments.last.trim().isNotEmpty
+                ? url.pathSegments.last
+                : 'download_${DateTime.now().millisecondsSinceEpoch}');
+        final relDir = custom.isNotEmpty ? p.dirname(custom) : 'downloads';
+        final dir = Directory(p.join(_root!, relDir));
+        await dir.create(recursive: true);
+        final outPath = p.join(dir.path, fileName);
+        final res = await http.get(url).timeout(const Duration(minutes: 2));
+        if (res.statusCode < 200 || res.statusCode >= 300) {
+          return '错误：下载失败（HTTP ${res.statusCode}）';
+        }
+        if (res.bodyBytes.length > 50 * 1024 * 1024) {
+          return '错误：文件超过 50MB 限制';
+        }
+        await File(outPath).writeAsBytes(res.bodyBytes, flush: true);
+        await project.refreshFileTree();
+        return '已下载：${_rel(outPath)}（${res.bodyBytes.length} 字节）';
       },
     ),
   ];

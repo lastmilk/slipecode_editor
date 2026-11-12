@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 
-import '../screens/custom_payload_manager_screen.dart';
 import '../services/community_service.dart';
 import '../services/custom_payload_service.dart';
 import 'community_theme.dart';
@@ -89,14 +88,6 @@ class _PayloadTabState extends State<PayloadTab> {
       if (!mounted) return;
       TToast.showFail('$e', context: context);
     }
-  }
-
-  Future<void> _openManager() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const CustomPayloadManagerScreen()),
-    );
-    _load();
-    if (_showMine) _loadMine();
   }
 
   Future<void> _showPublishSheet() async {
@@ -251,12 +242,6 @@ class _PayloadTabState extends State<PayloadTab> {
                   if (_showMine) _loadMine();
                 },
                 child: Text(_showMine ? '看社区' : '我的发布', style: const TextStyle(fontSize: 12)),
-              ),
-              IconButton(
-                tooltip: '我的 Payload',
-                visualDensity: VisualDensity.compact,
-                onPressed: _openManager,
-                icon: const Icon(Icons.extension_outlined, size: 18),
               ),
             ],
           ),

@@ -84,6 +84,14 @@ class ConversationService extends ChangeNotifier {
   String? _token;
   final Map<String, Timer> _pushTimers = {};
 
+  /// 项目作用域：每个项目拥有独立的 AI 会话
+  String _scope = 'global';
+
+  /// 会话 id 前缀（用于区分云端不同项目的会话）
+  String _idPrefix = '';
+
+  String get _localKey => '$_keyPrefix${_userKey}__$_scope';
+
   /// 当前打开的会话 id（null 表示尚未创建/选择）
   String? currentId;
 
@@ -150,22 +158,29 @@ class ConversationService extends ChangeNotifier {
     String? token,
     bool cloudEnabled = false,
     AppSettings? settings,
+    String scope = 'global',
   }) async {
     final key = userId.isEmpty ? 'anon' : userId;
     final accountChanged = key != _userKey;
     _token = token;
     _cloudEnabled = cloudEnabled && token != null;
     if (_loaded && !accountChanged) {
+      if (scope != _scope) {
+        await switchScopeInternal(scope, settings: settings);
+        return;
+      }
       // 登录状态刚就绪时补一次云同步
       if (_cloudEnabled && !_cloudSynced) unawaited(_syncWithCloud(settings));
       return;
     }
     _userKey = key;
+    _scope = scope;
+    _idPrefix = scope == 'global' ? '' : 'p${scope}_';
     _loaded = true;
     _cloudSynced = false;
     currentId = null;
     _list = await _readLocal();
-    if (_list.isEmpty) {
+    if (_list.isEmpty && scope == 'global') {
       await _migrateLegacy();
     }
     // 自动恢复最近一次使用的会话
@@ -176,10 +191,33 @@ class ConversationService extends ChangeNotifier {
     if (_cloudEnabled) unawaited(_syncWithCloud(settings));
   }
 
+  /// 切换项目作用域（切换项目后重新加载该项目的独立会话）
+  Future<void> switchScopeInternal(
+    String scope, {
+    AppSettings? settings,
+  }) async {
+    if (scope == _scope && _loaded) return;
+    await _saveLocal();
+    _scope = scope;
+    _idPrefix = scope == 'global' ? '' : 'p${scope}_';
+    _cloudSynced = false;
+    currentId = null;
+    _list = await _readLocal();
+    if (currentId == null && _list.isNotEmpty) {
+      currentId = conversations.first.id;
+    }
+    notifyListeners();
+    if (_cloudEnabled) unawaited(_syncWithCloud(settings));
+  }
+
   Future<List<AiConversation>> _readLocal() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final raw = prefs.getString('$_keyPrefix$_userKey');
+      // 兼容升级前按用户存储的全局会话
+      final raw = prefs.getString(_localKey) ??
+          (_scope == 'global'
+              ? prefs.getString('$_keyPrefix$_userKey')
+              : null);
       if (raw == null || raw.isEmpty) return [];
       final decoded = jsonDecode(raw);
       if (decoded is! List) return [];
@@ -234,7 +272,7 @@ class ConversationService extends ChangeNotifier {
       final sorted = conversations;
       final kept = sorted.take(_maxLocal).toList();
       await prefs.setString(
-        '$_keyPrefix$_userKey',
+        _localKey,
         jsonEncode(kept.map((c) => c.toJson()).toList()),
       );
     } catch (e) {
@@ -242,10 +280,10 @@ class ConversationService extends ChangeNotifier {
     }
   }
 
-  static String _newId() {
+  String _newId() {
     final now = DateTime.now().microsecondsSinceEpoch.toRadixString(36);
     final rand = (DateTime.now().hashCode & 0xFFFFFF).toRadixString(36);
-    return 'c$now$rand';
+    return '${_idPrefix}c$now$rand';
   }
 
   static String _titleFrom(List<ChatMessage> messages) {
@@ -413,6 +451,8 @@ class ConversationService extends ChangeNotifier {
       for (final meta in remoteList) {
         final id = (meta['id'] ?? '').toString();
         if (id.isEmpty) continue;
+        // 云端混存了所有项目的会话：只同步当前项目作用域的会话
+        if (!id.startsWith(_idPrefix)) continue;
         remoteIds.add(id);
         final remoteUpdated = (meta['updatedAt'] as num?)?.toInt() ?? 0;
         final local = _list.where((c) => c.id == id).firstOrNull;

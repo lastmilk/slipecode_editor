@@ -101,7 +101,13 @@ class _AiChatScreenState extends State<AiChatScreen> {
         }
       }
       if (lastAssistant != null) {
-        await KnowledgeService.instance.saveExperience(lastAssistant.content);
+        final experience =
+            await ai.summarizeExperienceForKnowledge() ??
+                lastAssistant.content;
+        await KnowledgeService.instance.saveExperience(
+          experience,
+          title: '项目经验 · ${_experienceTitle(ai.lastUserRequest)}',
+        );
         if (!mounted) return;
         final account = context.read<AccountProvider>();
         if (account.isSignedIn) {
@@ -118,6 +124,12 @@ class _AiChatScreenState extends State<AiChatScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message), duration: const Duration(seconds: 2)),
     );
+  }
+
+  String _experienceTitle(String? request) {
+    final text = (request ?? '').trim().replaceAll('\n', ' ');
+    if (text.isEmpty) return '未命名任务';
+    return text.length > 24 ? '${text.substring(0, 24)}…' : text;
   }
 
   @override

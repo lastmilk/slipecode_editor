@@ -9,6 +9,7 @@ import '../providers/settings_provider.dart';
 import '../l10n/app_localizations.dart';
 import '../payloads/project_payload.dart';
 import '../services/git_host.dart';
+import '../services/project_agent_settings_service.dart';
 import '../services/project_create_service.dart';
 
 /// 创建新项目页面
@@ -47,6 +48,9 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
 
   /// 用户是否手动改过 Org；未改过时跟随项目名（com.example.<项目名>）
   bool _orgEdited = false;
+
+  /// 是否开启 Agent 版本隔离（独立 MCP / Skills）
+  bool _agentIsolated = false;
 
   final List<String> _outputLines = [];
 
@@ -132,6 +136,10 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
 
       // 打开刚创建的项目
       await projectProvider.openProject(targetPath, kind: 'classic');
+      await ProjectAgentSettingsService.instance.setIsolated(
+        targetPath,
+        _agentIsolated,
+      );
       if (!mounted) return;
 
       // 按所选平台创建仓库并推送模板文件（需已登录对应平台）
@@ -351,6 +359,16 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
 
             // 远程仓库选项
             _buildRepoOptions(isDark),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              value: _agentIsolated,
+              onChanged: (value) => setState(() => _agentIsolated = value),
+              title: const Text('Agent 版本隔离', style: TextStyle(fontSize: 14)),
+              subtitle: const Text(
+                '开启后该项目使用独立的 MCP / Skills 配置（不会与其它项目共享）',
+                style: TextStyle(fontSize: 11),
+              ),
+            ),
             const SizedBox(height: 24),
 
             // 创建按钮

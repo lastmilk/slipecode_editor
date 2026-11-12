@@ -12,6 +12,7 @@ import '../providers/settings_provider.dart';
 import '../services/design_draft_service.dart';
 import '../services/git_host.dart';
 import '../services/loader_project_service.dart';
+import '../services/project_agent_settings_service.dart';
 import 'design_draft_list_screen.dart';
 
 /// 创建 Loader 项目
@@ -50,6 +51,9 @@ class _CreateLoaderProjectScreenState extends State<CreateLoaderProjectScreen> {
 
   /// 用户是否手动改过 Org；未改过时跟随项目名（com.example.<项目名>）
   bool _orgEdited = false;
+
+  /// 是否开启 Agent 版本隔离（独立 MCP / Skills）
+  bool _agentIsolated = false;
   final List<String> _outputLines = [];
 
   /// 是否有任一 Git 平台已登录（决定远程仓库功能是否可用）
@@ -199,6 +203,10 @@ class _CreateLoaderProjectScreenState extends State<CreateLoaderProjectScreen> {
 
       // 打开刚创建的项目（识别为 Loader 载荷）
       await projectProvider.openProject(targetPath, kind: 'loader');
+      await ProjectAgentSettingsService.instance.setIsolated(
+        targetPath,
+        _agentIsolated,
+      );
       if (!mounted) return;
 
       // 创建远程仓库并推送骨架（需已登录对应平台）
@@ -291,6 +299,16 @@ class _CreateLoaderProjectScreenState extends State<CreateLoaderProjectScreen> {
             _buildDraftPicker(isDark),
             const SizedBox(height: 20),
             _buildRepoOptions(isDark),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              value: _agentIsolated,
+              onChanged: (value) => setState(() => _agentIsolated = value),
+              title: const Text('Agent 版本隔离', style: TextStyle(fontSize: 14)),
+              subtitle: const Text(
+                '开启后该项目使用独立的 MCP / Skills 配置（不会与其它项目共享）',
+                style: TextStyle(fontSize: 11),
+              ),
+            ),
             const SizedBox(height: 24),
             _buildCreateButton(),
             const SizedBox(height: 24),

@@ -90,11 +90,6 @@ Future<void> main() async {
     settingsProvider,
   );
 
-  // 项目隔离：切换项目时重置编辑器工作区（按项目恢复标签页）与构建状态
-  projectProvider.onProjectChanged = (path) async {
-    await editorProvider.switchProject(path);
-    buildProvider.resetForProject();
-  };
   // AI 助手（Agent 面板依赖它；未注册会导致侧边栏 Agent 页空白）
   final aiProvider = AiProvider(
     settingsProvider,
@@ -104,6 +99,13 @@ Future<void> main() async {
     accountProvider,
     terminal: terminalProvider,
   );
+
+  // 项目隔离：切换项目时重置编辑器、构建状态与 AI 会话（每个项目独立会话）
+  projectProvider.onProjectChanged = (path) async {
+    await editorProvider.switchProject(path);
+    buildProvider.resetForProject();
+    await aiProvider.handleProjectChanged();
+  };
 
   runApp(
     SLIPEApp(

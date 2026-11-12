@@ -164,19 +164,27 @@ class KnowledgeService extends ChangeNotifier {
       _items.map((e) => e.toMap()).toList();
 
   /// 把一次 AI 回复沉淀为经验条目（/expmod）
-  Future<KnowledgeEntry?> saveExperience(String content) async {
+  Future<KnowledgeEntry?> saveExperience(
+    String content, {
+    String? title,
+  }) async {
     final text = content.trim();
     if (text.isEmpty) return null;
-    final firstLine = text
-        .split('\n')
-        .firstWhere((line) => line.trim().isNotEmpty, orElse: () => 'AI 经验')
-        .replaceAll(RegExp(r'^[#>\-\s`*]+'), '')
-        .trim();
-    final title = firstLine.length > 40
-        ? '${firstLine.substring(0, 40)}…'
-        : (firstLine.isEmpty ? 'AI 经验总结' : firstLine);
+    String resolvedTitle;
+    if (title != null && title.trim().isNotEmpty) {
+      resolvedTitle = title.trim();
+    } else {
+      final firstLine = text
+          .split('\n')
+          .firstWhere((line) => line.trim().isNotEmpty, orElse: () => 'AI 经验')
+          .replaceAll(RegExp(r'^[#>\-\s`*]+'), '')
+          .trim();
+      resolvedTitle = firstLine.length > 40
+          ? '${firstLine.substring(0, 40)}…'
+          : (firstLine.isEmpty ? 'AI 经验总结' : firstLine);
+    }
     return upsert(
-      title: title,
+      title: resolvedTitle,
       content: text,
       source: 'ai',
       tags: const ['AI 经验'],

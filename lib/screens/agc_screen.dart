@@ -99,6 +99,18 @@ class _AgcScreenState extends State<AgcScreen> {
         setState(() => _writeKnowledgeAfterRun = true);
         _showSnack('本轮完成后会把 AI 的经验写入知识库');
         break;
+      case '/design':
+        context.read<AiProvider>().setDesignMode(true);
+        _showSnack('已开启：AI 会先创建并编排设计稿，再执行任务');
+        break;
+      case '/search':
+        context.read<AiProvider>().setSearchMode(true);
+        _showSnack('已开启：AI 可按需联网搜索');
+        break;
+      case '/mcpadd':
+        context.read<AiProvider>().setMcpAddMode(true);
+        _showSnack('已开启：AI 可自行添加外源 MCP 服务器或 Skill');
+        break;
     }
   }
 
@@ -124,7 +136,12 @@ class _AgcScreenState extends State<AgcScreen> {
       return;
     }
     // 直接发送「/」指令时同样生效（如用户未点选面板，直接输入 /plan 回车）
-    if (text == '/plan' || text == '/exp' || text == '/expmod') {
+    if (text == '/plan' ||
+        text == '/exp' ||
+        text == '/expmod' ||
+        text == '/design' ||
+        text == '/search' ||
+        text == '/mcpadd') {
       _runSlashCommand(text);
       return;
     }
@@ -157,6 +174,12 @@ class _AgcScreenState extends State<AgcScreen> {
   }
 
   /// /expmod：把本轮 AI 的最终回复沉淀为一条知识库经验
+  String _experienceTitle(String? request) {
+    final text = (request ?? '').trim().replaceAll('\n', ' ');
+    if (text.isEmpty) return '未命名任务';
+    return text.length > 24 ? '${text.substring(0, 24)}…' : text;
+  }
+
   Future<void> _saveExperienceToKnowledge() async {
     final ai = context.read<AiProvider>();
     ChatMessage? lastAssistant;
@@ -168,7 +191,13 @@ class _AgcScreenState extends State<AgcScreen> {
       }
     }
     if (lastAssistant == null) return;
-    await KnowledgeService.instance.saveExperience(lastAssistant.content);
+    // 按固定复盘规范让 AI 重新总结项目完成过程（而不是直接存最后一条回复）
+    final experience =
+        await ai.summarizeExperienceForKnowledge() ?? lastAssistant.content;
+    await KnowledgeService.instance.saveExperience(
+      experience,
+      title: '项目经验 · ${_experienceTitle(ai.lastUserRequest)}',
+    );
     if (!mounted) return;
     final account = context.read<AccountProvider>();
     if (account.isSignedIn) {
@@ -388,6 +417,35 @@ class _AgcScreenState extends State<AgcScreen> {
         // 经验写入提示条（/expmod 指令开启）
         if (_writeKnowledgeAfterRun) _buildExpmodChip(isDark),
 
+        // /design：先设计稿后执行
+        if (ai.designMode)
+          _buildCommandChip(
+            icon: Icons.design_services_outlined,
+            color: Colors.teal,
+            text: ai.designDraft == null
+                ? '设计稿优先：发送需求后 AI 会先创建并编排设计稿，再执行'
+                : '设计稿优先：${ai.designDraft!.name}（AI 会先完善设计稿再实现）',
+            onClose: () => ai.setDesignMode(false),
+          ),
+
+        // /search：联网搜索
+        if (ai.searchMode)
+          _buildCommandChip(
+            icon: Icons.travel_explore,
+            color: Colors.blueAccent,
+            text: '联网搜索已开启：AI 可按需搜索最新网页资料',
+            onClose: () => ai.setSearchMode(false),
+          ),
+
+        // /mcpadd：AI 自行添加 MCP / Skill
+        if (ai.mcpAddMode)
+          _buildCommandChip(
+            icon: Icons.extension_outlined,
+            color: Colors.deepOrange,
+            text: 'MCP 扩展模式：AI 可自行添加外源 MCP 服务器或 Skill',
+            onClose: () => ai.setMcpAddMode(false),
+          ),
+
         // 模型与积分栏
         Padding(
           padding: const EdgeInsets.fromLTRB(14, 2, 14, 0),
@@ -532,6 +590,40 @@ class _AgcScreenState extends State<AgcScreen> {
             iconSize: 15,
             onPressed: () => setState(() => _writeKnowledgeAfterRun = false),
             icon: const Icon(Icons.close, color: Colors.purple),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 通用指令状态条（/design /search /mcpadd）
+  Widget _buildCommandChip({
+    required IconData icon,
+    required Color color,
+    required String text,
+    required VoidCallback onClose,
+  }) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(14, 5, 6, 5),
+      color: color.withValues(alpha: 0.10),
+      child: Row(
+        children: [
+          Icon(icon, size: 15, color: color),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              text,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 11, color: color),
+            ),
+          ),
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            iconSize: 15,
+            onPressed: onClose,
+            icon: Icon(Icons.close, color: color),
           ),
         ],
       ),
@@ -1319,6 +1411,24 @@ class _SlashCommandPanel extends StatelessWidget {
       '写入知识库',
       '本轮完成后把 AI 的经验写入私人知识库',
       Icons.auto_awesome,
+    ),
+    (
+      '/design',
+      '设计稿优先',
+      'AI 先创建并编排设计稿，再执行实现',
+      Icons.design_services_outlined,
+    ),
+    (
+      '/search',
+      '联网搜索',
+      'AI 可按需联网搜索最新资料',
+      Icons.travel_explore,
+    ),
+    (
+      '/mcpadd',
+      '扩展 MCP',
+      '允许 AI 自行添加外源 MCP 服务器或 Skill',
+      Icons.extension_outlined,
     ),
   ];
 

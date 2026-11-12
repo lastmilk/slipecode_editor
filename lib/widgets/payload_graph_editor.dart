@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../models/design_draft.dart';
 import '../payloads/loader/loader_payload.dart';
 import '../screens/custom_payload_editor_screen.dart';
+import '../screens/custom_payload_manager_screen.dart';
 import 'payload_assembler.dart';
 
 /// 节点卡片宽度（画布坐标系）
@@ -64,7 +65,18 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
       TransformationController();
   final GlobalKey _ivKey = GlobalKey();
 
-  bool _drawerOpen = false;
+  /// 右侧 Payload 调色板的滚动控制器（启用可见滚动条，给拖拽留出空间）
+  final ScrollController _paletteScrollController = ScrollController();
+
+  /// 右侧边栏是否展开
+  bool _railOpen = true;
+
+  @override
+  void dispose() {
+    _paletteScrollController.dispose();
+    _transformController.dispose();
+    super.dispose();
+  }
 
   /// 正在拖线的起点 {nodeId, blockId}
   Map<String, String>? _dragFrom;
@@ -366,46 +378,32 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final isLandscape =
-        MediaQuery.orientationOf(context) == Orientation.landscape;
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final railWidth = math.min(320.0, math.max(200.0, screenWidth * 0.34));
 
-    // 横屏：Root 与「System Payload」调色板移到右侧常驻边栏，
-    // 画布保留在左侧（拖拽与画布缩放/平移逻辑不变）
-    if (isLandscape) {
-      return Column(
-        children: [
-          _buildToolbar(isDark),
-          Expanded(
-            child: Row(
-              children: [
-                Expanded(child: _buildCanvas(isDark)),
-                _buildRightRail(isDark),
-              ],
-            ),
-          ),
-        ],
-      );
-    }
-
+    // 画布 + 右侧常驻 Payload 侧边栏（新增/选择 Root，拖拽 System 到画布）
     return Column(
       children: [
-        _buildRootBar(isDark),
         _buildToolbar(isDark),
-        Expanded(child: _buildCanvas(isDark)),
-        _buildDrawer(isDark),
+        Expanded(
+          child: Row(
+            children: [
+              Expanded(child: _buildCanvas(isDark)),
+              if (_railOpen) _buildRightRail(isDark, railWidth),
+            ],
+          ),
+        ),
       ],
     );
   }
 
-  /// 横屏右侧边栏：RootPayload 在顶端 + System Payload 调色板
-  Widget _buildRightRail(bool isDark) {
+  /// 右侧边栏：RootPayload 在顶端 + System Payload 调色板 + 新建入口
+  Widget _buildRightRail(bool isDark, double width) {
     final panelColor = isDark ? const Color(0xFF2D2D30) : Colors.white;
-    final railWidth =
-        math.min(300.0, MediaQuery.sizeOf(context).width * 0.32).toDouble();
     return Container(
-      width: math.max(200.0, railWidth),
+      width: width,
       margin: const EdgeInsets.fromLTRB(0, 0, 16, 4),
-      padding: const EdgeInsets.fromLTRB(10, 10, 10, 6),
+      padding: const EdgeInsets.fromLTRB(10, 10, 6, 8),
       decoration: BoxDecoration(
         color: panelColor,
         borderRadius: BorderRadius.circular(12),
@@ -427,7 +425,7 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
               ),
               const Spacer(),
               Text(
-                '长按拖入画布',
+                '拖入画布',
                 style: TextStyle(
                   fontSize: 10,
                   color: isDark ? Colors.white38 : Colors.black45,
@@ -437,17 +435,79 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
           ),
           const SizedBox(height: 6),
           Expanded(
-            child: ListView.separated(
-              padding: EdgeInsets.zero,
-              itemCount: SystemPayloadRegistry.all.length + 1,
-              separatorBuilder: (_, _) => const SizedBox(height: 6),
-              itemBuilder: (context, index) =>
-                  _buildPaletteItem(index, isDark),
+            child: Scrollbar(
+              controller: _paletteScrollController,
+              thumbVisibility: true,
+              child: ListView.separated(
+                controller: _paletteScrollController,
+                padding: const EdgeInsets.only(right: 8),
+                itemCount: SystemPayloadRegistry.all.length,
+                separatorBuilder: (_, _) => const SizedBox(height: 6),
+                itemBuilder: (context, index) =>
+                    _buildPaletteItem(index, isDark),
+              ),
             ),
+          ),
+          const Divider(height: 12),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              _payloadAddButton('镜像', Icons.inventory_2_outlined, 'root'),
+              _payloadAddButton('端', Icons.web_outlined, 'system'),
+              _payloadAddButton('模块', Icons.widgets_outlined, 'block'),
+              _payloadAddButton(
+                '管理',
+                Icons.settings_suggest_outlined,
+                null,
+              ),
+            ],
           ),
         ],
       ),
     );
+  }
+
+  /// 侧边栏的新建入口（kind 为 null 时打开 Payload 管理器）
+  Widget _payloadAddButton(
+    String label,
+    IconData icon,
+    String? kind,
+  ) {
+    return OutlinedButton.icon(
+      style: OutlinedButton.styleFrom(
+        visualDensity: VisualDensity.compact,
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        minimumSize: const Size(0, 30),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      ),
+      onPressed: () => kind == null
+          ? _openPayloadManager()
+          : _openPayloadCreator(kind),
+      icon: Icon(icon, size: 14),
+      label: Text('+$label', style: const TextStyle(fontSize: 10.5)),
+    );
+  }
+
+  Future<void> _openPayloadCreator(String kind) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => CustomPayloadEditorScreen(kind: kind),
+      ),
+    );
+    if (!mounted) return;
+    setState(() {});
+    widget.onChanged();
+  }
+
+  Future<void> _openPayloadManager() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => const CustomPayloadManagerScreen(),
+      ),
+    );
+    if (!mounted) return;
+    setState(() {});
   }
 
   Widget _buildRootBar(bool isDark, {bool compact = false}) {
@@ -569,9 +629,13 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
       padding: const EdgeInsets.fromLTRB(16, 4, 8, 6),
       child: Row(
         children: [
-          const Text(
-            '点击模块右侧引脚选中起点，再点击目标端 / 模块左侧引脚完成连接',
-            style: TextStyle(fontSize: 11, color: Colors.orange),
+          const Flexible(
+            child: Text(
+              '点击模块右侧引脚选中起点，再点击目标端 / 模块左侧引脚完成连接',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 11, color: Colors.orange),
+            ),
           ),
           const Spacer(),
           Text(
@@ -589,9 +653,12 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
           ),
           IconButton(
             visualDensity: VisualDensity.compact,
-            tooltip: '添加自定义端',
-            icon: const Icon(Icons.add_box_outlined, size: 20),
-            onPressed: _createCustomSystem,
+            tooltip: _railOpen ? '收起 Payload 侧栏' : '展开 Payload 侧栏',
+            icon: Icon(
+              _railOpen ? Icons.chevron_right : Icons.chevron_left,
+              size: 20,
+            ),
+            onPressed: () => setState(() => _railOpen = !_railOpen),
           ),
         ],
       ),
@@ -614,10 +681,7 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
             details.data.startsWith('system:'),
         onAcceptWithDetails: (details) {
           final specId = details.data.substring('system:'.length);
-          if (specId == '__custom__') {
-            _createCustomSystem();
-            return;
-          }
+
           final scenePos = _globalToScene(details.offset);
           _addSystemAt(specId, scenePos);
         },
@@ -984,110 +1048,11 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
   }
 
   // -------------------------------------------------------------------------
-  // 底部抽屉式 System 调色板
-  // -------------------------------------------------------------------------
 
-  Widget _buildDrawer(bool isDark) {
-    return Container(
-      margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-      decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF2D2D30) : Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: isDark ? const Color(0xFF3C3C3C) : const Color(0xFFE0E4E8),
-        ),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          InkWell(
-            onTap: () => setState(() => _drawerOpen = !_drawerOpen),
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-              child: Row(
-                children: [
-                  Icon(
-                    _drawerOpen
-                        ? Icons.keyboard_arrow_down
-                        : Icons.keyboard_arrow_up,
-                    size: 18,
-                  ),
-                  const SizedBox(width: 6),
-                  const Text(
-                    '端（System Payload）',
-                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
-                  ),
-                  const Spacer(),
-                  Text(
-                    '长按拖入画布',
-                    style: TextStyle(
-                      fontSize: 10,
-                      color: isDark ? Colors.white38 : Colors.black45,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          if (_drawerOpen)
-            SizedBox(
-              height: 72,
-              child: ListView.separated(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 10,
-                ),
-                scrollDirection: Axis.horizontal,
-                itemCount: SystemPayloadRegistry.all.length + 1,
-                separatorBuilder: (_, _) => const SizedBox(width: 8),
-                itemBuilder: (context, index) =>
-                    _buildPaletteItem(index, isDark),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  /// 调色板条目（底部抽屉与横屏右侧边栏共用，拖拽数据格式保持一致）
-  ///
-  /// 使用「长按拖拽」而不是直接拖拽：避免与调色板自身横向/纵向滚动
-  /// 手势互相抢占（用户可以先正常滚动，长按后再拖入画布）。
+  /// 调色板条目：直接拖拽到画布（与旧版拖入逻辑一致）。
   Widget _buildPaletteItem(int index, bool isDark) {
-    if (index == SystemPayloadRegistry.all.length) {
-      return LongPressDraggable<String>(
-        data: 'system:__custom__',
-        feedback: Material(
-          elevation: 6,
-          borderRadius: BorderRadius.circular(10),
-          child: _paletteChip(
-            icon: Icons.add,
-            label: '自定义端',
-            color: Colors.blueAccent,
-            isDark: isDark,
-          ),
-        ),
-        childWhenDragging: Opacity(
-          opacity: 0.35,
-          child: _paletteChip(
-            icon: Icons.add,
-            label: '自定义端',
-            color: Colors.blueAccent,
-            isDark: isDark,
-          ),
-        ),
-        child: _paletteChip(
-          icon: Icons.add,
-          label: '自定义端',
-          color: Colors.blueAccent,
-          isDark: isDark,
-          onTap: _createCustomSystem,
-        ),
-      );
-    }
     final spec = SystemPayloadRegistry.all[index];
-    return LongPressDraggable<String>(
+    return Draggable<String>(
       data: 'system:${spec.id}',
       feedback: Material(
         elevation: 6,
@@ -1149,15 +1114,6 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
     );
   }
 
-  Future<void> _createCustomSystem() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => const CustomPayloadEditorScreen(kind: 'system'),
-      ),
-    );
-    if (!mounted) return;
-    setState(() {});
-  }
 
   Future<void> _pickBlock(SystemPayloadInstance sys) async {
     final spec = SystemPayloadRegistry.byId(sys.specId);
