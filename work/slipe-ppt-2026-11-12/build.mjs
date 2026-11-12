@@ -934,7 +934,7 @@ const B = C.bg;
     if (i % 5 < 4) hairline(slide, x, y + 0.74, 3.95, { color: C.ruleSoft, pt: 0.5 });
   });
 
-  panel(slide, 9.05, 1.94, 3.66, 4.42, { topRule: C.accent, page: 15 });
+  panel(slide, 9.05, 1.94, 3.66, 3.44, { topRule: C.accent, page: 15 });
   kicker(slide, "METHOD & SOURCES", { x: 9.25, y: 2.1, w: 3.2, fs: 6.9 });
   text(slide, "24 条来源，事实与假设分记", { x: 9.25, y: 2.3, w: 3.2, h: 0.44, fs: 10.8, bold: true, lh: 14, page: 15 });
   bulletList(slide, [
