@@ -437,7 +437,9 @@ function mergeStats(raw) {
 
 /** 原子写盘（tmp + rename），并发调用串行执行 */
 export function saveDb() {
-  writeQueue = writeQueue.then(async () => {
+  // 先吞掉上一次的失败再排队：否则一次写盘错误会让队列永久处于
+  // rejected 状态，后续所有 saveDb 都不再执行，数据只留在内存里。
+  writeQueue = writeQueue.catch(() => {}).then(async () => {
     await mkdir(DATA_DIR, { recursive: true });
     const tmp = `${DB_FILE}.tmp`;
     // db.json 含微信支付等敏感凭据，仅允许服务账号读写

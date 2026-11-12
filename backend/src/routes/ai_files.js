@@ -207,13 +207,20 @@ export async function handleAiUnzip(req, res) {
       if (entry.method === 0) {
         data = entry.data;
       } else if (entry.method === 8) {
-        data = inflateRawSync(entry.data);
+        // 限制解压输出上限，防止高压缩比 Zip 炸弹把进程内存打爆
+        data = inflateRawSync(entry.data, {
+          maxOutputLength: cfg.maxUnzipMb * 1024 * 1024 + 1,
+        });
       } else {
         skipped.push({ path: relative, reason: `不支持的压缩方式 ${entry.method}` });
         continue;
       }
-    } catch {
-      skipped.push({ path: relative, reason: '解压失败' });
+    } catch (err) {
+      skipped.push({
+        path: relative,
+        reason:
+          err?.code === 'ERR_BUFFER_TOO_LARGE' ? '超过解压大小上限' : '解压失败',
+      });
       continue;
     }
     totalUnzipped += data.length;
