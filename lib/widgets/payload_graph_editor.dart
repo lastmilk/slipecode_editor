@@ -366,6 +366,27 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final isLandscape =
+        MediaQuery.orientationOf(context) == Orientation.landscape;
+
+    // 横屏：Root 与「System Payload」调色板移到右侧常驻边栏，
+    // 画布保留在左侧（拖拽与画布缩放/平移逻辑不变）
+    if (isLandscape) {
+      return Column(
+        children: [
+          _buildToolbar(isDark),
+          Expanded(
+            child: Row(
+              children: [
+                Expanded(child: _buildCanvas(isDark)),
+                _buildRightRail(isDark),
+              ],
+            ),
+          ),
+        ],
+      );
+    }
+
     return Column(
       children: [
         _buildRootBar(isDark),
@@ -376,11 +397,104 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
     );
   }
 
-  Widget _buildRootBar(bool isDark) {
-    final rootSpec = RootPayloadRegistry.byId(draft.root.specId);
+  /// 横屏右侧边栏：RootPayload 在顶端 + System Payload 调色板
+  Widget _buildRightRail(bool isDark) {
+    final panelColor = isDark ? const Color(0xFF2D2D30) : Colors.white;
+    final railWidth =
+        math.min(300.0, MediaQuery.sizeOf(context).width * 0.32).toDouble();
     return Container(
-      margin: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      width: math.max(200.0, railWidth),
+      margin: const EdgeInsets.fromLTRB(0, 0, 16, 4),
+      padding: const EdgeInsets.fromLTRB(10, 10, 10, 6),
+      decoration: BoxDecoration(
+        color: panelColor,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isDark ? const Color(0xFF3C3C3C) : const Color(0xFFE0E4E8),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // RootPayload 置顶
+          _buildRootBar(isDark, compact: true),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              const Text(
+                '端（System Payload）',
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+              ),
+              const Spacer(),
+              Text(
+                '拖入画布添加',
+                style: TextStyle(
+                  fontSize: 10,
+                  color: isDark ? Colors.white38 : Colors.black45,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Expanded(
+            child: ListView.separated(
+              padding: EdgeInsets.zero,
+              itemCount: SystemPayloadRegistry.all.length + 1,
+              separatorBuilder: (_, _) => const SizedBox(height: 6),
+              itemBuilder: (context, index) =>
+                  _buildPaletteItem(index, isDark),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRootBar(bool isDark, {bool compact = false}) {
+    final rootSpec = RootPayloadRegistry.byId(draft.root.specId);
+    final dropdown = DropdownButtonHideUnderline(
+      child: DropdownButton<String>(
+        isExpanded: true,
+        value: rootSpec.id,
+        style: TextStyle(
+          fontSize: 13,
+          color: isDark ? Colors.white : Colors.black87,
+        ),
+        items: [
+          for (final spec in RootPayloadRegistry.all)
+            DropdownMenuItem(
+              value: spec.id,
+              child: Text(
+                '${spec.name} · ${spec.buildEnvLabel}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+        ],
+        onChanged: (v) {
+          if (v != null) _selectRoot(v);
+        },
+      ),
+    );
+    final paramsButton = IconButton(
+      visualDensity: VisualDensity.compact,
+      tooltip: 'Root 参数',
+      icon: const Icon(Icons.tune, size: 18),
+      onPressed: () => PayloadParamsSheet.show(
+        context,
+        title: '${rootSpec.name} · 参数',
+        defs: rootSpec.params,
+        values: draft.root.params,
+        onChanged: widget.onChanged,
+      ),
+    );
+
+    return Container(
+      margin: compact ? EdgeInsets.zero : const EdgeInsets.fromLTRB(16, 12, 16, 4),
+      padding: EdgeInsets.symmetric(
+        horizontal: 12,
+        vertical: compact ? 8 : 6,
+      ),
       decoration: BoxDecoration(
         color: isDark ? const Color(0xFF2D2D30) : Colors.white,
         borderRadius: BorderRadius.circular(12),
@@ -388,54 +502,45 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
           color: isDark ? const Color(0xFF3C3C3C) : const Color(0xFFE0E4E8),
         ),
       ),
-      child: Row(
-        children: [
-          Icon(rootSpec.icon, size: 18, color: Colors.blueAccent),
-          const SizedBox(width: 8),
-          Text(
-            'Root',
-            style: TextStyle(
-              fontSize: 11,
-              color: isDark ? Colors.white54 : Colors.black45,
-            ),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: DropdownButtonHideUnderline(
-              child: DropdownButton<String>(
-                isExpanded: true,
-                value: rootSpec.id,
-                style: TextStyle(
-                  fontSize: 13,
-                  color: isDark ? Colors.white : Colors.black87,
-                ),
-                items: [
-                  for (final spec in RootPayloadRegistry.all)
-                    DropdownMenuItem(
-                      value: spec.id,
-                      child: Text('${spec.name} · ${spec.buildEnvLabel}'),
+      child: compact
+          // 侧边栏较窄：Root 标签 + 参数按钮一行，下拉框单独一行
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(rootSpec.icon, size: 18, color: Colors.blueAccent),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Root',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: isDark ? Colors.white54 : Colors.black45,
+                      ),
                     ),
-                ],
-                onChanged: (v) {
-                  if (v != null) _selectRoot(v);
-                },
-              ),
+                    const Spacer(),
+                    paramsButton,
+                  ],
+                ),
+                dropdown,
+              ],
+            )
+          : Row(
+              children: [
+                Icon(rootSpec.icon, size: 18, color: Colors.blueAccent),
+                const SizedBox(width: 8),
+                Text(
+                  'Root',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: isDark ? Colors.white54 : Colors.black45,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(child: dropdown),
+                paramsButton,
+              ],
             ),
-          ),
-          IconButton(
-            visualDensity: VisualDensity.compact,
-            tooltip: 'Root 参数',
-            icon: const Icon(Icons.tune, size: 18),
-            onPressed: () => PayloadParamsSheet.show(
-              context,
-              title: '${rootSpec.name} · 参数',
-              defs: rootSpec.params,
-              values: draft.root.params,
-              onChanged: widget.onChanged,
-            ),
-          ),
-        ],
-      ),
     );
   }
 
@@ -916,74 +1021,78 @@ class _PayloadGraphEditorState extends State<PayloadGraphEditor> {
                 scrollDirection: Axis.horizontal,
                 itemCount: SystemPayloadRegistry.all.length + 1,
                 separatorBuilder: (_, _) => const SizedBox(width: 8),
-                itemBuilder: (context, index) {
-                  if (index == SystemPayloadRegistry.all.length) {
-                    return Draggable<String>(
-                      data: 'system:__custom__',
-                      feedback: Material(
-                        elevation: 6,
-                        borderRadius: BorderRadius.circular(10),
-                        child: _paletteChip(
-                          icon: Icons.add,
-                          label: '自定义端',
-                          color: Colors.blueAccent,
-                          isDark: isDark,
-                        ),
-                      ),
-                      childWhenDragging: Opacity(
-                        opacity: 0.35,
-                        child: _paletteChip(
-                          icon: Icons.add,
-                          label: '自定义端',
-                          color: Colors.blueAccent,
-                          isDark: isDark,
-                        ),
-                      ),
-                      child: _paletteChip(
-                        icon: Icons.add,
-                        label: '自定义端',
-                        color: Colors.blueAccent,
-                        isDark: isDark,
-                        onTap: _createCustomSystem,
-                      ),
-                    );
-                  }
-                  final spec = SystemPayloadRegistry.all[index];
-                  return Draggable<String>(
-                    data: 'system:${spec.id}',
-                    feedback: Material(
-                      elevation: 6,
-                      borderRadius: BorderRadius.circular(10),
-                      child: _paletteChip(
-                        icon: spec.icon,
-                        label: spec.name,
-                        color: Colors.teal,
-                        isDark: isDark,
-                      ),
-                    ),
-                    childWhenDragging: Opacity(
-                      opacity: 0.35,
-                      child: _paletteChip(
-                        icon: spec.icon,
-                        label: spec.name,
-                        color: Colors.teal,
-                        isDark: isDark,
-                      ),
-                    ),
-                    child: Tooltip(
-                      message: '拖入画布添加「${spec.name}」',
-                      child: _paletteChip(
-                        icon: spec.icon,
-                        label: spec.name,
-                        color: Colors.teal,
-                        isDark: isDark,
-                      ),
-                    ),
-                  );
-                },
+                itemBuilder: (context, index) =>
+                    _buildPaletteItem(index, isDark),
               ),
             ),
         ],
+      ),
+    );
+  }
+
+  /// 调色板条目（底部抽屉与横屏右侧边栏共用，拖拽数据格式保持一致）
+  Widget _buildPaletteItem(int index, bool isDark) {
+    if (index == SystemPayloadRegistry.all.length) {
+      return Draggable<String>(
+        data: 'system:__custom__',
+        feedback: Material(
+          elevation: 6,
+          borderRadius: BorderRadius.circular(10),
+          child: _paletteChip(
+            icon: Icons.add,
+            label: '自定义端',
+            color: Colors.blueAccent,
+            isDark: isDark,
+          ),
+        ),
+        childWhenDragging: Opacity(
+          opacity: 0.35,
+          child: _paletteChip(
+            icon: Icons.add,
+            label: '自定义端',
+            color: Colors.blueAccent,
+            isDark: isDark,
+          ),
+        ),
+        child: _paletteChip(
+          icon: Icons.add,
+          label: '自定义端',
+          color: Colors.blueAccent,
+          isDark: isDark,
+          onTap: _createCustomSystem,
+        ),
+      );
+    }
+    final spec = SystemPayloadRegistry.all[index];
+    return Draggable<String>(
+      data: 'system:${spec.id}',
+      feedback: Material(
+        elevation: 6,
+        borderRadius: BorderRadius.circular(10),
+        child: _paletteChip(
+          icon: spec.icon,
+          label: spec.name,
+          color: Colors.teal,
+          isDark: isDark,
+        ),
+      ),
+      childWhenDragging: Opacity(
+        opacity: 0.35,
+        child: _paletteChip(
+          icon: spec.icon,
+          label: spec.name,
+          color: Colors.teal,
+          isDark: isDark,
+        ),
+      ),
+      child: Tooltip(
+        message: '拖入画布添加「${spec.name}」',
+        child: _paletteChip(
+          icon: spec.icon,
+          label: spec.name,
+          color: Colors.teal,
+          isDark: isDark,
+        ),
       ),
     );
   }

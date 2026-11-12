@@ -311,8 +311,10 @@ class _EditorScreenState extends State<EditorScreen>
   Future<void> _handleFileTap(String path) async {
     final editorProvider = context.read<EditorProvider>();
     final opened = await editorProvider.openFile(path);
-    // 打开成功后自动收起侧边栏（小屏手机可立刻看到代码）
-    if (opened != null && mounted) {
+    if (opened == null || !mounted) return;
+    // 打开成功后自动收起侧边栏（小屏手机可立刻看到代码）；
+    // 横屏下侧边栏常驻，不收起（与编辑器并排操作）
+    if (MediaQuery.orientationOf(context) != Orientation.landscape) {
       setState(() => _showSidebar = false);
     }
   }
@@ -690,6 +692,8 @@ class _EditorScreenState extends State<EditorScreen>
     final settings = context.watch<SettingsProvider>().settings;
     final terminal = context.watch<TerminalProvider>();
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final isLandscape =
+        MediaQuery.orientationOf(context) == Orientation.landscape;
 
     final showBackground =
         AppBackground.shouldShow(settings, isIdeScreen: true);
@@ -698,9 +702,102 @@ class _EditorScreenState extends State<EditorScreen>
     // 传统项目 → CDE，Loader 项目 → AGC
     final mode = _mode ??= _defaultMode(projectProvider);
 
-    // 侧边栏宽度：窄屏最多占 82%，避免完全遮住代码
+    // 竖屏浮层侧边栏宽度：窄屏最多占 82%，避免完全遮住代码
     final screenWidth = MediaQuery.of(context).size.width;
     final sidebarWidth = math.min(300.0, screenWidth * 0.82);
+    // 横屏常驻侧边栏宽度（与编辑器并排，挤压编辑区，VSCode 式布局）
+    final dockedSidebarWidth =
+        math.min(320.0, math.max(200.0, screenWidth * 0.3));
+
+    // 主体：CDE（代码编辑）/ AGC（全屏 AI），水平滑动切换形态
+    final modeBody = GestureDetector(
+      behavior: HitTestBehavior.translucent,
+      onHorizontalDragEnd: (details) =>
+          _handleModeSwipe(details.primaryVelocity ?? 0),
+      child: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 220),
+        switchInCurve: Curves.easeOut,
+        switchOutCurve: Curves.easeIn,
+        transitionBuilder: (child, animation) => FadeTransition(
+          opacity: animation,
+          child: SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(0.04, 0),
+              end: Offset.zero,
+            ).animate(animation),
+            child: child,
+          ),
+        ),
+        child: mode == EditorMode.cde
+            ? _buildCdeBody(
+                key: const ValueKey('cde'),
+                editorProvider: editorProvider,
+                isDark: isDark,
+                settings: settings,
+                showBackground: showBackground,
+              )
+            : const KeyedSubtree(
+                key: ValueKey('agc'),
+                child: AgcScreen(),
+              ),
+      ),
+    );
+
+    // 横屏：隐藏顶栏，功能按钮集中到右侧，左侧侧边栏（文件/Agent 或
+    // 对话记录/MCP·Skills）常驻并与编辑器同时可操作
+    final body = isLandscape
+        ? SafeArea(
+            child: Row(
+              children: [
+                _buildSidebar(
+                  projectProvider,
+                  isDark,
+                  dockedSidebarWidth,
+                  mode,
+                  translucent: showBackground,
+                  docked: true,
+                ),
+                Expanded(child: modeBody),
+                _buildLandscapeRail(terminal, mode, isDark),
+              ],
+            ),
+          )
+        : Stack(
+            children: [
+              modeBody,
+
+              // 侧边栏打开时的遮罩（点击关闭）
+              if (_showSidebar)
+                Positioned.fill(
+                  child: GestureDetector(
+                    onTap: () => setState(() => _showSidebar = false),
+                    child:
+                        Container(color: Colors.black.withValues(alpha: 0.28)),
+                  ),
+                ),
+
+              // 侧边栏：浮层滑入，不占据编辑区宽度；菜单栏随形态切换
+              AnimatedPositioned(
+                duration: const Duration(milliseconds: 250),
+                curve: Curves.easeInOutCubic,
+                left: _showSidebar ? 0 : -sidebarWidth,
+                top: 0,
+                bottom: 0,
+                width: sidebarWidth,
+                child: _buildSidebar(
+                  projectProvider,
+                  isDark,
+                  sidebarWidth,
+                  mode,
+                  translucent: showBackground,
+                ),
+              ),
+
+              // AI 悬浮球：仅 CDE 模式显示（AGC 本身就是全屏 AI）
+              if (mode == EditorMode.cde && settings.aiFloatingBallEnabled)
+                AiFloatingBall(onTap: () => AiQuickChatSheet.show(context)),
+            ],
+          );
 
     return PopScope(
       canPop: _allowPop,
@@ -713,82 +810,138 @@ class _EditorScreenState extends State<EditorScreen>
         navigator.pop();
       },
       child: Scaffold(
-        appBar: AppBar(
-        title: _buildTitle(projectProvider, mode, isDark),
-        actions: mode == EditorMode.cde
-            ? _buildCdeActions(projectProvider, terminal)
-            : _buildAgcActions(),
+        appBar: isLandscape
+            ? null
+            : AppBar(
+                title: _buildTitle(projectProvider, mode, isDark),
+                actions: mode == EditorMode.cde
+                    ? _buildCdeActions(projectProvider, terminal)
+                    : _buildAgcActions(),
+              ),
+        body: AppBackground.wrap(
+          isIdeScreen: true,
+          child: body,
+        ),
       ),
-      body: AppBackground.wrap(
-        isIdeScreen: true,
-        child: Stack(
-          children: [
-            // 主体：CDE（代码编辑）/ AGC（全屏 AI），水平滑动切换形态
-            GestureDetector(
-              behavior: HitTestBehavior.translucent,
-              onHorizontalDragEnd: (details) =>
-                  _handleModeSwipe(details.primaryVelocity ?? 0),
-              child: AnimatedSwitcher(
-                duration: const Duration(milliseconds: 220),
-                switchInCurve: Curves.easeOut,
-                switchOutCurve: Curves.easeIn,
-                transitionBuilder: (child, animation) => FadeTransition(
-                  opacity: animation,
-                  child: SlideTransition(
-                    position: Tween<Offset>(
-                      begin: const Offset(0.04, 0),
-                      end: Offset.zero,
-                    ).animate(animation),
-                    child: child,
+    );
+  }
+
+  /// 横屏右侧竖向功能栏：顶栏隐藏后所有操作按钮集中于此
+  Widget _buildLandscapeRail(
+    TerminalProvider terminal,
+    EditorMode mode,
+    bool isDark,
+  ) {
+    final isCde = mode == EditorMode.cde;
+    final panelColor =
+        isDark ? const Color(0xFF252526) : const Color(0xFFF3F3F3);
+
+    return Material(
+      color: panelColor,
+      child: Container(
+        width: 52,
+        decoration: BoxDecoration(
+          border: Border(
+            left: BorderSide(color: isDark ? Colors.white12 : Colors.black12),
+          ),
+        ),
+        child: SingleChildScrollView(
+          child: Column(
+            children: [
+              _buildRailButton(
+                icon: Icons.arrow_back,
+                tooltip: '返回',
+                onPressed: () => Navigator.of(context).maybePop(),
+              ),
+              _buildRailButton(
+                icon: isCde ? Icons.auto_awesome : Icons.code,
+                tooltip: isCde ? '切换到 AGC' : '切换到 CDE',
+                onPressed: () =>
+                    _switchMode(isCde ? EditorMode.agc : EditorMode.cde),
+              ),
+              Divider(
+                height: 12,
+                color: isDark ? Colors.white12 : Colors.black12,
+              ),
+              if (isCde) ...[
+                // 仅桌面端（本地 shell）时显示终端入口
+                if (terminal.available)
+                  _buildRailButton(
+                    icon: Icons.terminal,
+                    tooltip: t('editor.terminal'),
+                    onPressed: () => showTerminalSheet(context),
                   ),
+                _buildRailButton(
+                  icon: Icons.build,
+                  tooltip: t('editor.build'),
+                  onPressed: _openBuildScreen,
                 ),
-                child: mode == EditorMode.cde
-                    ? _buildCdeBody(
-                        key: const ValueKey('cde'),
-                        editorProvider: editorProvider,
-                        isDark: isDark,
-                        settings: settings,
-                        showBackground: showBackground,
-                      )
-                    : const KeyedSubtree(
-                        key: ValueKey('agc'),
-                        child: AgcScreen(),
-                      ),
-              ),
-            ),
-
-            // 侧边栏打开时的遮罩（点击关闭）
-            if (_showSidebar)
-              Positioned.fill(
-                child: GestureDetector(
-                  onTap: () => setState(() => _showSidebar = false),
-                  child: Container(color: Colors.black.withValues(alpha: 0.28)),
+                _buildRailButton(
+                  icon: Icons.auto_awesome,
+                  tooltip: t('editor.ai'),
+                  onPressed: _openAgentPanel,
                 ),
-              ),
-
-            // 侧边栏：浮层滑入，不占据编辑区宽度；菜单栏随形态切换
-            AnimatedPositioned(
-              duration: const Duration(milliseconds: 250),
-              curve: Curves.easeInOutCubic,
-              left: _showSidebar ? 0 : -sidebarWidth,
-              top: 0,
-              bottom: 0,
-              width: sidebarWidth,
-              child: _buildSidebar(
-                projectProvider,
-                isDark,
-                sidebarWidth,
-                mode,
-                translucent: showBackground,
-              ),
-            ),
-
-            // AI 悬浮球：仅 CDE 模式显示（AGC 本身就是全屏 AI）
-            if (mode == EditorMode.cde && settings.aiFloatingBallEnabled)
-              AiFloatingBall(onTap: () => AiQuickChatSheet.show(context)),
-          ],
+                _buildRailButton(
+                  icon: Icons.refresh,
+                  tooltip: t('editor.refresh'),
+                  onPressed: () =>
+                      context.read<ProjectProvider>().refreshFileTree(),
+                ),
+                _buildRailButton(
+                  icon: Icons.save,
+                  tooltip: t('editor.save'),
+                  onPressed: _handleSave,
+                ),
+              ] else ...[
+                _buildRailButton(
+                  icon: Icons.add_comment_outlined,
+                  tooltip: '新对话',
+                  onPressed: _newAgcChat,
+                ),
+                _buildRailButton(
+                  icon: Icons.history,
+                  tooltip: '对话记录',
+                  onPressed: () => _sidebarTabController.animateTo(0),
+                ),
+                _buildRailButton(
+                  icon: Icons.extension_outlined,
+                  tooltip: 'MCP/Skills',
+                  onPressed: () => _sidebarTabController.animateTo(1),
+                ),
+              ],
+            ],
+          ),
         ),
-        ),
+      ),
+    );
+  }
+
+  Widget _buildRailButton({
+    required IconData icon,
+    required String tooltip,
+    required VoidCallback onPressed,
+  }) {
+    return IconButton(
+      icon: Icon(icon, size: 20),
+      tooltip: tooltip,
+      visualDensity: VisualDensity.compact,
+      onPressed: onPressed,
+    );
+  }
+
+  /// 打开构建页（CDE 顶栏与横屏右侧栏共用）
+  Future<void> _openBuildScreen() async {
+    // GitHub / Gitee 均未登录时提醒先配置账号
+    final ok = await BuildScreen.ensureSignedIn(context);
+    if (!ok || !mounted) return;
+    if (!context.mounted) return;
+    // Loader 项目走「AI 介入 + 实际构建」两环节构建页
+    final isLoader =
+        context.read<ProjectProvider>().payload.id == LoaderProjectPayload.payloadId;
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) =>
+            isLoader ? const LoaderBuildScreen() : const BuildScreen(),
       ),
     );
   }
@@ -865,22 +1018,7 @@ class _EditorScreenState extends State<EditorScreen>
       IconButton(
         icon: const Icon(Icons.build),
         tooltip: t('editor.build'),
-        onPressed: () async {
-          // GitHub / Gitee 均未登录时提醒先配置账号
-          final ok = await BuildScreen.ensureSignedIn(context);
-          if (!ok || !mounted) return;
-          if (!context.mounted) return;
-          // Loader 项目走「AI 介入 + 实际构建」两环节构建页
-          final isLoader = context.read<ProjectProvider>().payload.id ==
-              LoaderProjectPayload.payloadId;
-          Navigator.of(context).push(
-            MaterialPageRoute(
-              builder: (_) => isLoader
-                  ? const LoaderBuildScreen()
-                  : const BuildScreen(),
-            ),
-          );
-        },
+        onPressed: _openBuildScreen,
       ),
       IconButton(
         icon: const Icon(Icons.auto_awesome),
@@ -964,6 +1102,7 @@ class _EditorScreenState extends State<EditorScreen>
     double width,
     EditorMode mode, {
     required bool translucent,
+    bool docked = false,
   }) {
     final panelColor = translucent
         ? (isDark
@@ -976,7 +1115,8 @@ class _EditorScreenState extends State<EditorScreen>
 
     return Material(
       color: panelColor,
-      elevation: 12,
+      // 横屏常驻时不加浮层阴影，避免与编辑器分栏割裂
+      elevation: docked ? 0 : 12,
       child: SizedBox(
         width: width,
         child: Column(
@@ -1008,8 +1148,10 @@ class _EditorScreenState extends State<EditorScreen>
                       ]
                     : [
                         AgcHistoryPanel(
-                          onClose: () =>
-                              setState(() => _showSidebar = false),
+                          // 常驻模式下选中会话不收起侧边栏
+                          onClose: docked
+                              ? null
+                              : () => setState(() => _showSidebar = false),
                         ),
                         const AgcToolsPanel(),
                       ],
