@@ -21,7 +21,7 @@ const MAX_BYTES = 300 * 1024 * 1024;
 const VERSION_PATTERN = /^[0-9A-Za-z.+-]{1,32}$/;
 const MAX_NOTES = 4000;
 
-function publicRelease(release) {
+export function publicRelease(release) {
   return {
     version: release.version,
     notes: release.notes || '',

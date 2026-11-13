@@ -26,7 +26,7 @@ async function readJson(file) {
   return JSON.parse(text);
 }
 
-async function loadManifest() {
+export async function loadManifest() {
   if (manifestCache && Date.now() - manifestCachedAt < CACHE_TTL_MS) {
     return manifestCache;
   }

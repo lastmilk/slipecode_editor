@@ -3,184 +3,782 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <title>SlipCode · 口袋里的移动 IDE</title>
-  <meta name="description" content="SlipCode 是一款移动端代码编辑器：项目云同步、云端构建、AI 编程助手与 Termux 终端，让你随时随地写代码。" />
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%234f7cff'/%3E%3Cpath d='M18 22l10 10-10 10M32 44h14' stroke='%23fff' stroke-width='5' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E" />
+  <title>SLIPE · 口袋里的移动 AI IDE</title>
+  <meta name="description" content="SLIPE 把编辑器、AI 编程助手、云端构建与终端折叠进手机。随时随地打开项目，改代码、跑构建、拿产物。" />
+  <meta name="theme-color" content="#0A0A0B" />
+  <meta property="og:title" content="SLIPE · 口袋里的移动 AI IDE" />
+  <meta property="og:description" content="编辑器、AI 助手、云端构建与终端，全部折叠进口袋。" />
+  <meta property="og:type" content="website" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23FF5A1F'/%3E%3Cpath d='M21.5 10.5c-1.2-1.4-3-2.2-5-2.2-3 0-5 1.6-5 4 0 4.8 10 2.8 10 7.6 0 2.6-2.2 4.3-5.4 4.3-2.2 0-4.1-.8-5.3-2.3' stroke='%23F4EFE6' stroke-width='2.6' fill='none' stroke-linecap='round'/%3E%3C/svg%3E" />
+  <link rel="preload" href="assets/fonts/Outfit-Bold.ttf" as="font" type="font/ttf" crossorigin />
+  <link rel="preload" href="assets/fonts/JetBrainsMono-Regular.ttf" as="font" type="font/ttf" crossorigin />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <!-- 顶部导航 -->
-  <header class="nav">
-    <div class="container nav-inner">
-      <a class="brand" href="#top">
-        <svg class="brand-logo" viewBox="0 0 64 64" aria-hidden="true">
-          <rect width="64" height="64" rx="16" fill="#4f7cff"/>
-          <path d="M18 22l10 10-10 10M32 44h14" stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <a class="skip-link" href="#main">跳到主要内容</a>
+  <div class="grain" aria-hidden="true"></div>
+
+  <!-- ================= 导航 ================= -->
+  <header class="site-header" id="site-header">
+    <div class="wrap nav-inner">
+      <a class="brand" href="#top" aria-label="SLIPE 首页">
+        <svg class="brand-mark" viewBox="0 0 32 32" role="img" aria-label="SLIPE">
+          <rect width="32" height="32" rx="8" fill="#FF5A1F"/>
+          <path d="M21.5 10.5c-1.2-1.4-3-2.2-5-2.2-3 0-5 1.6-5 4 0 4.8 10 2.8 10 7.6 0 2.6-2.2 4.3-5.4 4.3-2.2 0-4.1-.8-5.3-2.3" stroke="#F4EFE6" stroke-width="2.6" fill="none" stroke-linecap="round"/>
         </svg>
-        <span class="brand-name">SlipCode</span>
+        <span class="brand-name">SLIPE</span>
+        <span class="brand-tag">MOBILE&nbsp;AI&nbsp;IDE</span>
       </a>
-      <nav class="nav-links">
-        <a href="#features">功能</a>
-        <a href="#download">下载</a>
+
+      <nav class="nav-links" aria-label="主导航">
+        <a href="#why">产品</a>
+        <a href="#capabilities">能力</a>
+        <a href="#workflow">工作流</a>
         <a href="#community">社区</a>
+        <a href="#pricing">定价</a>
+        <a href="#download">下载</a>
       </nav>
+
+      <div class="nav-actions">
+        <a class="nav-gh" href="https://github.com/lastmilk/slipecode_editor" target="_blank" rel="noopener">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.7c-2.78.6-3.37-1.34-3.37-1.34-.45-1.16-1.1-1.47-1.1-1.47-.9-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.89 1.52 2.34 1.08 2.91.83.09-.65.35-1.09.63-1.34-2.22-.25-4.56-1.11-4.56-4.94 0-1.09.39-1.98 1.03-2.68-.1-.25-.45-1.27.1-2.64 0 0 .84-.27 2.75 1.02a9.6 9.6 0 0 1 5 0c1.91-1.29 2.75-1.02 2.75-1.02.55 1.37.2 2.39.1 2.64.64.7 1.03 1.59 1.03 2.68 0 3.84-2.34 4.68-4.57 4.93.36.31.68.92.68 1.85v2.74c0 .27.18.58.69.48A10 10 0 0 0 12 2z" fill="currentColor"/></svg>
+          <span>GitHub</span>
+        </a>
+        <a class="btn btn-small btn-primary" href="#download">下载 App</a>
+        <button class="nav-toggle" id="nav-toggle" type="button" aria-expanded="false" aria-controls="mobile-drawer" aria-label="打开菜单">
+          <span></span><span></span>
+        </button>
+      </div>
     </div>
   </header>
 
-  <main id="top">
-    <!-- Hero -->
-    <section class="hero">
-      <div class="container hero-inner">
+  <div class="drawer" id="mobile-drawer" hidden>
+    <nav aria-label="移动导航">
+      <a href="#why"><span>01</span>产品</a>
+      <a href="#capabilities"><span>02</span>能力</a>
+      <a href="#workflow"><span>03</span>工作流</a>
+      <a href="#community"><span>04</span>社区</a>
+      <a href="#pricing"><span>05</span>定价</a>
+      <a href="#download"><span>06</span>下载</a>
+    </nav>
+    <a class="btn btn-primary btn-block" href="#download">下载 Android 版</a>
+  </div>
+
+  <main id="main">
+    <!-- ================= Hero ================= -->
+    <section class="hero" id="top">
+      <div class="hero-glow" aria-hidden="true"></div>
+      <div class="wrap hero-grid">
         <div class="hero-copy">
-          <p class="hero-eyebrow">移动端代码编辑器</p>
-          <h1 class="hero-title">把 IDE 装进口袋，<br />随时随地写代码</h1>
-          <p class="hero-desc">
-            项目云同步、GitHub / Gitee 云端构建、AI 编程助手与 Termux 终端——
-            手机上也能完成从编码到出包的完整流程。
+          <p class="eyebrow reveal" style="--d:0s">
+            <span class="eyebrow-dot"></span>移动 AI 开发环境 · v<span id="hero-version">1.0</span>
           </p>
-          <div class="hero-actions">
-            <a class="btn btn-primary" href="#download">
-              <svg viewBox="0 0 24 24" class="icon"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-              立即下载
+          <h1 class="hero-title">
+            <span class="line reveal" style="--d:.06s">把整个开发环境</span>
+            <span class="line reveal" style="--d:.12s"><em>折叠</em>进口袋<span class="title-mark">.</span></span>
+          </h1>
+          <p class="hero-lede reveal" style="--d:.18s">
+            SLIPE 把代码编辑器、AI 编程助手、云端构建与终端装进一台手机。
+            地铁上改一行代码，排队时跑一次构建，回到工位，产物已经在等你。
+          </p>
+          <div class="hero-actions reveal" style="--d:.24s">
+            <a class="btn btn-primary btn-lg" id="hero-download" href="#download">
+              <svg viewBox="0 0 24 24" class="icon" aria-hidden="true"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              下载 Android 版
             </a>
-            <a class="btn btn-ghost" href="#features">了解功能</a>
+            <a class="btn btn-ghost btn-lg" href="#capabilities">看看能做什么</a>
           </div>
-          <p class="hero-meta" id="hero-meta">正在获取最新版本…</p>
+          <div class="hero-meta reveal" style="--d:.3s">
+            <span class="meta-item"><b id="hero-meta-version">最新版本</b> 已发布</span>
+            <span class="meta-sep">/</span>
+            <span class="meta-item">Android 8.0+</span>
+            <span class="meta-sep">/</span>
+            <span class="meta-item">免费开始</span>
+          </div>
         </div>
-        <div class="hero-visual">
-          <div class="phone-frame">
+
+        <div class="hero-visual reveal" style="--d:.16s" aria-hidden="true">
+          <div class="hero-frame">
+            <span class="frame-corner tl"></span><span class="frame-corner tr"></span>
+            <span class="frame-corner bl"></span><span class="frame-corner br"></span>
+            <span class="frame-label">DEVICE&nbsp;/&nbsp;ANDROID&nbsp;·&nbsp;FIELD&nbsp;TEST</span>
+          </div>
+          <div class="orbit orbit-a"></div>
+          <div class="orbit orbit-b"></div>
+          <div class="hero-num">01</div>
+
+          <div class="phone">
             <div class="phone-notch"></div>
             <div class="phone-screen">
-              <div class="code-line"><span class="tk-k">import</span> <span class="tk-s">'package:flutter/material.dart'</span>;</div>
-              <div class="code-line">&nbsp;</div>
-              <div class="code-line"><span class="tk-k">void</span> <span class="tk-f">main</span>() {</div>
-              <div class="code-line">&nbsp;&nbsp;<span class="tk-f">runApp</span>(<span class="tk-k">const</span> <span class="tk-f">SlipCodeApp</span>());</div>
-              <div class="code-line">}</div>
-              <div class="code-line">&nbsp;</div>
-              <div class="code-line"><span class="tk-c">// AI：已为你修复 3 处问题</span></div>
-              <div class="code-line"><span class="tk-c">// 云端构建 #128 成功 ✓</span></div>
-              <div class="code-cursor"></div>
+              <div class="ph-status"><span>9:41</span><span class="ph-status-right">5G ▪▪▪ 86%</span></div>
+              <div class="ph-head">
+                <span class="ph-dot"></span>
+                <span class="ph-file">main.dart</span>
+                <span class="ph-branch">main</span>
+                <span class="ph-more">···</span>
+              </div>
+              <div class="ph-tabs">
+                <span class="on">main.dart</span><span>theme.dart</span><span class="plus">+</span>
+              </div>
+              <pre class="ph-code"><code><span class="ln">1</span><span class="k">import</span> <span class="s">'package:flutter/material.dart'</span>;
+<span class="ln">2</span>
+<span class="ln">3</span><span class="k">void</span> <span class="f">main</span>() =&gt; <span class="f">runApp</span>(
+<span class="ln">4</span>  <span class="k">const</span> <span class="f">SlipeApp</span>(),
+<span class="ln">5</span>);
+<span class="ln">6</span>
+<span class="ln">7</span><span class="k">class</span> <span class="f">SlipeApp</span> <span class="k">extends</span> <span class="f">StatelessWidget</span> {
+<span class="ln">8</span>  <span class="c">// AI: 3 处修改已应用</span>
+<span class="ln">9</span>  <span class="f">Widget</span> <span class="f">build</span>(<span class="f">BuildContext</span> ctx) =&gt;
+<span class="ln">10</span>    <span class="f">MaterialApp</span>(
+<span class="ln">11</span>      <span class="f">theme</span>: <span class="f">SlipeTheme</span>.dark,
+<span class="ln">12</span>      <span class="f">home</span>: <span class="k">const</span> <span class="f">EditorPage</span>(),
+<span class="ln">13</span>    );
+<span class="ln">14</span>}</code><span class="caret"></span></pre>
+
+              <div class="ph-ai">
+                <div class="ph-ai-head">
+                  <span class="ph-ai-title">SLIPE AI</span>
+                  <span class="ph-chip">DeepSeek Flash</span>
+                </div>
+                <p class="ph-ai-msg">已补全深色主题，并修复 2 处空安全问题。</p>
+                <div class="ph-diff">
+                  <span class="del">- theme: SlipeTheme.light,</span>
+                  <span class="add">+ theme: SlipeTheme.dark,</span>
+                </div>
+                <div class="ph-ai-actions">
+                  <span class="ph-btn">应用</span>
+                  <span class="ph-btn ghost">回滚</span>
+                  <span class="ph-tool">3 tool calls</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="float-card float-build">
+            <div class="fc-top"><span class="pulse"></span>BUILD #128</div>
+            <div class="fc-main">SUCCESS</div>
+            <div class="fc-sub">app-release.apk · 18.4 MB</div>
+            <div class="fc-bar"><i></i></div>
+          </div>
+          <div class="float-card float-ai">
+            <div class="fc-top">AI TOOL CALL</div>
+            <div class="fc-line"><span class="ok">✓</span> read_file main.dart</div>
+            <div class="fc-line"><span class="ok">✓</span> edit_file 3 changes</div>
+            <div class="fc-line"><span class="run">›</span> run_analyze …</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 数据条 -->
+      <div class="wrap">
+        <div class="stats-strip reveal" style="--d:.36s">
+          <div class="stat">
+            <b data-stat="users" data-fallback="1">0</b>
+            <span>开发者已加入</span>
+          </div>
+          <div class="stat">
+            <b data-stat="downloads" data-fallback="0">0</b>
+            <span>安装包下载</span>
+          </div>
+          <div class="stat">
+            <b data-stat="posts" data-fallback="0">0</b>
+            <span>社区讨论</span>
+          </div>
+          <div class="stat">
+            <b data-stat="lessons" data-fallback="0">0</b>
+            <span>实战教程</span>
+          </div>
+          <div class="stat-note">数据来自 SLIPE 公开统计</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= 技术跑马灯 ================= -->
+    <div class="marquee" aria-hidden="true">
+      <div class="marquee-track">
+        <span>FLUTTER</span><i>✦</i><span>DART</span><i>✦</i><span>GITHUB ACTIONS</span><i>✦</i><span>GITEE GO</span><i>✦</i><span>TERMUX</span><i>✦</i><span>MCP</span><i>✦</i><span>DEEPSEEK</span><i>✦</i><span>VIBE CODING</span><i>✦</i>
+        <span>FLUTTER</span><i>✦</i><span>DART</span><i>✦</i><span>GITHUB ACTIONS</span><i>✦</i><span>GITEE GO</span><i>✦</i><span>TERMUX</span><i>✦</i><span>MCP</span><i>✦</i><span>DEEPSEEK</span><i>✦</i><span>VIBE CODING</span><i>✦</i>
+      </div>
+    </div>
+
+    <!-- ================= 为什么 ================= -->
+    <section class="section why" id="why">
+      <div class="wrap">
+        <div class="section-head">
+          <p class="section-label"><span>02</span> / WHY</p>
+          <h2 class="section-title">手机不该只是<br /><em>消费</em>内容的地方。</h2>
+          <p class="section-sub">
+            灵感不挑场合。可笔记本不在手边时，大多数移动编辑器只够「看一眼代码」。
+            SLIPE 想把「改、跑、发」这三件事，完整地留在手机上。
+          </p>
+        </div>
+
+        <div class="why-grid">
+          <article class="why-item">
+            <span class="why-num">01</span>
+            <h3>够用的编辑器，不是预览器</h3>
+            <p>多标签、文件树、语法高亮、查找替换与多光标。外接键盘时，它就是一台缩小的工作站。</p>
+          </article>
+          <article class="why-item">
+            <span class="why-num">02</span>
+            <h3>AI 改代码，过程可回滚</h3>
+            <p>每一次工具调用、每一处 diff 都摊开给你看。不满意，一键撤回，不需要重来。</p>
+          </article>
+          <article class="why-item">
+            <span class="why-num">03</span>
+            <h3>构建在云端，产物回手机</h3>
+            <p>GitHub Actions 与 Gitee Go 接力编译，手机只负责发起与收件——不烫手，也不占存储。</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= 能力 ================= -->
+    <section class="section capabilities" id="capabilities">
+      <div class="wrap">
+        <div class="section-head split">
+          <div>
+            <p class="section-label"><span>03</span> / CAPABILITIES</p>
+            <h2 class="section-title">一条完整的<br />移动开发链路。</h2>
+          </div>
+          <p class="section-sub narrow">
+            从打开项目到拿到 APK，六个模块彼此咬合。不是功能清单的堆叠，而是一条能走通的路。
+          </p>
+        </div>
+
+        <div class="bento">
+          <!-- 编辑器 -->
+          <article class="bento-card span-7 card-editor">
+            <div class="bento-head">
+              <div>
+                <p class="bento-kicker">EDITOR</p>
+                <h3>专业编辑内核</h3>
+              </div>
+              <svg class="bento-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6l-5 6 5 6M16 6l5 6-5 6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <p>语法高亮、自动补全、代码折叠、多光标与全局搜索。小屏幕也保留完整的文件树与标签页。</p>
+            <div class="mini-editor" aria-hidden="true">
+              <div class="me-bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="me-path">lib / widgets / llm_model_bar.dart</span></div>
+              <div class="me-body">
+                <div class="me-tree">
+                  <span class="on">lib</span>
+                  <span>├ main.dart</span>
+                  <span>├ editor/</span>
+                  <span>└ widgets/</span>
+                </div>
+                <pre class="me-code"><code><span class="c">// 模型切换，按积分计费</span>
+<span class="k">final</span> model = <span class="f">models</span>[index];
+<span class="k">if</span> (credits &lt; model.cost) {
+  <span class="f">showCreditsSheet</span>();
+}
+<span class="k">return</span> <span class="f">ChatView</span>(model);</code></pre>
+              </div>
+            </div>
+          </article>
+
+          <!-- AI -->
+          <article class="bento-card span-5 card-ai">
+            <div class="bento-head">
+              <div>
+                <p class="bento-kicker">AI ASSISTANT</p>
+                <h3>会动手的 AI</h3>
+              </div>
+              <svg class="bento-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.8 4.5L18.5 9l-4.7 1.5L12 15l-1.8-4.5L5.5 9l4.7-1.5L12 3z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M18.5 15l.9 2.1 2.1.9-2.1.9-.9 2.1-.9-2.1-2.1-.9 2.1-.9.9-2.1z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
+            </div>
+            <p>读文件、改代码、跑分析，工具调用全程可见。VibeCoding 与联网搜索，让一句话变成一次提交。</p>
+            <div class="mini-chat" aria-hidden="true">
+              <div class="bubble user">给首页加上深色模式。</div>
+              <div class="bubble ai"><span class="tool">edit_file</span><span class="tool">read_file</span>已修改 3 个文件，运行 flutter analyze 通过。</div>
+              <div class="chat-actions"><span>应用</span><span>回滚</span></div>
+            </div>
+          </article>
+
+          <!-- 构建 -->
+          <article class="bento-card span-4 card-build">
+            <div class="bento-head">
+              <div>
+                <p class="bento-kicker">CLOUD BUILD</p>
+                <h3>云端构建</h3>
+              </div>
+              <svg class="bento-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 18a4 4 0 1 1 .6-7.96A5.5 5.5 0 0 1 18.3 8.5 3.75 3.75 0 0 1 17.5 18H7z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M12 12v6m0 0l-2.5-2.5M12 18l2.5-2.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <p>绑定仓库，一键触发 GitHub Actions 或 Gitee Go。构建进度实时同步，产物直接下载安装。</p>
+            <div class="mini-build" aria-hidden="true">
+              <div><span class="ok">✓</span> checkout</div>
+              <div><span class="ok">✓</span> flutter build apk</div>
+              <div><span class="run">›</span> upload artifact</div>
+            </div>
+          </article>
+
+          <!-- 终端 -->
+          <article class="bento-card span-4 card-term">
+            <div class="bento-head">
+              <div>
+                <p class="bento-kicker">TERMINAL</p>
+                <h3>Termux 终端</h3>
+              </div>
+              <svg class="bento-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M7 9l3 3-3 3M12 15h5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <p>检测到 Termux 即自动启用入口，启动直达项目目录。手机上的命令行，也能是完整的那一条。</p>
+            <div class="mini-term" aria-hidden="true">
+              <div><span class="p">$</span> cd ~/projects/slipe</div>
+              <div><span class="p">$</span> git status</div>
+              <div class="muted">On branch main · clean</div>
+              <div><span class="p">$</span> <span class="cursor-line">▍</span></div>
+            </div>
+          </article>
+
+          <!-- 同步 -->
+          <article class="bento-card span-4 card-sync">
+            <div class="bento-head">
+              <div>
+                <p class="bento-kicker">SYNC</p>
+                <h3>跨设备同步</h3>
+              </div>
+              <svg class="bento-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <p>项目列表、偏好设置、会话与积分跟随账号。换一台手机，接着上一行继续写。</p>
+            <div class="mini-sync" aria-hidden="true">
+              <div class="node">PHONE</div>
+              <div class="sync-line"><i></i></div>
+              <div class="node">CLOUD</div>
+              <div class="sync-line"><i></i></div>
+              <div class="node">TABLET</div>
+            </div>
+          </article>
+
+          <!-- 安全 -->
+          <article class="bento-card span-12 card-safe">
+            <div class="safe-copy">
+              <p class="bento-kicker">SECURITY &amp; OPEN</p>
+              <h3>代码是你的，账号也是。</h3>
+              <p>生物识别应用锁、OAuth 授权登录、设备管理与账号注销。用户协议与隐私政策随版本公开，随时可查。</p>
+            </div>
+            <div class="safe-tags" aria-hidden="true">
+              <span>BIO LOCK</span><span>OAUTH</span><span>DEVICE LIST</span><span>DATA EXPORT</span><span>OPEN SOURCE</span>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= 深潜 A：编辑器 + AI ================= -->
+    <section class="section deep" id="editor">
+      <div class="wrap deep-row">
+        <div class="deep-visual">
+          <div class="panel-window">
+            <div class="pw-bar">
+              <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+              <span class="pw-title">lib/theme.dart — SLIPE</span>
+              <span class="pw-badge">AI EDITING</span>
+            </div>
+            <div class="pw-diff">
+              <div class="pw-line ctx"><span class="gutter">41</span><code>ThemeData <span class="f">buildTheme</span>() {</code></div>
+              <div class="pw-line del"><span class="gutter">42</span><code>- <span class="k">final</span> base = ThemeData.light();</code></div>
+              <div class="pw-line add"><span class="gutter">42</span><code>+ <span class="k">final</span> base = ThemeData.dark();</code></div>
+              <div class="pw-line add"><span class="gutter">43</span><code>+ <span class="k">final</span> scheme = base.colorScheme.copyWith(</code></div>
+              <div class="pw-line add"><span class="gutter">44</span><code>+   primary: <span class="s">Color</span>(0xFFFF5A1F),</code></div>
+              <div class="pw-line add"><span class="gutter">45</span><code>+ );</code></div>
+              <div class="pw-line ctx"><span class="gutter">46</span><code>  <span class="k">return</span> base.copyWith(colorScheme: scheme);</code></div>
+              <div class="pw-line ctx"><span class="gutter">47</span><code>}</code></div>
+            </div>
+            <div class="pw-foot">
+              <span class="pw-status ok">✓ analyze passed</span>
+              <span class="pw-status">3 files changed</span>
+              <span class="pw-status">+18 −6</span>
+            </div>
+          </div>
+          <div class="panel-caption">每次修改都有 diff、有记录、有回滚点</div>
+        </div>
+        <div class="deep-copy">
+          <p class="section-label"><span>A</span> / EDITOR × AI</p>
+          <h2>让 AI 动手，<br />但别让它消失。</h2>
+          <p>它读你的文件、理解上下文、调用工具改代码。所有动作按顺序展示，改动以 diff 呈现，接受或回滚都由你决定。</p>
+          <ul class="check-list">
+            <li>工具调用链路透明：read_file / edit_file / run_analyze</li>
+            <li>多模型切换，按积分计费，用量可查</li>
+            <li>VibeCoding 一句话生成页面，联网搜索补充上下文</li>
+            <li>MCP 扩展接入外部能力</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= 深潜 B：云端构建 ================= -->
+    <section class="section deep deep-rev" id="build">
+      <div class="wrap deep-row">
+        <div class="deep-copy">
+          <p class="section-label"><span>B</span> / BUILD PIPELINE</p>
+          <h2>把编译交给云，<br />把结果留给你。</h2>
+          <p>手机的性能只用来写代码。提交触达云端 runner，编译、打包、上传产物一气呵成，SLIPE 在后台盯进度，完成后把 APK 递到你手上。</p>
+          <ul class="check-list">
+            <li>GitHub Actions / Gitee Go 双通道</li>
+            <li>服务端持续同步构建状态，断网也不丢任务</li>
+            <li>产物中转下载，支持断点与大小校验</li>
+            <li>版本、SHA-256、构建日志一处可查</li>
+          </ul>
+        </div>
+        <div class="deep-visual">
+          <div class="pipeline">
+            <div class="pipe-step done">
+              <span class="pipe-node">✓</span>
+              <div><b>提交代码</b><small>feat: dark theme</small></div>
+              <span class="pipe-tag">COMMIT</span>
+            </div>
+            <div class="pipe-step done">
+              <span class="pipe-node">✓</span>
+              <div><b>云端 runner</b><small>ubuntu-latest · 2m 14s</small></div>
+              <span class="pipe-tag">ACTIONS</span>
+            </div>
+            <div class="pipe-step active">
+              <span class="pipe-node">›</span>
+              <div><b>打包 APK</b><small>flutter build apk --release</small></div>
+              <span class="pipe-tag">BUILD</span>
+            </div>
+            <div class="pipe-step">
+              <span class="pipe-node">↓</span>
+              <div><b>回传手机</b><small>slipe-1.0.0.apk · 18.4 MB</small></div>
+              <span class="pipe-tag">DELIVER</span>
+            </div>
+          </div>
+          <div class="panel-caption">构建状态由服务端持续同步，不依赖前台</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= 深潜 C：社区 ================= -->
+    <section class="section deep" id="community-deep">
+      <div class="wrap deep-row">
+        <div class="deep-visual">
+          <div class="community-mock">
+            <div class="cm-card">
+              <div class="cm-head"><span class="cm-badge">PAYLOAD</span><span class="cm-meta">社区市场</span></div>
+              <h4>移动端 Markdown 编辑器组件</h4>
+              <p>即插即用的 Flutter 组件，含工具栏、预览与图片粘贴。</p>
+              <div class="cm-tags"><span>flutter</span><span>widget</span><span>markdown</span></div>
+              <div class="cm-foot"><span>♥ 128</span><span>↓ 1.2k</span><span class="cm-get">获取</span></div>
+            </div>
+            <div class="cm-card offset">
+              <div class="cm-head"><span class="cm-badge alt">TUTORIAL</span><span class="cm-meta">实战教程</span></div>
+              <h4>从零构建第一个 Flutter App</h4>
+              <div class="cm-progress"><i></i></div>
+              <div class="cm-foot"><span>6 课时</span><span>52 分钟</span><span class="cm-get">继续</span></div>
+            </div>
+          </div>
+          <div class="panel-caption">Payload 复用现成能力，教程陪你走完第一步</div>
+        </div>
+        <div class="deep-copy">
+          <p class="section-label"><span>C</span> / COMMUNITY</p>
+          <h2>一个人写代码，<br />一群人少踩坑。</h2>
+          <p>社区里有可直接导入的 Payload、按课时编排的实战教程，以及每天都在发生的讨论。遇到问题，先看看别人怎么解。</p>
+          <ul class="check-list">
+            <li>Payload 市场：组件、模板与工具，一键取用</li>
+            <li>教程轨道：从安装到出包，按顺序推进</li>
+            <li>论坛帖子、评论与点赞，反馈直达开发者</li>
+            <li>官方 QQ 群，内测与问题响应</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= 工作流 ================= -->
+    <section class="section workflow" id="workflow">
+      <div class="wrap">
+        <div class="section-head split">
+          <div>
+            <p class="section-label"><span>04</span> / WORKFLOW</p>
+            <h2 class="section-title">四步，从想法<br />到能安装的包。</h2>
+          </div>
+          <p class="section-sub narrow">不需要外接设备，不需要打开电脑。一台手机，一条闭环。</p>
+        </div>
+
+        <ol class="steps">
+          <li class="step">
+            <span class="step-num">01</span>
+            <div class="step-body">
+              <h3>打开项目</h3>
+              <p>克隆仓库或导入本地目录，文件树与标签页就位。</p>
+              <span class="step-tag">OPEN</span>
+            </div>
+          </li>
+          <li class="step">
+            <span class="step-num">02</span>
+            <div class="step-body">
+              <h3>改代码</h3>
+              <p>手动编辑，或让 AI 读上下文后动手。diff 确认再应用。</p>
+              <span class="step-tag">EDIT</span>
+            </div>
+          </li>
+          <li class="step">
+            <span class="step-num">03</span>
+            <div class="step-body">
+              <h3>跑构建</h3>
+              <p>一键推送 Actions 或 Gitee Go，进度在手机实时更新。</p>
+              <span class="step-tag">BUILD</span>
+            </div>
+          </li>
+          <li class="step">
+            <span class="step-num">04</span>
+            <div class="step-body">
+              <h3>拿产物</h3>
+              <p>APK 回传后直接安装，或分享给同伴继续测试。</p>
+              <span class="step-tag">SHIP</span>
+            </div>
+          </li>
+        </ol>
+      </div>
+    </section>
+
+    <!-- ================= 社区 ================= -->
+    <section class="section community" id="community">
+      <div class="wrap">
+        <div class="section-head split">
+          <div>
+            <p class="section-label"><span>05</span> / COMMUNITY</p>
+            <h2 class="section-title">正在发生的<br />讨论与教程。</h2>
+          </div>
+          <a class="text-link" href="#download">加入社区 <span aria-hidden="true">↗</span></a>
+        </div>
+
+        <div class="community-grid">
+          <div class="feed-card">
+            <div class="feed-head">
+              <span class="feed-title">最新讨论</span>
+              <span class="feed-live"><i></i>LIVE</span>
+            </div>
+            <div class="feed-list" id="posts-list">
+              <a class="feed-item" href="#community">
+                <span class="feed-item-title">在手机上跑 Flutter 构建，我是这样省掉电脑的</span>
+                <span class="feed-item-meta">社区 · 刚刚</span>
+              </a>
+              <a class="feed-item" href="#community">
+                <span class="feed-item-title">分享一个自己写的文件树组件</span>
+                <span class="feed-item-meta">社区 · 今天</span>
+              </a>
+              <a class="feed-item" href="#community">
+                <span class="feed-item-title">云端构建失败排查清单（持续更新）</span>
+                <span class="feed-item-meta">社区 · 今天</span>
+              </a>
+            </div>
+            <div class="feed-foot">
+              <span>发帖、评论、点赞都在 App 内完成</span>
+            </div>
+          </div>
+
+          <div class="track-card">
+            <div class="feed-head">
+              <span class="feed-title">教程轨道</span>
+              <span class="feed-live">TRACKS</span>
+            </div>
+            <div class="track-list" id="tracks-list">
+              <div class="track-item">
+                <span class="track-index">01</span>
+                <div><b>Flutter 起步</b><small>6 课时 · 52 分钟</small></div>
+                <span class="track-arrow">↗</span>
+              </div>
+              <div class="track-item">
+                <span class="track-index">02</span>
+                <div><b>编辑器与 AI 协同</b><small>4 课时 · 38 分钟</small></div>
+                <span class="track-arrow">↗</span>
+              </div>
+              <div class="track-item">
+                <span class="track-index">03</span>
+                <div><b>云端构建与签名</b><small>5 课时 · 45 分钟</small></div>
+                <span class="track-arrow">↗</span>
+              </div>
+            </div>
+            <div class="feed-foot">
+              <span id="tracks-summary">教程持续更新</span>
             </div>
           </div>
         </div>
       </div>
     </section>
 
-    <!-- 下载 -->
-    <section id="download" class="section">
-      <div class="container">
-        <h2 class="section-title">下载 SlipCode</h2>
-        <p class="section-sub">选择你的平台，开始移动编码之旅</p>
-        <div class="cards" id="platform-cards">
-          <!-- Android -->
-          <div class="card platform-card" id="card-android">
-            <div class="badge badge-recommend" id="badge-android">推荐</div>
-            <svg class="platform-icon" viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M7 9V7a5 5 0 0 1 10 0v2M5 9h14v8a3 3 0 0 1-3 3H8a3 3 0 0 1-3-3V9z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
-              <path d="M9 13h.01M15 13h.01" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>
-              <path d="M8 4.5L6.5 3M16 4.5L17.5 3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
-            </svg>
-            <h3>Android 版</h3>
-            <p class="platform-desc">适配 Android 8.0 及以上，支持 Termux 终端与云端构建。</p>
-            <div class="release-info" id="release-info">
-              <p class="release-loading">正在获取版本信息…</p>
-            </div>
-            <button class="btn btn-primary btn-block" id="btn-download-android" disabled>
-              <svg viewBox="0 0 24 24" class="icon"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-              <span id="btn-android-text">获取中…</span>
-            </button>
-            <p class="platform-note" id="android-note"></p>
+    <!-- ================= 定价 ================= -->
+    <section class="section pricing" id="pricing">
+      <div class="wrap">
+        <div class="section-head split pricing-head">
+          <div>
+            <p class="section-label"><span>06</span> / PRICING</p>
+            <h2 class="section-title">先免费用，<br />不够再升级。</h2>
           </div>
-          <!-- 桌面版 -->
-          <div class="card platform-card" id="card-desktop">
-            <div class="badge badge-recommend" id="badge-desktop">推荐</div>
-            <svg class="platform-icon" viewBox="0 0 24 24" aria-hidden="true">
-              <rect x="3" y="4" width="18" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/>
-              <path d="M9 20h6M12 16v4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
-              <path d="M7 9l2.5 2.5L7 14M12.5 14H16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-            <h3>桌面版</h3>
-            <p class="platform-desc">Windows / macOS / Linux 客户端正在适配中，敬请期待。</p>
-            <div class="release-info release-soon">
-              <p>桌面端正在紧锣密鼓开发，与移动端一致的同步体验即将到来。</p>
+          <div class="pricing-side">
+            <p class="section-sub narrow">注册即送 500 积分，每日签到继续领。所有档位都在 App 内开通，随时可停。</p>
+            <div class="segmented" role="group" aria-label="计费周期">
+              <button type="button" data-cycle="month" class="active">月付</button>
+              <button type="button" data-cycle="quarter">季付</button>
+              <button type="button" data-cycle="year">年付 <span class="save">省 25%</span></button>
             </div>
-            <button class="btn btn-disabled btn-block" disabled>
-              <svg viewBox="0 0 24 24" class="icon"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M12 7v5l3 3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-              即将推出
-            </button>
-            <p class="platform-note" id="desktop-note"></p>
+          </div>
+        </div>
+
+        <div class="plan-grid" id="plan-grid">
+          <!-- JS 渲染；此处为无脚本兜底 -->
+          <article class="plan">
+            <p class="plan-name">Personal</p>
+            <p class="plan-price"><span class="cur">¥</span><b>0</b><span class="per">/月</span></p>
+            <p class="plan-desc">免费档 · 每日签到 25 积分</p>
+            <a class="btn btn-ghost btn-block" href="#download">免费开始</a>
+          </article>
+        </div>
+        <p class="pricing-note" id="pricing-note">1 积分 = 1000 tokens · 价格以 App 内结算页为准</p>
+      </div>
+    </section>
+
+    <!-- ================= 下载 ================= -->
+    <section class="section download" id="download">
+      <div class="wrap">
+        <div class="download-panel">
+          <div class="download-copy">
+            <p class="section-label"><span>07</span> / DOWNLOAD</p>
+            <h2 class="download-title">现在，把 IDE<br />装进口袋。</h2>
+            <div class="release-line">
+              <span class="release-dot"></span>
+              <span id="release-state">正在获取最新版本…</span>
+            </div>
+            <div class="release-specs">
+              <div><small>版本</small><b id="release-version">—</b></div>
+              <div><small>大小</small><b id="release-size">—</b></div>
+              <div><small>更新</small><b id="release-date">—</b></div>
+              <div><small>下载</small><b id="release-downloads">—</b></div>
+            </div>
+            <div class="download-actions">
+              <a class="btn btn-primary btn-lg" id="download-btn" href="/api/releases/download" aria-disabled="true">
+                <svg viewBox="0 0 24 24" class="icon" aria-hidden="true"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                <span id="download-btn-text">获取中…</span>
+              </a>
+              <a class="btn btn-ghost btn-lg" href="https://github.com/lastmilk/slipecode_editor" target="_blank" rel="noopener">查看源码</a>
+            </div>
+            <p class="download-hint" id="download-hint">Android 8.0 及以上 · 安装前请允许「未知来源」</p>
+            <div class="sha-row" id="sha-row" hidden>
+              <span class="sha-label">SHA-256</span>
+              <code id="release-sha">—</code>
+              <button type="button" class="copy-btn" id="copy-sha" aria-label="复制 SHA-256">复制</button>
+            </div>
+            <p class="release-notes" id="release-notes"></p>
+          </div>
+
+          <div class="download-side">
+            <ol class="install-steps">
+              <li><span>01</span><div><b>下载 APK</b><small>点击左侧按钮，或扫码在手机打开本页</small></div></li>
+              <li><span>02</span><div><b>允许安装</b><small>系统提示时开启「允许此来源安装应用」</small></div></li>
+              <li><span>03</span><div><b>登录账号</b><small>使用邮箱注册，领取 500 积分</small></div></li>
+              <li><span>04</span><div><b>导入项目</b><small>连接 GitHub / Gitee，开始第一次构建</small></div></li>
+            </ol>
+            <div class="desktop-note">
+              <span class="desktop-icon" aria-hidden="true"></span>
+              <div>
+                <b>桌面端 · 适配中</b>
+                <small>Windows / macOS / Linux，体验与移动端保持一致</small>
+              </div>
+              <span class="soon-tag">SOON</span>
+            </div>
           </div>
         </div>
       </div>
     </section>
 
-    <!-- 功能 -->
-    <section id="features" class="section">
-      <div class="container">
-        <h2 class="section-title">为移动编码而生</h2>
-        <p class="section-sub">从编辑到构建，一个 App 全搞定</p>
-        <div class="cards features-grid">
-          <div class="card feature-card">
-            <svg class="feature-icon" viewBox="0 0 24 24"><path d="M8 6l-5 6 5 6M16 6l5 6-5 6M13 4l-2 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            <h4>专业编辑体验</h4>
-            <p>Monaco 编辑器内核，语法高亮、代码补全与多光标编辑，小屏幕也有大效率。</p>
-          </div>
-          <div class="card feature-card">
-            <svg class="feature-icon" viewBox="0 0 24 24"><path d="M7 18a4 4 0 1 1 .6-7.96A5.5 5.5 0 0 1 18.3 8.5 3.75 3.75 0 0 1 17.5 18H7z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M12 12v6m0 0l-2.5-2.5M12 18l2.5-2.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            <h4>云端构建</h4>
-            <p>对接 GitHub Actions 与 Gitee Go，一键触发构建，产物自动回传到手机。</p>
-          </div>
-          <div class="card feature-card">
-            <svg class="feature-icon" viewBox="0 0 24 24"><path d="M12 3l1.9 4.6L18.5 9l-4.6 1.4L12 15l-1.9-4.6L5.5 9l4.6-1.4L12 3z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M18.5 15l.9 2.1 2.1.9-2.1.9-.9 2.1-.9-2.1-2.1-.9 2.1-.9.9-2.1zM5 16l.7 1.8 1.8.7-1.8.7L5 21l-.7-1.8-1.8-.7 1.8-.7L5 16z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>
-            <h4>AI 编程助手</h4>
-            <p>对话式改代码，工具调用过程可见，每一处修改都支持撤回与回滚。</p>
-          </div>
-          <div class="card feature-card">
-            <svg class="feature-icon" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            <h4>项目云同步</h4>
-            <p>项目列表与偏好设置跨设备同步，换机不丢失，随时随地接着写。</p>
-          </div>
-          <div class="card feature-card">
-            <svg class="feature-icon" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M7 9l3 3-3 3M12 15h5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            <h4>Termux 终端</h4>
-            <p>检测到 Termux 后自动启用终端入口，启动直达项目目录，命令行触手可及。</p>
-          </div>
-          <div class="card feature-card">
-            <svg class="feature-icon" viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 4.5-3 8.5-7 10-4-1.5-7-5.5-7-10V6l7-3z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M9 12l2 2 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            <h4>安全与合规</h4>
-            <p>生物识别应用锁、OAuth 安全授权，完整的用户协议与隐私政策保障。</p>
-          </div>
+    <!-- ================= FAQ ================= -->
+    <section class="section faq" id="faq">
+      <div class="wrap faq-grid">
+        <div class="faq-head">
+          <p class="section-label"><span>08</span> / FAQ</p>
+          <h2 class="section-title">你可能<br />想问。</h2>
+          <p class="section-sub">还有问题？到社区发帖，或加入官方 QQ 群。</p>
         </div>
-      </div>
-    </section>
-
-    <!-- 社区 -->
-    <section id="community" class="section">
-      <div class="container">
-        <div class="card community-card">
-          <div class="community-copy">
-            <h2>加入官方社区</h2>
-            <p>反馈问题、获取内测版本、与其他开发者交流移动编码心得。</p>
-          </div>
-          <button class="btn btn-primary" id="btn-qq" hidden>
-            <svg viewBox="0 0 24 24" class="icon"><rect x="5" y="3" width="14" height="18" rx="3" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M9 17h6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-            <span id="qq-text">复制 QQ 群号</span>
-          </button>
+        <div class="faq-list">
+          <details class="faq-item" open>
+            <summary><span>需要 Root 或特殊权限吗？</span><i aria-hidden="true"></i></summary>
+            <div class="faq-body"><p>不需要。SLIPE 以普通应用方式运行；Termux 终端为可选项，仅在检测到已安装 Termux 时启用入口。</p></div>
+          </details>
+          <details class="faq-item">
+            <summary><span>云端构建怎么收费？</span><i aria-hidden="true"></i></summary>
+            <div class="faq-body"><p>构建本身走你自己的 GitHub Actions / Gitee Go 额度，SLIPE 只负责任务编排、状态同步与产物回传，不额外收取构建费。AI 对话按积分计费。</p></div>
+          </details>
+          <details class="faq-item">
+            <summary><span>支持哪些语言和框架？</span><i aria-hidden="true"></i></summary>
+            <div class="faq-body"><p>编辑器对主流语言提供语法高亮与基础补全；云端构建目前针对 Flutter / Android 链路做了完整适配，其它技术栈可按仓库自定义工作流。</p></div>
+          </details>
+          <details class="faq-item">
+            <summary><span>项目和数据会上传吗？</span><i aria-hidden="true"></i></summary>
+            <div class="faq-body"><p>项目文件保存在本机。只有你主动开启的云端同步（项目列表、偏好、会话）会写入 SLIPE 账号；AI 对话仅发送当前请求所需上下文。隐私政策随版本公开。</p></div>
+          </details>
+          <details class="faq-item">
+            <summary><span>换手机后数据还在吗？</span><i aria-hidden="true"></i></summary>
+            <div class="faq-body"><p>登录同一账号即可恢复项目列表、偏好设置、AI 会话与积分。若在旧设备开启过云端壁纸与头像，也会一并同步。</p></div>
+          </details>
         </div>
       </div>
     </section>
   </main>
 
-  <footer class="footer">
-    <div class="container footer-inner">
-      <p>© 2026 SlipCode · 口袋里的移动 IDE</p>
-      <p class="footer-links">
-        <a href="https://api.lineregre.com/api/policies" target="_blank" rel="noopener">服务协议与隐私政策</a>
-      </p>
+  <!-- ================= 页脚 ================= -->
+  <footer class="site-footer">
+    <div class="wrap">
+      <div class="footer-top">
+        <div class="footer-brand">
+          <svg class="brand-mark lg" viewBox="0 0 32 32" aria-hidden="true">
+            <rect width="32" height="32" rx="8" fill="#FF5A1F"/>
+            <path d="M21.5 10.5c-1.2-1.4-3-2.2-5-2.2-3 0-5 1.6-5 4 0 4.8 10 2.8 10 7.6 0 2.6-2.2 4.3-5.4 4.3-2.2 0-4.1-.8-5.3-2.3" stroke="#F4EFE6" stroke-width="2.6" fill="none" stroke-linecap="round"/>
+          </svg>
+          <p>口袋里的移动 AI IDE。<br />写代码，不必等到坐下。</p>
+          <button type="button" class="qq-btn" id="qq-copy" hidden>
+            <span class="qq-label">官方 QQ 群</span>
+            <span id="qq-number">—</span>
+            <span class="qq-copy-text">复制</span>
+          </button>
+        </div>
+        <div class="footer-cols">
+          <div class="footer-col">
+            <h4>产品</h4>
+            <a href="#capabilities">能力</a>
+            <a href="#workflow">工作流</a>
+            <a href="#pricing">定价</a>
+            <a href="#download">下载</a>
+          </div>
+          <div class="footer-col">
+            <h4>社区</h4>
+            <a href="#community">最新讨论</a>
+            <a href="#community">教程</a>
+            <a href="https://github.com/lastmilk/slipecode_editor" target="_blank" rel="noopener">GitHub</a>
+          </div>
+          <div class="footer-col">
+            <h4>合规</h4>
+            <button type="button" data-policy="userAgreement">用户协议</button>
+            <button type="button" data-policy="privacyPolicy">隐私政策</button>
+            <a href="https://api.lineregre.com/api/docs" target="_blank" rel="noopener">使用文档</a>
+          </div>
+        </div>
+      </div>
+
+      <div class="footer-word" aria-hidden="true">SLIPE</div>
+
+      <div class="footer-bottom">
+        <span>© <span id="year">2026</span> SLIPE · Mobile AI IDE</span>
+        <span class="footer-motto">BUILT FOR DEVELOPERS ON THE MOVE</span>
+        <a href="#top" class="back-top">回到顶部 ↑</a>
+      </div>
     </div>
   </footer>
 
-  <div class="toast" id="toast" role="status"></div>
-  <script src="app.js"></script>
+  <!-- 政策弹窗 -->
+  <div class="modal" id="policy-modal" hidden>
+    <div class="modal-backdrop" data-close></div>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="policy-title">
+      <div class="modal-head">
+        <h3 id="policy-title">用户协议</h3>
+        <div class="modal-tabs">
+          <button type="button" data-policy="userAgreement" class="active">用户协议</button>
+          <button type="button" data-policy="privacyPolicy">隐私政策</button>
+        </div>
+        <button type="button" class="modal-close" data-close aria-label="关闭">×</button>
+      </div>
+      <div class="modal-body" id="policy-body">正在加载…</div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="app.js" defer></script>
 </body>
 </html>
