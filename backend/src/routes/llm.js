@@ -10,7 +10,6 @@
 
 import {
   MIN_CALL_CREDITS,
-  MIN_BALANCE_FOR_CALL,
   TOKENS_PER_CREDIT,
 } from '../config.js';
 import { bumpStat, getDb, saveDb } from '../db.js';
@@ -178,6 +177,36 @@ function recordChannelStat(config, channel, { ok, tokens = 0, error = '' }) {
   db.stats.channels[channelKey] = channelStat;
 }
 
+// 并发预留：余额校验发生在请求开始，实际扣费在响应结束后；
+// 若不做预留，并发请求或超大 prompt 请求会共用同一次余额校验结果，
+// 配合 applyCredits 的「不低于 0」钳制，可绕过计费（上游成本由服务方承担）。
+// 因此按 prompt 侧预估成本预留，结算时释放。
+const inflightReserved = new Map(); // userId -> 已预留积分数
+
+function reserveInflight(userId, amount) {
+  inflightReserved.set(userId, (inflightReserved.get(userId) || 0) + amount);
+}
+
+function releaseInflight(userId, amount) {
+  const next = (inflightReserved.get(userId) || 0) - amount;
+  if (next > 0) inflightReserved.set(userId, next);
+  else inflightReserved.delete(userId);
+}
+
+/** 供测试观察内部预留状态 */
+export function inflightReservedFor(userId) {
+  return inflightReserved.get(userId) || 0;
+}
+
+/** 结算时统一释放预留并返回响应 */
+async function withInflightRelease(user, reserved, respond) {
+  try {
+    await respond();
+  } finally {
+    releaseInflight(user.id, reserved);
+  }
+}
+
 /** 判断消息中是否包含图片（多模态 content 数组） */
 function messagesContainImage(messages) {
   for (const m of messages || []) {
@@ -317,10 +346,14 @@ export async function handleLlmChat(req, res) {
     });
   }
 
+  const { multiplier } = modelDefaults(config);
+  // 预留 prompt 侧预估成本后再放行，防止并发/大 prompt 请求绕过计费
+  const reserved = costForTokens(estimatePromptTokens(body.messages), multiplier);
   const balance = getCredits(user);
-  if (balance < MIN_BALANCE_FOR_CALL) {
+  if (balance - inflightReservedFor(user.id) < reserved) {
     return sendJson(res, 402, { error: '积分不足，请先充值', credits: balance });
   }
+  reserveInflight(user.id, reserved);
 
   const upstreamBody = {
     model: config.model,
@@ -338,8 +371,6 @@ export async function handleLlmChat(req, res) {
     upstreamBody.stream_options = { include_usage: true };
   }
 
-  const { multiplier } = modelDefaults(config);
-
   let upstream;
   let channel;
   try {
@@ -351,6 +382,7 @@ export async function handleLlmChat(req, res) {
     upstream = picked.upstream;
     channel = picked.channel;
   } catch (err) {
+    releaseInflight(user.id, reserved);
     return sendJson(res, 502, {
       error: '无法连接上游模型服务',
       detail: String(err?.message || err).slice(0, 200),
@@ -366,6 +398,7 @@ export async function handleLlmChat(req, res) {
     }
     markChannelFailure(config, channel, `HTTP ${upstream.status}: ${detail}`);
     await saveDb();
+    releaseInflight(user.id, reserved);
     return sendJson(res, 502, {
       error: '上游模型调用失败',
       upstreamStatus: upstream.status,
@@ -374,8 +407,21 @@ export async function handleLlmChat(req, res) {
   }
 
   if (wantStream) {
-    return proxyStream({
-      req,
+    return withInflightRelease(user, reserved, () =>
+      proxyStream({
+        req,
+        res,
+        user,
+        config,
+        channel,
+        upstream,
+        multiplier,
+        messages: body.messages,
+      }),
+    );
+  }
+  return withInflightRelease(user, reserved, () =>
+    proxyJson({
       res,
       user,
       config,
@@ -383,17 +429,8 @@ export async function handleLlmChat(req, res) {
       upstream,
       multiplier,
       messages: body.messages,
-    });
-  }
-  return proxyJson({
-    res,
-    user,
-    config,
-    channel,
-    upstream,
-    multiplier,
-    messages: body.messages,
-  });
+    }),
+  );
 }
 
 // ---------------------------------------------------------------------------

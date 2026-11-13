@@ -148,8 +148,6 @@ export function addMonths(dateLike, months) {
 export const TOKENS_PER_CREDIT = 1000;
 /** 单次调用最少扣 1 积分，避免高频小额请求白嫖 */
 export const MIN_CALL_CREDITS = 1;
-/** 请求前要求的最低余额（不足则直接 402，避免透支） */
-export const MIN_BALANCE_FOR_CALL = 1;
 
 /**
  * 商业化充值套餐（与激活码面额对应）。
