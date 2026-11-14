@@ -123,6 +123,18 @@ node src/server.js
 | `GET` | `/api/tutorials/:id` | 单课完整步骤 |
 | `GET` | `/tutorial-assets/*` | 教程资源按需下载（目录 `DATA_DIR/tutorials/`） |
 
+### 官网（公开）
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `GET` | `/api/public/overview` | 官网聚合数据：最新安装包、统计、3 条社区帖子、教程轨道、套餐与 QQ 群 |
+| `GET` | `/api/releases/latest` | 最新 Android 安装包元数据（未发布返回 404） |
+| `GET` | `/api/releases/download` | 下载最新 APK（支持 `HEAD` 预检） |
+| `GET` | `/api/policies` | 用户协议与隐私政策 |
+| `GET` | `/api/public/info` | 门户信息（QQ 群号） |
+
+官网源码位于 `backend/website/`（`index.html` / `styles.css` / `app.js` / `assets/fonts/`），本地启动后访问 `http://localhost:8787/website/` 预览；线上 `slipe.cn` / `www.slipe.cn` 根路径直接输出该站点。
+
 管理端新增：
 
 | 方法 | 路径 | 说明 |

@@ -122,6 +122,7 @@ import {
   handleAdminUpdatePolicies,
   handleGetPolicies,
 } from './routes/policies.js';
+import { handlePublicOverview } from './routes/portal.js';
 import { handleGetProjects, handlePutProjects } from './routes/projects.js';
 import {
   handleAdminDeleteRelease,
@@ -281,6 +282,8 @@ const ROUTES = {
   // 使用文档（公开只读）与门户信息
   'GET /api/docs': handleListDocs,
   'GET /api/public/info': handlePortalInfo,
+  // 官网聚合数据（版本 / 统计 / 社区 / 教程 / 套餐）
+  'GET /api/public/overview': handlePublicOverview,
 
   // 政策合规（公开只读）
   'GET /api/policies': handleGetPolicies,
@@ -579,7 +582,25 @@ const server = createServer(async (req, res) => {
       return;
     }
 
-    // 2) 官网（slipe.cn / www.slipe.cn）
+    // 2) 官网本地预览：/website/ → backend/website 静态目录
+    //    线上域名由下面的 isWebsiteHost 分支在根路径直接提供。
+    if (req.method === 'GET' || req.method === 'HEAD') {
+      const rawPath = new URL(req.url, 'http://localhost').pathname;
+      if (rawPath === '/website') {
+        res.writeHead(302, { Location: '/website/' });
+        res.end();
+        return;
+      }
+      if (rawPath.startsWith('/website/')) {
+        const rel = decodeURIComponent(rawPath.slice('/website/'.length)) || 'index.html';
+        const ok = await serveStatic(req, res, WEBSITE_DIR, rel);
+        if (ok) return;
+        sendJson(res, 404, { error: '页面不存在' });
+        return;
+      }
+    }
+
+    // 3) 官网（slipe.cn / www.slipe.cn）
     if (isWebsiteHost(req) && (req.method === 'GET' || req.method === 'HEAD')) {
       const isAsset = /\.(js|mjs|css|map|png|jpg|jpeg|svg|webp|ico|woff|woff2|ttf|txt)$/i.test(path);
       if (isAsset) {
@@ -592,7 +613,7 @@ const server = createServer(async (req, res) => {
       return;
     }
 
-    // 3) 管理页面
+    // 4) 管理页面
     //    资源（含 /vendor、/styles.css、/app.js）无论哪个域名都从 admin 目录读取；
     //    页面入口：workadmin.* 任意路径、其它域名的 / 与 /admin。
     if (req.method === 'GET' || req.method === 'HEAD') {
