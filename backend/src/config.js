@@ -259,9 +259,11 @@ export function aliyunConfig() {
 
 export const DEFAULT_ADMIN_PASSWORD = env.ADMIN_PASSWORD || 'slipe-admin-2026';
 
-/** 环境变量中的静态管理令牌（兼容脚本调用，可选） */
-export const LEGACY_ADMIN_TOKEN =
-  env.ADMIN_TOKEN || 'dev-only-admin-token-7f3a9c1e5b2d48f0-change-me';
+/**
+ * 环境变量中的静态管理令牌（兼容脚本调用，可选）。
+ * 不得提供内置默认值：源码是公开的，已知常数等同于无鉴权。
+ */
+export const LEGACY_ADMIN_TOKEN = env.ADMIN_TOKEN || '';
 
 export function adminPasswordHash() {
   return getDb().config?.admin?.passwordHash || '';

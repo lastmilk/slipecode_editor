@@ -143,7 +143,7 @@ export function verifyAdminPassword(password) {
 export function requireAdmin(req) {
   const token = bearer(req);
   if (!token) throw httpError(401, '请先登录管理端');
-  if (safeEqual(token, LEGACY_ADMIN_TOKEN)) return;
+  if (LEGACY_ADMIN_TOKEN && safeEqual(token, LEGACY_ADMIN_TOKEN)) return;
   const payload = verifyToken(token);
   if (!payload || payload.role !== 'admin') {
     throw httpError(401, '管理端登录已过期，请重新登录');

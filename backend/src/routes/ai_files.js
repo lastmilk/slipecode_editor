@@ -207,7 +207,12 @@ export async function handleAiUnzip(req, res) {
       if (entry.method === 0) {
         data = entry.data;
       } else if (entry.method === 8) {
-        data = inflateRawSync(entry.data);
+        // 解压输出必须按剩余额度封顶，否则 Zip 炸弹会在下面的总量检查前
+        // 一次性分配数百 MB~数 GB 内存，直接拖垮单进程服务。
+        const remaining = cfg.maxUnzipMb * 1024 * 1024 - totalUnzipped;
+        data = inflateRawSync(entry.data, {
+          maxOutputLength: Math.max(1, remaining),
+        });
       } else {
         skipped.push({ path: relative, reason: `不支持的压缩方式 ${entry.method}` });
         continue;
