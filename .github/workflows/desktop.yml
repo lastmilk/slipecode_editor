@@ -52,7 +52,7 @@ jobs:
           flutter build linux --release --no-tree-shake-icons --verbose 2>&1 | tee "$RUNNER_TEMP/slipe-linux-build.log"
           status=${PIPESTATUS[0]}
           if [[ $status -ne 0 ]]; then
-            python3 -c 'import pathlib,sys; text=pathlib.Path(sys.argv[1]).read_text(errors="replace")[-24000:]; print("::error title=Linux build output::"+text.replace("%","%25").replace("\r","%0D").replace("\n","%0A"))' "$RUNNER_TEMP/slipe-linux-build.log"
+            python3 -c 'import pathlib,sys; text=pathlib.Path(sys.argv[1]).read_text(errors="replace")[-3500:]; print("::error title=Linux build output::"+text.replace("%","%25").replace("\r","%0D").replace("\n","%0A"))' "$RUNNER_TEMP/slipe-linux-build.log"
             exit "$status"
           fi
 
@@ -106,7 +106,7 @@ jobs:
           $status = $LASTEXITCODE
           if ($status -ne 0) {
             $text = Get-Content -Raw "$env:RUNNER_TEMP/slipe-windows-build.log"
-            if ($text.Length -gt 24000) { $text = $text.Substring($text.Length - 24000) }
+            if ($text.Length -gt 3500) { $text = $text.Substring($text.Length - 3500) }
             $escaped = $text.Replace("%", "%25").Replace("`r", "%0D").Replace("`n", "%0A")
             Write-Output "::error title=Windows build output::$escaped"
             exit $status
@@ -177,7 +177,7 @@ jobs:
           flutter build macos --release --no-tree-shake-icons --verbose 2>&1 | tee "$RUNNER_TEMP/slipe-macos-build.log"
           status=${PIPESTATUS[0]}
           if [[ $status -ne 0 ]]; then
-            python3 -c 'import pathlib,sys; text=pathlib.Path(sys.argv[1]).read_text(errors="replace")[-24000:]; print("::error title=macOS build output::"+text.replace("%","%25").replace("\r","%0D").replace("\n","%0A"))' "$RUNNER_TEMP/slipe-macos-build.log"
+            python3 -c 'import pathlib,sys; text=pathlib.Path(sys.argv[1]).read_text(errors="replace")[-3500:]; print("::error title=macOS build output::"+text.replace("%","%25").replace("\r","%0D").replace("\n","%0A"))' "$RUNNER_TEMP/slipe-macos-build.log"
             exit "$status"
           fi
 
