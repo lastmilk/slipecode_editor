@@ -19,7 +19,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             clang cmake ninja-build pkg-config \
-            libgtk-3-dev libblkid-dev liblzma-dev libstdc++-12-dev
+            libgtk-3-dev libsecret-1-dev libblkid-dev liblzma-dev libstdc++-12-dev
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -46,7 +46,15 @@ jobs:
 
       - name: Build Linux
         # 自定义 Payload 图标为非 const IconData，必须关闭图标 tree-shaking
-        run: flutter build linux --release --no-tree-shake-icons
+        shell: bash
+        run: |
+          set +e
+          flutter build linux --release --no-tree-shake-icons --verbose 2>&1 | tee "$RUNNER_TEMP/slipe-linux-build.log"
+          status=${PIPESTATUS[0]}
+          if [[ $status -ne 0 ]]; then
+            python3 -c 'import pathlib,sys; text=pathlib.Path(sys.argv[1]).read_text(errors="replace")[-24000:]; print("::error title=Linux build output::"+text.replace("%","%25").replace("\r","%0D").replace("\n","%0A"))' "$RUNNER_TEMP/slipe-linux-build.log"
+            exit "$status"
+          fi
 
       - name: Verify Linux LuaJIT bundle
         run: |
@@ -91,7 +99,18 @@ jobs:
         run: flutter config --enable-windows-desktop
 
       - name: Build Windows
-        run: flutter build windows --release --no-tree-shake-icons
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $false
+          flutter build windows --release --no-tree-shake-icons --verbose 2>&1 | Tee-Object -FilePath "$env:RUNNER_TEMP/slipe-windows-build.log"
+          $status = $LASTEXITCODE
+          if ($status -ne 0) {
+            $text = Get-Content -Raw "$env:RUNNER_TEMP/slipe-windows-build.log"
+            if ($text.Length -gt 24000) { $text = $text.Substring($text.Length - 24000) }
+            $escaped = $text.Replace("%", "%25").Replace("`r", "%0D").Replace("`n", "%0A")
+            Write-Output "::error title=Windows build output::$escaped"
+            exit $status
+          }
 
       - name: Verify Windows LuaJIT bundle
         shell: pwsh
@@ -152,7 +171,15 @@ jobs:
         run: flutter config --enable-macos-desktop
 
       - name: Build macOS
-        run: flutter build macos --release --no-tree-shake-icons
+        shell: bash
+        run: |
+          set +e
+          flutter build macos --release --no-tree-shake-icons --verbose 2>&1 | tee "$RUNNER_TEMP/slipe-macos-build.log"
+          status=${PIPESTATUS[0]}
+          if [[ $status -ne 0 ]]; then
+            python3 -c 'import pathlib,sys; text=pathlib.Path(sys.argv[1]).read_text(errors="replace")[-24000:]; print("::error title=macOS build output::"+text.replace("%","%25").replace("\r","%0D").replace("\n","%0A"))' "$RUNNER_TEMP/slipe-macos-build.log"
+            exit "$status"
+          fi
 
       - name: Verify macOS LuaJIT bundle, architecture and entitlements
         run: |
