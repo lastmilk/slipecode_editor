@@ -25,6 +25,7 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: stable
+          flutter-version: '3.47.1'
           cache: true
 
       - name: Pub get
@@ -86,6 +87,7 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: stable
+          flutter-version: '3.47.1'
           cache: true
 
       - name: Pub get
@@ -156,6 +158,7 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: stable
+          flutter-version: '3.47.1'
           cache: true
 
       - name: Pub get
