@@ -1,24 +1,32 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:math';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:window_manager/legacy.dart';
 
 import '../l10n/app_localizations.dart';
 import '../models/project.dart';
 import '../providers/project_provider.dart';
 import '../providers/settings_provider.dart';
+import '../services/command_registry.dart';
 import '../services/design_draft_service.dart';
+import '../services/desktop_platform.dart';
+import '../services/desktop_prefs_service.dart';
+import '../services/editor_process_service.dart';
 import '../services/loader_project_service.dart';
 import '../services/project_history_service.dart';
 import '../services/project_trash_service.dart';
 import '../services/saying_service.dart';
 import '../widgets/app_background.dart';
+import '../widgets/desktop/desktop_dialogs.dart';
+import '../widgets/global_ai_workspace.dart';
 import '../widgets/typewriter_text.dart';
 import 'design_draft_editor_screen.dart';
 import 'editor_screen.dart';
-import 'settings_screen.dart';
 import 'repo_sync_screen.dart';
 
 /// 应用主页
@@ -31,8 +39,7 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => HomeScreenState();
 }
 
-class HomeScreenState extends State<HomeScreen>
-    with TickerProviderStateMixin {
+class HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   List<Project> _history = [];
   String _saying = '';
   bool _loadingHistory = true;
@@ -55,13 +62,13 @@ class HomeScreenState extends State<HomeScreen>
       parent: _entranceController,
       curve: const Interval(0.0, 0.5, curve: Curves.easeOut),
     );
-    _listSlide = Tween<Offset>(
-      begin: const Offset(0, 0.08),
-      end: Offset.zero,
-    ).animate(CurvedAnimation(
-      parent: _entranceController,
-      curve: const Interval(0.3, 1.0, curve: Curves.easeOut),
-    ));
+    _listSlide = Tween<Offset>(begin: const Offset(0, 0.08), end: Offset.zero)
+        .animate(
+          CurvedAnimation(
+            parent: _entranceController,
+            curve: const Interval(0.3, 1.0, curve: Curves.easeOut),
+          ),
+        );
     _entranceController.forward();
 
     // 合规说明：开屏不申请任何文件存储权限。
@@ -103,13 +110,15 @@ class HomeScreenState extends State<HomeScreen>
     // 设计稿也作为项目列表中的一类条目展示（点击进入图编排器）
     final drafts = await DesignDraftService.instance.list();
     final draftEntries = drafts
-        .map((d) => Project(
-              name: d.name,
-              path: 'draft:${d.id}',
-              createdAt: d.createdAt,
-              lastEditedAt: d.updatedAt,
-              kind: 'draft',
-            ))
+        .map(
+          (d) => Project(
+            name: d.name,
+            path: 'draft:${d.id}',
+            createdAt: d.createdAt,
+            lastEditedAt: d.updatedAt,
+            kind: 'draft',
+          ),
+        )
         .toList();
     final merged = [...projects, ...draftEntries]
       ..sort((a, b) => b.activityAt.compareTo(a.activityAt));
@@ -130,9 +139,8 @@ class HomeScreenState extends State<HomeScreen>
       final draft = await DesignDraftService.instance.byId(id);
       if (!mounted) return;
       if (draft == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('设计稿不存在或已删除')),
-        );
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('设计稿不存在或已删除')));
         _loadHistory();
         return;
       }
@@ -159,7 +167,8 @@ class HomeScreenState extends State<HomeScreen>
         custom.isEmpty ? null : custom[Random().nextInt(custom.length)];
 
     if (custom.isNotEmpty) {
-      final useCustom = !settings.homeSayingSourceEnabled || Random().nextBool();
+      final useCustom =
+          !settings.homeSayingSourceEnabled || Random().nextBool();
       if (useCustom) {
         final text = pickCustom();
         if (!mounted || text == null) return;
@@ -179,25 +188,108 @@ class HomeScreenState extends State<HomeScreen>
   Future<void> _openProjectPath(String path, {String? name}) async {
     if (!Directory(path).existsSync()) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('项目目录不存在（可能来自其他设备）：\n$path')),
-        );
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('项目目录不存在（可能来自其他设备）：\n$path')));
       }
       return;
+    }
+    // 桌面：Editor 是独立进程（独立地址空间 / 崩溃域）
+    if (DesktopPlatform.isDesktop) {
+      // 首次打开时询问一次「每次询问 / 直接关闭」
+      await _resolveHubExitMode();
+      if (!mounted) return;
+
+      final step = ValueNotifier<int>(0);
+      unawaited(
+        showDialog<void>(
+          context: context,
+          barrierDismissible: false,
+          builder: (_) =>
+              _LaunchProgressDialog(step: step, projectName: name ?? ''),
+        ),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 32));
+      step.value = 1;
+
+      late EditorLaunchResult result;
+      try {
+        result = await EditorProcessService.instance.openProject(
+          path,
+          projectName: name,
+          // 关闭 Hub 时用 detached 启动，Hub 退出不会影响编辑器
+          detach: true,
+        );
+      } finally {
+        if (mounted) Navigator.of(context, rootNavigator: true).pop();
+      }
+      if (!mounted) return;
+      switch (result.status) {
+        case EditorLaunchStatus.launched:
+          _loadHistory();
+          // 窗口互斥：Hub 直接退出，返回 Hub 时由编辑器重新拉起
+          await DesktopPrefsService.instance.save();
+          await windowManager.destroy();
+          return;
+        case EditorLaunchStatus.alreadyRunning:
+          ScaffoldMessenger.of(context)
+              .showSnackBar(const SnackBar(content: Text('该项目已经在编辑器中打开')));
+          return;
+        case EditorLaunchStatus.failed:
+          ScaffoldMessenger.of(context)
+              .showSnackBar(SnackBar(content: Text(result.message)));
+          return;
+        case EditorLaunchStatus.unsupported:
+          break; // 回退到同进程编辑器
+      }
     }
     final provider = context.read<ProjectProvider>();
     await provider.openProject(path);
     if (!mounted) return;
     if (provider.projectPath != null && provider.error == null) {
-      await Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => const EditorScreen()),
-      );
+      await Navigator.of(context)
+          .push(MaterialPageRoute(builder: (_) => const EditorScreen()));
       _loadHistory(); // 返回首页时刷新历史排序
     } else if (provider.error != null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(provider.error!)),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(provider.error!)));
     }
+  }
+
+  /// 确定 Hub 打开项目后的处理方式
+  ///
+  /// 现在只有两种：直接关闭 Hub（推荐），或每次打开前询问。
+  /// 「隐藏 Hub」已移除：部分 Wayland 合成器上隐藏窗口仍参与输入分发，
+  /// 会让编辑器窗口点不动。
+  Future<String> _resolveHubExitMode() async {
+    final prefs = DesktopPrefsService.instance;
+    final stored = normalizeHubExitMode(prefs.hubExitMode);
+    if (stored != 'ask') return stored;
+    final choice = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: const Text('打开项目后，Hub 如何处理？'),
+        content: const Text(
+          '项目会在独立的编辑器窗口中打开，Hub 将退出。\n'
+          '返回 Hub 时会自动重新拉起。\n'
+          '该选项之后可在「偏好设置」中修改。',
+          style: TextStyle(fontSize: 12, height: 1.6),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop('close'),
+            child: const Text('关闭 Hub'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop('ask'),
+            child: const Text('每次询问我'),
+          ),
+        ],
+      ),
+    );
+    if (choice == 'ask') return 'ask';
+    prefs.update(() => prefs.hubExitMode = 'close');
+    return 'close';
   }
 
   /// 用系统文件选择器选择项目目录
@@ -221,16 +313,16 @@ class HomeScreenState extends State<HomeScreen>
 
   /// 导入仓库（原项目同步里的入口，现与「打开项目」并排）
   Future<void> _openRepoImport() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const RepoSyncScreen()),
-    );
+    await Navigator.of(context)
+        .push(MaterialPageRoute(builder: (_) => const RepoSyncScreen()));
     if (mounted) _loadHistory();
   }
 
   Future<void> _removeHistory(Project project) async {
     if (project.kind == 'draft' && project.path.startsWith('draft:')) {
-      await DesignDraftService.instance
-          .delete(project.path.substring('draft:'.length));
+      await DesignDraftService.instance.delete(
+        project.path.substring('draft:'.length),
+      );
     } else {
       // 仅从列表移除：磁盘保留，记录到回收站以便还原
       await ProjectTrashService.instance.rememberRemoved(project);
@@ -272,9 +364,7 @@ class HomeScreenState extends State<HomeScreen>
                 style: const TextStyle(color: Colors.red),
               ),
               subtitle: Text(
-                project.kind == 'draft'
-                    ? '设计稿数据将被直接删除'
-                    : '永久删除磁盘目录（不可恢复）',
+                project.kind == 'draft' ? '设计稿数据将被直接删除' : '永久删除磁盘目录（不可恢复）',
                 style: const TextStyle(fontSize: 11),
               ),
               onTap: () => Navigator.of(ctx).pop('delete'),
@@ -313,7 +403,7 @@ class HomeScreenState extends State<HomeScreen>
                   project.kind == 'draft'
                       ? '该操作会直接删除设计稿数据，且无法恢复。'
                       : '该操作会永久删除磁盘上的项目目录，无法恢复。\n'
-                          '如果只是想暂时隐藏，请选择「仅从列表移除」。',
+                            '如果只是想暂时隐藏，请选择「仅从列表移除」。',
                   style: const TextStyle(fontSize: 12, height: 1.5),
                 ),
                 const SizedBox(height: 8),
@@ -328,10 +418,7 @@ class HomeScreenState extends State<HomeScreen>
                     ),
                   ),
                 const SizedBox(height: 14),
-                Text(
-                  '请输入「$phrase」以确认：',
-                  style: const TextStyle(fontSize: 12),
-                ),
+                Text('请输入「$phrase」以确认：', style: const TextStyle(fontSize: 12)),
                 const SizedBox(height: 6),
                 TextField(
                   controller: controller,
@@ -370,24 +457,23 @@ class HomeScreenState extends State<HomeScreen>
   Future<void> _deleteProject(Project project) async {
     if (!await _confirmTypedDelete(project)) return;
     if (project.kind == 'draft' && project.path.startsWith('draft:')) {
-      await DesignDraftService.instance
-          .delete(project.path.substring('draft:'.length));
+      await DesignDraftService.instance.delete(
+        project.path.substring('draft:'.length),
+      );
     } else {
       final dir = Directory(project.path);
       if (!dir.existsSync()) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('项目目录不存在，已仅清理列表记录')),
-          );
+          ScaffoldMessenger.of(context)
+              .showSnackBar(const SnackBar(content: Text('项目目录不存在，已仅清理列表记录')));
         }
       } else {
         try {
           await dir.delete(recursive: true);
         } catch (e) {
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('删除失败：$e')),
-            );
+            ScaffoldMessenger.of(context)
+                .showSnackBar(SnackBar(content: Text('删除失败：$e')));
           }
           return;
         }
@@ -399,9 +485,7 @@ class HomeScreenState extends State<HomeScreen>
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            project.kind == 'draft' ? '设计稿已删除' : '项目已从磁盘永久删除',
-          ),
+          content: Text(project.kind == 'draft' ? '设计稿已删除' : '项目已从磁盘永久删除'),
         ),
       );
     }
@@ -412,9 +496,8 @@ class HomeScreenState extends State<HomeScreen>
     final ok = await ProjectTrashService.instance.restore(entry);
     if (!ok) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('还原失败：项目目录已不存在')),
-        );
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('还原失败：项目目录已不存在')));
       }
       return;
     }
@@ -441,18 +524,16 @@ class HomeScreenState extends State<HomeScreen>
         await dir.delete(recursive: true);
       } catch (e) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('删除失败：$e')),
-          );
+          ScaffoldMessenger.of(context)
+              .showSnackBar(SnackBar(content: Text('删除失败：$e')));
         }
         return;
       }
     }
     await ProjectTrashService.instance.forget(entry.id);
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('项目已从磁盘永久删除')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('项目已从磁盘永久删除')));
     }
   }
 
@@ -559,130 +640,170 @@ class HomeScreenState extends State<HomeScreen>
     final isDark = Theme.of(context).brightness == Brightness.dark;
     // 首页按显示范围决定是否叠加背景图；显示时降低渐变不透明度让背景可见
     final settings = context.watch<SettingsProvider>().settings;
-    final showBackground =
-        AppBackground.shouldShow(settings, isIdeScreen: false);
+    final showBackground = AppBackground.shouldShow(
+      settings,
+      isIdeScreen: false,
+    );
     final isLandscape =
         MediaQuery.orientationOf(context) == Orientation.landscape;
 
-    return Scaffold(
-      body: AppBackground.wrap(
-        isIdeScreen: false,
-        child: Container(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: (isDark
-                      ? [const Color(0xFF1E1E1E), const Color(0xFF121212)]
-                      : [const Color(0xFFF5F7FA), const Color(0xFFE4E8EC)])
-                  .map((c) =>
-                      showBackground ? c.withValues(alpha: 0.75) : c)
-                  .toList(),
-            ),
-          ),
-        child: SafeArea(
-          child: Padding(
-            padding: EdgeInsets.symmetric(
-              horizontal: isLandscape ? 16.0 : 24.0,
-            ),
-            // 横屏：左侧头像 + 标题 + 文案，右侧项目列表
-            child: isLandscape
-                ? Row(
-                    children: [
-                      SizedBox(
-                        width: min(320.0,
-                            MediaQuery.sizeOf(context).width * 0.36),
-                        child: Column(
+    return CallbackShortcuts(
+      // 桌面：Ctrl/Cmd+O 直接选择本地项目目录
+      bindings: DesktopPlatform.isDesktop
+          ? {desktopActivator(LogicalKeyboardKey.keyO): _openExistingProject}
+          : const <ShortcutActivator, VoidCallback>{},
+      child: Focus(
+        autofocus: DesktopPlatform.isDesktop,
+        child: Scaffold(
+          body: AppBackground.wrap(
+            isIdeScreen: false,
+            child: Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors:
+                      (isDark
+                              ? [
+                                  const Color(0xFF1E1E1E),
+                                  const Color(0xFF121212),
+                                ]
+                              : [
+                                  const Color(0xFFF5F7FA),
+                                  const Color(0xFFE4E8EC),
+                                ])
+                          .map(
+                            (c) =>
+                                showBackground ? c.withValues(alpha: 0.75) : c,
+                          )
+                          .toList(),
+                ),
+              ),
+              child: SafeArea(
+                child: Padding(
+                  padding: EdgeInsets.symmetric(
+                    horizontal: isLandscape ? 16.0 : 24.0,
+                  ),
+                  // 桌面：项目列 + 全局 AI；手机横屏：头像文案 + 项目列表
+                  child: DesktopPlatform.isDesktop
+                      ? _buildDesktopLayout(isDark)
+                      : isLandscape
+                      ? Row(
                           children: [
-                            Align(
-                              alignment: Alignment.centerRight,
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
+                            SizedBox(
+                              width: min(
+                                320.0,
+                                MediaQuery.sizeOf(context).width * 0.36,
+                              ),
+                              child: Column(
                                 children: [
-                                  IconButton(
-                                    tooltip: '还原项目',
-                                    icon: const Icon(Icons.restore),
-                                    onPressed: _openTrash,
+                                  Align(
+                                    alignment: Alignment.centerRight,
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        IconButton(
+                                          tooltip: '还原项目',
+                                          icon: const Icon(Icons.restore),
+                                          onPressed: _openTrash,
+                                        ),
+                                        IconButton(
+                                          tooltip: t('home.preferences'),
+                                          icon: const Icon(Icons.tune),
+                                          onPressed: () =>
+                                              showSettingsDialog(context),
+                                        ),
+                                      ],
+                                    ),
                                   ),
-                                  IconButton(
-                                    tooltip: t('home.preferences'),
-                                    icon: const Icon(Icons.tune),
-                                    onPressed: () =>
-                                        Navigator.of(context).push(
-                                      MaterialPageRoute(
-                                        builder: (_) => const SettingsScreen(),
+                                  Expanded(
+                                    child: Center(
+                                      child: Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          _buildHero(isDark),
+                                          const SizedBox(height: 16),
+                                          _buildSaying(isDark),
+                                        ],
                                       ),
                                     ),
                                   ),
                                 ],
                               ),
                             ),
-                            Expanded(
-                              child: Center(
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    _buildHero(isDark),
-                                    const SizedBox(height: 16),
-                                    _buildSaying(isDark),
-                                  ],
-                                ),
-                              ),
+                            VerticalDivider(
+                              width: 17,
+                              thickness: 1,
+                              color: isDark ? Colors.white10 : Colors.black12,
                             ),
+                            Expanded(child: _buildHistoryList(isDark)),
                           ],
-                        ),
-                      ),
-                      VerticalDivider(
-                        width: 17,
-                        thickness: 1,
-                        color: isDark ? Colors.white10 : Colors.black12,
-                      ),
-                      Expanded(child: _buildHistoryList(isDark)),
-                    ],
-                  )
-                : Column(
-                    children: [
-                      // 右上角只保留偏好设置入口，其余功能已移到底栏 / 我的
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.end,
-                        children: [
-                          IconButton(
-                            tooltip: '还原项目',
-                            icon: const Icon(Icons.restore),
-                            onPressed: _openTrash,
-                          ),
-                          IconButton(
-                            tooltip: t('home.preferences'),
-                            icon: const Icon(Icons.tune),
-                            onPressed: () => Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (_) => const SettingsScreen(),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      _buildHero(isDark),
-                      const SizedBox(height: 12),
-                      _buildSaying(isDark),
-                      const SizedBox(height: 12),
-                      // 项目历史列表
-                      Expanded(
-                        child: SlideTransition(
-                          position: _listSlide,
-                          child: FadeTransition(
-                            opacity: _entranceController,
-                            child: _buildHistoryList(isDark),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                    ],
-                  ),
+                        )
+                      : _buildProfileProjectColumn(isDark),
+                ),
+              ),
+            ),
           ),
         ),
-        ),
       ),
+    );
+  }
+
+  Widget _buildDesktopLayout(bool isDark) {
+    return Row(
+      children: [
+        SizedBox(width: 340, child: _buildProfileProjectColumn(isDark)),
+        VerticalDivider(
+          width: 17,
+          thickness: 1,
+          color: isDark ? Colors.white10 : Colors.black12,
+        ),
+        Expanded(
+          child: GlobalAiWorkspace(
+            projects: _history
+                .where((project) => project.kind != 'draft')
+                .toList(growable: false),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// 手机竖屏与桌面左栏共用：设置入口、头像、文案和项目历史列表。
+  Widget _buildProfileProjectColumn(bool isDark) {
+    return Column(
+      children: [
+        // 右上角只保留偏好设置入口，其余功能已移到底栏 / 我的
+        Row(
+          mainAxisAlignment: MainAxisAlignment.end,
+          children: [
+            IconButton(
+              tooltip: '还原项目',
+              icon: const Icon(Icons.restore),
+              onPressed: _openTrash,
+            ),
+            IconButton(
+              tooltip: t('home.preferences'),
+              icon: const Icon(Icons.tune),
+              onPressed: () => showSettingsDialog(context),
+            ),
+          ],
+        ),
+        _buildHero(isDark),
+        const SizedBox(height: 12),
+        _buildSaying(isDark),
+        const SizedBox(height: 12),
+        Expanded(
+          child: SlideTransition(
+            position: _listSlide,
+            child: FadeTransition(
+              opacity: _entranceController,
+              child: _buildHistoryList(isDark),
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+      ],
     );
   }
 
@@ -696,10 +817,19 @@ class HomeScreenState extends State<HomeScreen>
           return Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              _HomeAvatar(
-                avatarPath: settings.avatarPath,
-                isDark: isDark,
-              ),
+              if (DesktopPlatform.isDesktop) ...[
+                Text(
+                  'SLIPE HUB · 项目中心',
+                  style: TextStyle(
+                    fontSize: 11,
+                    letterSpacing: 2,
+                    fontWeight: FontWeight.w600,
+                    color: isDark ? Colors.white38 : Colors.black38,
+                  ),
+                ),
+                const SizedBox(height: 12),
+              ],
+              _HomeAvatar(avatarPath: settings.avatarPath, isDark: isDark),
               const SizedBox(height: 8),
               Text(
                 settings.homeTitle,
@@ -766,8 +896,10 @@ class HomeScreenState extends State<HomeScreen>
               ),
               style: OutlinedButton.styleFrom(
                 visualDensity: VisualDensity.compact,
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 6,
+                ),
               ),
             ),
             OutlinedButton.icon(
@@ -776,8 +908,10 @@ class HomeScreenState extends State<HomeScreen>
               label: const Text('导入仓库', style: TextStyle(fontSize: 12)),
               style: OutlinedButton.styleFrom(
                 visualDensity: VisualDensity.compact,
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 6,
+                ),
               ),
             ),
           ],
@@ -803,9 +937,7 @@ class HomeScreenState extends State<HomeScreen>
                       ),
                       const SizedBox(height: 12),
                       Text(
-                        _history.isEmpty
-                            ? t('home.empty')
-                            : '当前筛选下没有项目',
+                        _history.isEmpty ? t('home.empty') : '当前筛选下没有项目',
                         textAlign: TextAlign.center,
                         style: TextStyle(
                           fontSize: 13,
@@ -849,11 +981,19 @@ class HomeScreenState extends State<HomeScreen>
   Widget _buildKindFilter() {
     const items = <_KindFilterItem>[
       _KindFilterItem(null, '全部', Icons.apps, Colors.blueGrey),
-      _KindFilterItem('loader', 'Loader', Icons.rocket_launch_outlined,
-          Colors.blueAccent),
+      _KindFilterItem(
+        'loader',
+        'Loader',
+        Icons.rocket_launch_outlined,
+        Colors.blueAccent,
+      ),
       _KindFilterItem('classic', '传统', Icons.folder, Colors.blue),
       _KindFilterItem(
-          'draft', '设计稿', Icons.design_services_outlined, Colors.teal),
+        'draft',
+        '设计稿',
+        Icons.design_services_outlined,
+        Colors.teal,
+      ),
     ];
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
@@ -931,9 +1071,7 @@ class _LastEditedCard extends StatelessWidget {
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: Colors.blueAccent.withValues(alpha: 0.25),
-        ),
+        border: Border.all(color: Colors.blueAccent.withValues(alpha: 0.25)),
       ),
       child: InkWell(
         borderRadius: BorderRadius.circular(14),
@@ -1053,11 +1191,7 @@ class _HomeAvatar extends StatelessWidget {
           colors: [Color(0xFF0175C2), Color(0xFF13B9FD)],
         ),
       ),
-      child: const Icon(
-        Icons.person,
-        size: 46,
-        color: Colors.white,
-      ),
+      child: const Icon(Icons.person, size: 46, color: Colors.white),
     );
   }
 }
@@ -1105,11 +1239,7 @@ class _ProjectCard extends StatelessWidget {
                   color: color.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: Icon(
-                  icon,
-                  color: color,
-                  size: 22,
-                ),
+                child: Icon(icon, color: color, size: 22),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -1155,6 +1285,86 @@ class _ProjectCard extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// 打开项目时的两阶段启动进度（Hub 侧）
+///
+/// 用确定进度条代替无限转圈，避免启动期间动画卡顿的观感。
+class _LaunchProgressDialog extends StatelessWidget {
+  const _LaunchProgressDialog({required this.step, required this.projectName});
+
+  /// 0：正在打开项目；1：正在拉起编辑器窗口
+  final ValueNotifier<int> step;
+  final String projectName;
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('正在启动编辑器'),
+      content: SizedBox(
+        width: 360,
+        child: ValueListenableBuilder<int>(
+          valueListenable: step,
+          builder: (context, value, _) {
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _row(
+                  context,
+                  '打开项目${projectName.isEmpty ? '' : '「$projectName」'}',
+                  done: value > 0,
+                ),
+                const SizedBox(height: 10),
+                _row(context, '关闭 Hub 并拉起项目', done: value > 1, active: value == 1),
+                const SizedBox(height: 18),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(2),
+                  child: LinearProgressIndicator(
+                    value: value == 0 ? 0.35 : 0.75,
+                    minHeight: 3,
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _row(
+    BuildContext context,
+    String label, {
+    required bool done,
+    bool active = false,
+  }) {
+    final color = done || active
+        ? Theme.of(context).colorScheme.primary
+        : Theme.of(context).disabledColor;
+    return Row(
+      children: [
+        Icon(
+          done
+              ? Icons.check_circle
+              : (active ? Icons.radio_button_checked : Icons.radio_button_unchecked),
+          size: 16,
+          color: color,
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 12.5,
+              fontWeight: active ? FontWeight.w600 : FontWeight.w400,
+              color: color,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

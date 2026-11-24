@@ -7,6 +7,7 @@ import 'package:video_player/video_player.dart';
 
 import '../models/app_settings.dart';
 import '../providers/settings_provider.dart';
+import '../services/desktop_platform.dart';
 
 /// 应用主题背景
 ///
@@ -41,6 +42,11 @@ class AppBackground extends StatelessWidget {
   /// 判断当前页面是否需要显示背景
   static bool shouldShow(AppSettings settings, {required bool isIdeScreen}) {
     if (settings.backgroundImagePath.isEmpty) return false;
+    // 桌面端 video_player 不支持 Linux，MP4 壁纸降级为不显示
+    if (DesktopPlatform.isDesktop &&
+        isVideoPath(settings.backgroundImagePath)) {
+      return false;
+    }
     // 显示范围为「仅 IDE 编辑器界面」时，非编辑器页不显示
     if (settings.backgroundImageScope == AppSettings.backgroundScopeIdeOnly &&
         !isIdeScreen) {
@@ -50,8 +56,7 @@ class AppBackground extends StatelessWidget {
   }
 
   /// 背景文件是否为视频（MP4 动态壁纸）
-  static bool isVideoPath(String path) =>
-      path.toLowerCase().endsWith('.mp4');
+  static bool isVideoPath(String path) => path.toLowerCase().endsWith('.mp4');
 
   @override
   Widget build(BuildContext context) {

@@ -12,7 +12,7 @@ class AppConfig {
   ///
   /// 作为 .env 缺失 / 未被正确打包时的兜底：这些字段都不含 secret，
   /// 即使资源加载失败也必须保证后端、OAuth 登录可用。
-  static const String defaultAccountBackend = 'https://api.lineregre.com';
+  static const String defaultAccountBackend = 'https://api.slipe.linjade.com';
   static const String defaultGithubClientId = 'Ov23li26aNK8JhfG6weT';
   static const String defaultGiteeClientId =
       '44c8a6725c2e8af401b2c9fe43ad17fe2e0d5bf5a98b3fa2b8923ec8006b1d46';
@@ -41,7 +41,7 @@ class AppConfig {
   /// 授权回调地址（GitHub OAuth App 里登记的 URL，通常是后端中转地址）
   static String get oauthRedirectUri => _env(
         'GITHUB_OAUTH_REDIRECT_URI',
-        'https://api.lineregre.com/api/oauth/github/callback',
+        'https://api.slipe.linjade.com/api/oauth/github/callback',
       );
 
   /// App 自身监听的深链，后端换到 token 后 302 到这里
@@ -72,7 +72,7 @@ class AppConfig {
   /// Gitee OAuth 回调地址（后端桥接页，再跳转 App 深链）
   static String get giteeRedirectUri => _env(
         'GITEE_OAUTH_REDIRECT_URI',
-        'https://api.lineregre.com/api/oauth/gitee/callback',
+        'https://api.slipe.linjade.com/api/oauth/gitee/callback',
       );
 
   /// Gitee 授权范围（projects 用于仓库读写）

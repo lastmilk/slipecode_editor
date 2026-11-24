@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/open_file.dart';
@@ -5,10 +6,13 @@ import '../providers/editor_provider.dart';
 
 /// 编辑器标签栏组件
 class EditorTabs extends StatelessWidget {
-  const EditorTabs({super.key, this.onRequestClose});
+  const EditorTabs({super.key, this.onRequestClose, this.onContextMenu});
 
   /// 关闭标签前的回调（用于未保存确认）；为空时直接关闭
   final void Function(OpenFile file)? onRequestClose;
+
+  /// 右键菜单（桌面）；为空时不响应右键
+  final void Function(OpenFile file, Offset globalPosition)? onContextMenu;
 
   @override
   Widget build(BuildContext context) {
@@ -42,6 +46,9 @@ class EditorTabs extends StatelessWidget {
                 editor.closeFile(file.path);
               }
             },
+            onContextMenu: onContextMenu == null
+                ? null
+                : (position) => onContextMenu!(file, position),
           );
         },
       ),
@@ -55,6 +62,7 @@ class _TabItem extends StatelessWidget {
   final bool isDark;
   final VoidCallback onTap;
   final VoidCallback onClose;
+  final void Function(Offset position)? onContextMenu;
 
   const _TabItem({
     required this.file,
@@ -62,6 +70,7 @@ class _TabItem extends StatelessWidget {
     required this.isDark,
     required this.onTap,
     required this.onClose,
+    this.onContextMenu,
   });
 
   @override
@@ -74,10 +83,18 @@ class _TabItem extends StatelessWidget {
         ? (isDark ? Colors.white : Colors.black87)
         : (isDark ? Colors.white70 : Colors.black54);
 
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
+    return Listener(
+      // 中键点击关闭标签（桌面习惯）
+      onPointerDown: (event) {
+        if (event.buttons == kMiddleMouseButton) onClose();
+      },
+      child: GestureDetector(
+        onTap: onTap,
+        onSecondaryTapDown: onContextMenu == null
+            ? null
+            : (details) => onContextMenu!(details.globalPosition),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
         constraints: const BoxConstraints(minWidth: 80),
         decoration: BoxDecoration(
           color: bgColor,
@@ -125,6 +142,7 @@ class _TabItem extends StatelessWidget {
               ),
             ),
           ],
+        ),
         ),
       ),
     );

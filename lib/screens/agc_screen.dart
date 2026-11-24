@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import '../agent/mcp_tools.dart';
 import '../l10n/app_localizations.dart';
 import '../models/chat_segment.dart';
+import '../models/mcp_config.dart';
 import '../providers/account_provider.dart';
 import '../providers/ai_provider.dart';
 import '../providers/editor_provider.dart';
@@ -15,12 +16,14 @@ import '../services/ai_change_journal.dart';
 import '../services/ai_attachment_service.dart';
 import '../services/ai_extensions_service.dart';
 import '../services/conversation_service.dart';
+import '../services/desktop_platform.dart';
+import '../services/external_mcp_manager.dart';
 import '../services/knowledge_service.dart';
 import '../services/llm_service.dart';
 import '../widgets/ai_interaction_cards.dart';
+import '../widgets/desktop/desktop_dialogs.dart';
 import '../widgets/llm_model_bar.dart';
 import '../widgets/mcp_edit_dialog.dart';
-import 'settings_screen.dart';
 
 /// AGC（AI Generated Code）模式主界面
 ///
@@ -31,7 +34,10 @@ import 'settings_screen.dart';
 ///
 /// 侧边栏菜单为「对话记录 / MCP·Skills」（见 [AgcHistoryPanel] / [AgcToolsPanel]）。
 class AgcScreen extends StatefulWidget {
-  const AgcScreen({super.key});
+  const AgcScreen({super.key, this.global = false});
+
+  /// 首页全局模式：无项目时展示全局能力，而不是项目操作引导。
+  final bool global;
 
   @override
   State<AgcScreen> createState() => _AgcScreenState();
@@ -91,9 +97,7 @@ class _AgcScreenState extends State<AgcScreen> {
         break;
       case '/exp':
         setState(() => _knowledgeEnabled = !_knowledgeEnabled);
-        _showSnack(
-          _knowledgeEnabled ? '已开启：本轮将参考知识库经验' : '已关闭知识库参考',
-        );
+        _showSnack(_knowledgeEnabled ? '已开启：本轮将参考知识库经验' : '已关闭知识库参考');
         break;
       case '/expmod':
         setState(() => _writeKnowledgeAfterRun = true);
@@ -148,8 +152,9 @@ class _AgcScreenState extends State<AgcScreen> {
     final images = List<ChatImageAttachment>.from(_pendingImages);
     final files = List<AiTextAttachment>.from(_pendingFiles);
     // /exp：把私人知识库作为参考上下文（仅发给模型，不显示在气泡中）
-    final knowledgeContext =
-        _knowledgeEnabled ? KnowledgeService.instance.buildContext() : '';
+    final knowledgeContext = _knowledgeEnabled
+        ? KnowledgeService.instance.buildContext()
+        : '';
     final attachmentContext =
         '${AiAttachmentService.composeContext(files)}$knowledgeContext';
     final attachmentNames = [
@@ -305,50 +310,53 @@ class _AgcScreenState extends State<AgcScreen> {
 
         // 对话区
         Expanded(
-          child: empty
-              ? _AgcWelcome(
-                  isDark: isDark,
-                  onSuggestion: (text) => _send(text),
-                )
-              : ListView.builder(
-                  controller: _scrollController,
-                  padding: const EdgeInsets.fromLTRB(14, 14, 14, 8),
-                  itemCount: items.length + (ai.isStreaming ? 1 : 0),
-                  itemBuilder: (context, index) {
-                    if (index >= items.length) {
+          child: _soloWidth(
+            empty
+                ? _AgcWelcome(
+                    isDark: isDark,
+                    global: widget.global,
+                    onSuggestion: (text) => _send(text),
+                  )
+                : ListView.builder(
+                    controller: _scrollController,
+                    padding: const EdgeInsets.fromLTRB(14, 14, 14, 8),
+                    itemCount: items.length + (ai.isStreaming ? 1 : 0),
+                    itemBuilder: (context, index) {
+                      if (index >= items.length) {
+                        return _AgcAiMessage(
+                          content: ai.streamingText.isEmpty
+                              ? t('ai.thinking')
+                              : ai.streamingText,
+                          isDark: isDark,
+                          streaming: true,
+                          reasoning: ai.streamingReasoning.isEmpty
+                              ? null
+                              : ai.streamingReasoning,
+                          segments: ai.streamSegments,
+                        );
+                      }
+                      final msg = items[index];
+                      if (msg.role == ChatRole.user) {
+                        return _AgcUserMessage(
+                          content: msg.content,
+                          isDark: isDark,
+                        );
+                      }
+                      final isLast =
+                          index == items.length - 1 && !ai.isStreaming;
                       return _AgcAiMessage(
-                        content: ai.streamingText.isEmpty
-                            ? t('ai.thinking')
-                            : ai.streamingText,
-                        isDark: isDark,
-                        streaming: true,
-                        reasoning: ai.streamingReasoning.isEmpty
-                            ? null
-                            : ai.streamingReasoning,
-                        segments: ai.streamSegments,
-                      );
-                    }
-                    final msg = items[index];
-                    if (msg.role == ChatRole.user) {
-                      return _AgcUserMessage(
                         content: msg.content,
                         isDark: isDark,
+                        streaming: false,
+                        reasoning: msg.reasoning,
+                        segments: msg.segments,
+                        showPlanAction:
+                            msg.kind == 'plan' && isLast && !ai.isThinking,
+                        onExecutePlan: () => ai.executePlan(),
                       );
-                    }
-                    final isLast =
-                        index == items.length - 1 && !ai.isStreaming;
-                    return _AgcAiMessage(
-                      content: msg.content,
-                      isDark: isDark,
-                      streaming: false,
-                      reasoning: msg.reasoning,
-                      segments: msg.segments,
-                      showPlanAction:
-                          msg.kind == 'plan' && isLast && !ai.isThinking,
-                      onExecutePlan: () => ai.executePlan(),
-                    );
-                  },
-                ),
+                    },
+                  ),
+          ),
         ),
 
         // 阶段 TODO（AI 先规划再执行）
@@ -387,8 +395,10 @@ class _AgcScreenState extends State<AgcScreen> {
                   Expanded(
                     child: Text(
                       ai.error!,
-                      style:
-                          TextStyle(fontSize: 12, color: Colors.red.shade700),
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.red.shade700,
+                      ),
                     ),
                   ),
                   if (ai.canRetry)
@@ -465,14 +475,27 @@ class _AgcScreenState extends State<AgcScreen> {
           _buildAttachmentChips(),
 
         // 输入栏
-        _AgcInputBar(
-          controller: _inputController,
-          busy: ai.isThinking,
-          onSend: _send,
-          onStop: ai.cancel,
-          onAttach: ai.isThinking ? null : _showAttachmentSheet,
+        _soloWidth(
+          _AgcInputBar(
+            controller: _inputController,
+            busy: ai.isThinking,
+            onSend: _send,
+            onStop: ai.cancel,
+            onAttach: ai.isThinking ? null : _showAttachmentSheet,
+          ),
         ),
       ],
+    );
+  }
+
+  /// SOLO 形态：桌面宽屏下限制对话区宽度，避免超长行影响可读性
+  Widget _soloWidth(Widget child) {
+    if (!DesktopPlatform.isDesktop) return child;
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 900),
+        child: child,
+      ),
     );
   }
 
@@ -549,8 +572,7 @@ class _AgcScreenState extends State<AgcScreen> {
       color: Colors.teal.withValues(alpha: 0.10),
       child: Row(
         children: [
-          const Icon(Icons.auto_stories_outlined,
-              size: 15, color: Colors.teal),
+          const Icon(Icons.auto_stories_outlined, size: 15, color: Colors.teal),
           const SizedBox(width: 6),
           const Expanded(
             child: Text(
@@ -632,9 +654,7 @@ class _AgcScreenState extends State<AgcScreen> {
 
   Widget _buildConfigBanner(bool isDark) {
     return InkWell(
-      onTap: () => Navigator.of(
-        context,
-      ).push(MaterialPageRoute(builder: (_) => const SettingsScreen())),
+      onTap: () => showSettingsDialog(context),
       child: Container(
         width: double.infinity,
         padding: const EdgeInsets.all(12),
@@ -648,7 +668,9 @@ class _AgcScreenState extends State<AgcScreen> {
                 t('ai.llmNotConfigured'),
                 style: TextStyle(
                   fontSize: 12,
-                  color: isDark ? Colors.orange.shade200 : Colors.orange.shade800,
+                  color: isDark
+                      ? Colors.orange.shade200
+                      : Colors.orange.shade800,
                 ),
               ),
             ),
@@ -669,26 +691,41 @@ class _AgcScreenState extends State<AgcScreen> {
 // =============================================================================
 
 class _AgcWelcome extends StatelessWidget {
-  const _AgcWelcome({required this.isDark, required this.onSuggestion});
+  const _AgcWelcome({
+    required this.isDark,
+    required this.onSuggestion,
+    this.global = false,
+  });
 
   final bool isDark;
+  final bool global;
   final ValueChanged<String> onSuggestion;
 
-  static const _suggestions = [
+  static const _projectSuggestions = [
     (Icons.map_outlined, '介绍一下这个项目'),
     (Icons.add_circle_outline, '帮我写一个新的页面'),
     (Icons.bug_report_outlined, '帮我检查并修复问题'),
     (Icons.search, '在项目里搜索一段代码'),
   ];
 
+  static const _globalSuggestions = [
+    (Icons.lightbulb_outline, '帮我制定一个应用方案'),
+    (Icons.extension_outlined, '介绍 MCP 和 Skills 能做什么'),
+    (Icons.travel_explore_outlined, '帮我检索最新技术资料'),
+    (Icons.cloud_outlined, '列出我已连接的代码仓库'),
+  ];
+
   @override
   Widget build(BuildContext context) {
-    final projectName = context
+    final projectName =
+        context
             .watch<ProjectProvider>()
             .projectPath
             ?.split(RegExp(r'[/\\]'))
             .last ??
         '';
+    final globalMode = global && projectName.isEmpty;
+    final suggestions = globalMode ? _globalSuggestions : _projectSuggestions;
     return Center(
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(28),
@@ -721,13 +758,17 @@ class _AgcWelcome extends StatelessWidget {
             ),
             const SizedBox(height: 18),
             Text(
-              projectName.isEmpty ? '有什么可以帮你的？' : '我是 $projectName 的 AI 搭档',
+              globalMode
+                  ? '你好，我是 SLIPE 全局 AI'
+                  : projectName.isEmpty
+                  ? '有什么可以帮你的？'
+                  : '我是 $projectName 的 AI 搭档',
               style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 8),
             Text(
-              '可以直接让我读写项目文件、改代码、触发构建',
+              globalMode ? '可通用提问，也可挂载项目执行任务' : '可以直接让我读写项目文件、改代码、触发构建',
               style: TextStyle(
                 fontSize: 12,
                 height: 1.5,
@@ -740,7 +781,7 @@ class _AgcWelcome extends StatelessWidget {
               spacing: 8,
               runSpacing: 8,
               alignment: WrapAlignment.center,
-              children: _suggestions
+              children: suggestions
                   .map(
                     (s) => ActionChip(
                       avatar: Icon(s.$1, size: 15),
@@ -903,10 +944,7 @@ class _AgcAiMessage extends StatelessWidget {
                 ),
                 onPressed: onExecutePlan,
                 icon: const Icon(Icons.play_arrow, size: 16),
-                label: const Text(
-                  '执行计划',
-                  style: TextStyle(fontSize: 12),
-                ),
+                label: const Text('执行计划', style: TextStyle(fontSize: 12)),
               ),
             ),
         ],
@@ -931,9 +969,7 @@ class _AgcAiMessage extends StatelessWidget {
             ),
           );
         case ChatSegmentKind.tools:
-          widgets.add(
-            _AgcToolBatchCard(steps: seg.steps, isDark: isDark),
-          );
+          widgets.add(_AgcToolBatchCard(steps: seg.steps, isDark: isDark));
         case ChatSegmentKind.text:
           final text = seg.text;
           if (text.isEmpty && !(streaming && isLast)) break;
@@ -972,8 +1008,9 @@ class _AgcAiMessage extends StatelessWidget {
       code: TextStyle(
         fontFamily: 'monospace',
         fontSize: 12.5,
-        backgroundColor:
-            isDark ? const Color(0xFF1E1E1E) : const Color(0xFFF0F2F5),
+        backgroundColor: isDark
+            ? const Color(0xFF1E1E1E)
+            : const Color(0xFFF0F2F5),
         color: isDark ? const Color(0xFFCE9178) : const Color(0xFFB31D28),
       ),
       codeblockDecoration: BoxDecoration(
@@ -1150,8 +1187,9 @@ class _AgcCodeBlock extends StatelessWidget {
                 fontFamily: 'monospace',
                 fontSize: 12.5,
                 height: 1.45,
-                color:
-                    isDark ? const Color(0xFFD4D4D4) : const Color(0xFF1F2328),
+                color: isDark
+                    ? const Color(0xFFD4D4D4)
+                    : const Color(0xFF1F2328),
               ),
             ),
           ),
@@ -1222,7 +1260,9 @@ class _AgcToolCardState extends State<_AgcToolCard> {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      step.summary.isEmpty ? step.tool : '${step.tool} · ${step.summary}',
+                      step.summary.isEmpty
+                          ? step.tool
+                          : '${step.tool} · ${step.summary}',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
@@ -1305,15 +1345,18 @@ class _AgcToolBatchCardState extends State<_AgcToolBatchCard> {
     if (all((t) => t.contains('read') || t.contains('get'))) {
       return '读取 $n 个文件';
     }
-    if (all((t) =>
-        t.contains('search') || t.contains('list') || t.contains('grep'))) {
+    if (all(
+      (t) => t.contains('search') || t.contains('list') || t.contains('grep'),
+    )) {
       return '搜索 $n 次';
     }
-    if (all((t) =>
-        t.contains('write') ||
-        t.contains('create') ||
-        t.contains('replace') ||
-        t.contains('edit'))) {
+    if (all(
+      (t) =>
+          t.contains('write') ||
+          t.contains('create') ||
+          t.contains('replace') ||
+          t.contains('edit'),
+    )) {
       return '修改 $n 个文件';
     }
     return '调用 $n 个工具';
@@ -1394,36 +1437,11 @@ class _SlashCommandPanel extends StatelessWidget {
 
   /// 已支持的指令（后续可扩展）
   static const _commands = [
-    (
-      '/plan',
-      '计划模式',
-      'AI 先制定实施计划，确认后再执行',
-      Icons.format_list_numbered,
-    ),
-    (
-      '/exp',
-      '参考知识库',
-      '本轮把私人知识库经验提供给 AI 参考',
-      Icons.auto_stories_outlined,
-    ),
-    (
-      '/expmod',
-      '写入知识库',
-      '本轮完成后把 AI 的经验写入私人知识库',
-      Icons.auto_awesome,
-    ),
-    (
-      '/design',
-      '设计稿优先',
-      'AI 先创建并编排设计稿，再执行实现',
-      Icons.design_services_outlined,
-    ),
-    (
-      '/search',
-      '联网搜索',
-      'AI 可按需联网搜索最新资料',
-      Icons.travel_explore,
-    ),
+    ('/plan', '计划模式', 'AI 先制定实施计划，确认后再执行', Icons.format_list_numbered),
+    ('/exp', '参考知识库', '本轮把私人知识库经验提供给 AI 参考', Icons.auto_stories_outlined),
+    ('/expmod', '写入知识库', '本轮完成后把 AI 的经验写入私人知识库', Icons.auto_awesome),
+    ('/design', '设计稿优先', 'AI 先创建并编排设计稿，再执行实现', Icons.design_services_outlined),
+    ('/search', '联网搜索', 'AI 可按需联网搜索最新资料', Icons.travel_explore),
     (
       '/mcpadd',
       '扩展 MCP',
@@ -1434,9 +1452,7 @@ class _SlashCommandPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final matched = _commands
-        .where((c) => c.$1.startsWith('/$query'))
-        .toList();
+    final matched = _commands.where((c) => c.$1.startsWith('/$query')).toList();
     if (matched.isEmpty) return const SizedBox.shrink();
     return Container(
       margin: const EdgeInsets.fromLTRB(12, 4, 12, 0),
@@ -1497,8 +1513,7 @@ class _AgcPendingBanner extends StatelessWidget {
           color: Colors.orange.withValues(alpha: 0.12),
           child: Row(
             children: [
-              const Icon(Icons.pending_actions,
-                  size: 16, color: Colors.orange),
+              const Icon(Icons.pending_actions, size: 16, color: Colors.orange),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
@@ -1635,72 +1650,76 @@ class _AgcInputBar extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-          padding: const EdgeInsets.fromLTRB(14, 4, 6, 4),
-          decoration: BoxDecoration(
-            color: isDark ? const Color(0xFF26262B) : Colors.white,
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(
-              color: isDark
-                  ? Colors.white.withValues(alpha: 0.12)
-                  : const Color(0xFFE0E4E8),
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: isDark ? 0.25 : 0.06),
-                blurRadius: 12,
-                offset: const Offset(0, 4),
-              ),
-            ],
-          ),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              if (onAttach != null)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 2),
-                  child: IconButton(
-                    visualDensity: VisualDensity.compact,
-                    onPressed: busy ? null : onAttach,
-                    icon: const Icon(Icons.attach_file, size: 19),
-                    tooltip: '上传图片或文件',
-                  ),
+              padding: const EdgeInsets.fromLTRB(14, 4, 6, 4),
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF26262B) : Colors.white,
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(
+                  color: isDark
+                      ? Colors.white.withValues(alpha: 0.12)
+                      : const Color(0xFFE0E4E8),
                 ),
-              Expanded(
-                child: TextField(
-                  controller: controller,
-                  maxLines: 5,
-                  minLines: 1,
-                  keyboardType: TextInputType.multiline,
-                  enabled: !busy,
-                  decoration: InputDecoration(
-                    hintText: busy ? t('ai.thinkingHint') : t('ai.inputHint'),
-                    hintStyle: TextStyle(
-                      fontSize: 14,
-                      color: isDark ? Colors.white30 : Colors.black26,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: isDark ? 0.25 : 0.06),
+                    blurRadius: 12,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  if (onAttach != null)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 2),
+                      child: IconButton(
+                        visualDensity: VisualDensity.compact,
+                        onPressed: busy ? null : onAttach,
+                        icon: const Icon(Icons.attach_file, size: 19),
+                        tooltip: '上传图片或文件',
+                      ),
                     ),
-                    border: InputBorder.none,
-                    contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                  Expanded(
+                    child: TextField(
+                      controller: controller,
+                      maxLines: 5,
+                      minLines: 1,
+                      keyboardType: TextInputType.multiline,
+                      enabled: !busy,
+                      decoration: InputDecoration(
+                        hintText: busy
+                            ? t('ai.thinkingHint')
+                            : t('ai.inputHint'),
+                        hintStyle: TextStyle(
+                          fontSize: 14,
+                          color: isDark ? Colors.white30 : Colors.black26,
+                        ),
+                        border: InputBorder.none,
+                        contentPadding: const EdgeInsets.symmetric(
+                          vertical: 10,
+                        ),
+                      ),
+                      onSubmitted: (_) => onSend(),
+                    ),
                   ),
-                  onSubmitted: (_) => onSend(),
-                ),
-              ),
-              const SizedBox(width: 4),
-              Padding(
-                padding: const EdgeInsets.only(bottom: 2),
-                child: IconButton.filled(
-                  style: IconButton.styleFrom(
-                    backgroundColor: const Color(0xFF2D6CF6),
-                    minimumSize: const Size(38, 38),
+                  const SizedBox(width: 4),
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 2),
+                    child: IconButton.filled(
+                      style: IconButton.styleFrom(
+                        backgroundColor: const Color(0xFF2D6CF6),
+                        minimumSize: const Size(38, 38),
+                      ),
+                      onPressed: busy ? onStop : onSend,
+                      icon: busy
+                          ? const Icon(Icons.stop_rounded, size: 18)
+                          : const Icon(Icons.arrow_upward, size: 18),
+                    ),
                   ),
-                  onPressed: busy ? onStop : onSend,
-                  icon: busy
-                      ? const Icon(Icons.stop_rounded, size: 18)
-                      : const Icon(Icons.arrow_upward, size: 18),
-                ),
+                ],
               ),
-            ],
-          ),
-        ),
+            ),
             const SizedBox(height: 4),
             Text(
               '内容由 AI 生成，仅供参考',
@@ -1752,7 +1771,9 @@ class _AgcHistoryPanelState extends State<AgcHistoryPanel> {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
     final day = DateTime.fromMillisecondsSinceEpoch(updatedAt);
-    final diff = today.difference(DateTime(day.year, day.month, day.day)).inDays;
+    final diff = today
+        .difference(DateTime(day.year, day.month, day.day))
+        .inDays;
     if (diff <= 0) return 0;
     if (diff == 1) return 1;
     if (diff < 7) return 2;
@@ -1775,9 +1796,7 @@ class _AgcHistoryPanelState extends State<AgcHistoryPanel> {
         final all = service.conversations.where((c) {
           if (query.isEmpty) return true;
           if (c.title.toLowerCase().contains(query)) return true;
-          return c.messages.any(
-            (m) => m.content.toLowerCase().contains(query),
-          );
+          return c.messages.any((m) => m.content.toLowerCase().contains(query));
         }).toList();
         final pinned = all.where((c) => c.pinned).toList();
         final unpinned = all.where((c) => !c.pinned).toList();
@@ -1854,7 +1873,9 @@ class _AgcHistoryPanelState extends State<AgcHistoryPanel> {
                         if (pinned.isNotEmpty) ...[
                           _buildPinnedHeader(isDark),
                           if (_pinnedExpanded)
-                            ...pinned.map((c) => _buildTile(c, service, isDark)),
+                            ...pinned.map(
+                              (c) => _buildTile(c, service, isDark),
+                            ),
                           const Divider(height: 16),
                         ],
                         for (var g = 0; g < 4; g++)
@@ -1906,7 +1927,9 @@ class _AgcHistoryPanelState extends State<AgcHistoryPanel> {
     ConversationService service,
     bool isDark,
   ) {
-    final items = unpinned.where((c) => _groupOf(c.updatedAt) == group).toList();
+    final items = unpinned
+        .where((c) => _groupOf(c.updatedAt) == group)
+        .toList();
     if (items.isEmpty) return const [];
     return [
       Padding(
@@ -1958,10 +1981,12 @@ class _AgcHistoryPanelState extends State<AgcHistoryPanel> {
             ),
         ],
       ),
-      onTap: () {
-        context.read<AiProvider>().openSession(conv.id);
-        widget.onClose?.call();
-      },
+      onTap: context.read<AiProvider>().isThinking
+          ? null
+          : () {
+              context.read<AiProvider>().openSession(conv.id);
+              widget.onClose?.call();
+            },
       onLongPress: () => _showSessionActions(conv, service),
     );
   }
@@ -1997,7 +2022,11 @@ class _AgcHistoryPanelState extends State<AgcHistoryPanel> {
             ),
             ListTile(
               dense: true,
-              leading: Icon(Icons.delete_outline, size: 18, color: Colors.red.shade400),
+              leading: Icon(
+                Icons.delete_outline,
+                size: 18,
+                color: Colors.red.shade400,
+              ),
               title: Text('删除', style: TextStyle(color: Colors.red.shade400)),
               onTap: () {
                 Navigator.of(sheetContext).pop();
@@ -2061,8 +2090,9 @@ class _AgcHistoryPanelState extends State<AgcHistoryPanel> {
         children: [
           CircleAvatar(
             radius: 13,
-            backgroundColor:
-                isDark ? Colors.white12 : Colors.black.withValues(alpha: 0.08),
+            backgroundColor: isDark
+                ? Colors.white12
+                : Colors.black.withValues(alpha: 0.08),
             child: Icon(
               Icons.person_outline,
               size: 15,
@@ -2101,11 +2131,12 @@ class AgcToolsPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final ai = context.watch<AiProvider>();
     final ext = AiExtensionsService.instance;
+    final manager = ExternalMcpManager.instance;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final tools = ai.mcpTools;
 
     return ListenableBuilder(
-      listenable: ext,
+      listenable: Listenable.merge([ext, manager]),
       builder: (context, _) {
         final servers = ext.servers;
         final skills = ext.skills;
@@ -2169,57 +2200,35 @@ class AgcToolsPanel extends StatelessWidget {
                     ),
                   ),
                   subtitle: Text(
-                    skill.enabled ? '已启用' : '已停用',
+                    skill.enabled ? '已启用 · 下一条消息生效' : '已停用',
                     style: const TextStyle(fontSize: 11),
+                  ),
+                  trailing: Switch(
+                    value: skill.enabled,
+                    onChanged: (enabled) => ext.toggleSkill(skill.id, enabled),
                   ),
                 ),
               ),
             ListTile(
               dense: true,
               leading: const Icon(Icons.add_circle_outline, size: 18),
-              title: const Text('导入 / 管理 Skill', style: TextStyle(fontSize: 12)),
+              title: const Text(
+                '导入 / 管理 Skill',
+                style: TextStyle(fontSize: 12),
+              ),
               onTap: () => _openSettings(context),
             ),
             const SizedBox(height: 8),
             _SectionHeader(
-              title: '第三方 MCP（${servers.length}）',
+              title:
+                  '第三方 MCP（${servers.length} 个服务器 · ${manager.definitions.length} 个工具）',
               isDark: isDark,
             ),
             if (servers.isEmpty)
               _emptyHint('未配置第三方 MCP，可直接添加或粘贴配置导入')
             else
               ...servers.map(
-                (server) => ListTile(
-                  dense: true,
-                  leading: Icon(
-                    Icons.dns_outlined,
-                    size: 18,
-                    color: server.enabled
-                        ? (isDark ? Colors.white70 : Colors.black54)
-                        : (isDark ? Colors.white24 : Colors.black26),
-                  ),
-                  title: Text(
-                    server.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: server.enabled ? null : Colors.grey,
-                    ),
-                  ),
-                  subtitle: Text(
-                    '${server.transport.toUpperCase()} · ${server.endpointLabel}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 11),
-                  ),
-                  trailing: const Icon(Icons.chevron_right, size: 16),
-                  onTap: () async {
-                    final ai = context.read<AiProvider>();
-                    await showMcpServerEditor(context, existing: server);
-                    await ai.refreshMcpTools();
-                  },
-                ),
+                (server) => _buildServerTile(context, server, ai, isDark),
               ),
             ListTile(
               dense: true,
@@ -2250,10 +2259,7 @@ class AgcToolsPanel extends StatelessWidget {
               },
             ),
             const SizedBox(height: 8),
-            _SectionHeader(
-              title: 'MCP 工具（${tools.length}）',
-              isDark: isDark,
-            ),
+            _SectionHeader(title: '内置工具（${tools.length}）', isDark: isDark),
             ...tools.map(
               (tool) => ListTile(
                 dense: true,
@@ -2290,6 +2296,114 @@ class AgcToolsPanel extends StatelessWidget {
     );
   }
 
+  Widget _buildServerTile(
+    BuildContext context,
+    McpServerConfig server,
+    AiProvider ai,
+    bool isDark,
+  ) {
+    final manager = ExternalMcpManager.instance;
+    final error = manager.errors[server.id];
+    final connected = manager.isConnected(server.id);
+    final count = manager.toolCounts[server.id] ?? 0;
+    final status = !server.enabled
+        ? '已停用'
+        : connected
+        ? '已连接 · $count 个工具'
+        : error != null
+        ? '连接失败'
+        : '等待连接';
+    return ListTile(
+      dense: true,
+      leading: Icon(
+        Icons.dns_outlined,
+        size: 18,
+        color: server.enabled
+            ? (isDark ? Colors.white70 : Colors.black54)
+            : (isDark ? Colors.white24 : Colors.black26),
+      ),
+      title: Text(
+        server.name,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          fontSize: 12,
+          color: server.enabled ? null : Colors.grey,
+        ),
+      ),
+      subtitle: Text(
+        '${server.transport.toUpperCase()} · $status\n'
+        '${server.endpointLabel}${error == null ? '' : '\n$error'}',
+        maxLines: 3,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(fontSize: 10, height: 1.35),
+      ),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Switch(
+            value: server.enabled,
+            onChanged: (enabled) async {
+              await AiExtensionsService.instance.toggleServer(
+                server.id,
+                enabled,
+              );
+              await ai.refreshMcpTools();
+            },
+          ),
+          PopupMenuButton<String>(
+            tooltip: '服务器操作',
+            onSelected: (action) async {
+              if (action == 'restart') {
+                await manager.restartServer(server);
+                await ai.refreshMcpTools();
+              } else if (action == 'logs') {
+                _showMcpLogs(context, server.name, manager.logsFor(server.id));
+              }
+            },
+            itemBuilder: (context) => [
+              PopupMenuItem<String>(
+                value: 'restart',
+                enabled: server.enabled,
+                child: const Text('重新连接'),
+              ),
+              const PopupMenuItem<String>(value: 'logs', child: Text('查看日志')),
+            ],
+          ),
+        ],
+      ),
+      onTap: () async {
+        await showMcpServerEditor(context, existing: server);
+        await ai.refreshMcpTools();
+      },
+    );
+  }
+
+  void _showMcpLogs(BuildContext context, String name, List<String> logs) {
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('$name · 最近日志'),
+        content: SizedBox(
+          width: 560,
+          height: 360,
+          child: SingleChildScrollView(
+            child: SelectableText(
+              logs.isEmpty ? '暂无日志' : logs.join('\n'),
+              style: const TextStyle(fontSize: 11, fontFamily: 'monospace'),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('关闭'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _emptyHint(String text) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(14, 2, 14, 6),
@@ -2301,14 +2415,14 @@ class AgcToolsPanel extends StatelessWidget {
   }
 
   void _openSettings(BuildContext context) {
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const SettingsScreen()),
-    );
+    showSettingsDialog(context);
   }
 
   IconData _toolIcon(String name) {
-    if (name.contains('read') || name.contains('get')) return Icons.visibility_outlined;
-    if (name.contains('write') || name.contains('replace')) return Icons.edit_outlined;
+    if (name.contains('read') || name.contains('get'))
+      return Icons.visibility_outlined;
+    if (name.contains('write') || name.contains('replace'))
+      return Icons.edit_outlined;
     if (name.contains('create')) return Icons.note_add_outlined;
     if (name.contains('delete')) return Icons.delete_outline;
     if (name.contains('rename')) return Icons.drive_file_rename_outline;
@@ -2319,9 +2433,8 @@ class AgcToolsPanel extends StatelessWidget {
   }
 
   Future<void> _showSkill(BuildContext context) async {
-    final content = await DefaultAssetBundle.of(
-      context,
-    ).loadString('assets/skills/skill.md');
+    final content = await DefaultAssetBundle.of(context)
+        .loadString('assets/skills/skill.md');
     if (!context.mounted) return;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     await showDialog<void>(
@@ -2341,10 +2454,7 @@ class AgcToolsPanel extends StatelessWidget {
                     height: 1.6,
                     color: isDark ? Colors.white70 : Colors.black87,
                   ),
-                  code: const TextStyle(
-                    fontFamily: 'monospace',
-                    fontSize: 11,
-                  ),
+                  code: const TextStyle(fontFamily: 'monospace', fontSize: 11),
                 ),
               ),
             ),

@@ -2,6 +2,10 @@
 cmake_minimum_required(VERSION 3.13)
 project(runner LANGUAGES CXX)
 
+# 新版 clang 会把部分三方头文件里的废弃字面量运算符视为错误
+# （flutter_secure_storage_linux 内置的 json.hpp），这里统一关闭该诊断。
+add_compile_options(-Wno-deprecated-literal-operator)
+
 # The name of the executable created for the application. Change this to change
 # the on-disk name of your application.
 set(BINARY_NAME "slipe_editor")
@@ -120,6 +124,11 @@ install(CODE "
   " COMPONENT Runtime)
 install(DIRECTORY "${PROJECT_BUILD_DIR}/${FLUTTER_ASSET_DIR_NAME}"
   DESTINATION "${INSTALL_BUNDLE_DATA_DIR}" COMPONENT Runtime)
+
+# 桌面入口：注册 slipe:// 协议（OAuth 回调需要）
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/slipe.desktop"
+  DESTINATION "${CMAKE_INSTALL_PREFIX}/share/applications"
+  COMPONENT Runtime)
 
 # Install the AOT library on non-Debug builds only.
 if(NOT CMAKE_BUILD_TYPE MATCHES "Debug")

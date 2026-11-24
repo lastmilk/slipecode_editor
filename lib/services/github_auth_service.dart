@@ -8,6 +8,8 @@ import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 
 import '../config/app_config.dart';
+import 'desktop_oauth_prompt.dart';
+import 'desktop_platform.dart';
 import 'oauth_link_bus.dart';
 
 /// GitHub OAuth 授权结果
@@ -95,6 +97,25 @@ class GitHubAuthService {
     final cancel = Completer<Uri>();
     _cancel = cancel;
     try {
+      // 桌面端没有移动深链：用外部浏览器打开授权页，再让用户粘贴回调地址
+      if (DesktopPlatform.isDesktop) {
+        final launched = await launchUrl(
+          authorizeUri,
+          mode: LaunchMode.externalApplication,
+        );
+        if (!launched) {
+          throw StateError('无法打开浏览器完成授权');
+        }
+        final pasted = await DesktopOAuthPrompt.ask(
+          hint: AppConfig.oauthDeepLink,
+        );
+        if (pasted == null) throw StateError('已取消授权');
+        if (!_isCallbackUri(pasted)) {
+          throw StateError('回调地址与预期不符，请复制完整链接后重试');
+        }
+        return await _finishSignIn(pasted, state);
+      }
+
       final launched = await launchUrl(
         authorizeUri,
         // 用 Custom Tab / SFSafariViewController 打开，避免被 GitHub App
@@ -117,35 +138,40 @@ class GitHubAuthService {
       ]);
       OAuthLinkBus.instance.consume(callback);
 
-      // 校验 state 防 CSRF
-      if (callback.queryParameters['state'] != state) {
-        throw StateError('授权回调 state 校验失败');
-      }
-      final error = callback.queryParameters['error'];
-      if (error != null) {
-        throw StateError(
-          '授权被拒绝：$error ${callback.queryParameters['error_description'] ?? ''}',
-        );
-      }
-
-      // 后端中转回调会带回一次性 ticket（token 已由后端换好），
-      // 直接深链回调则带回 code，两种情况都交给后端接口。
-      final ticket = callback.queryParameters['ticket'];
-      final code = callback.queryParameters['code'];
-      if ((ticket ?? '').isEmpty && (code ?? '').isEmpty) {
-        throw StateError('授权回调缺少 code / ticket');
-      }
-
-      final result = await _exchange(ticket: ticket, code: code);
-      await _storage.write(key: _tokenKey, value: result.accessToken);
-      await _storage.write(key: _scopeKey, value: result.scope);
-      return result;
+      return await _finishSignIn(callback, state);
     } finally {
       if (!cancel.isCompleted) {
         cancel.completeError(StateError('已取消授权'));
       }
       if (identical(_cancel, cancel)) _cancel = null;
     }
+  }
+
+  /// 校验回调并换取 token（移动端深链 / 桌面粘贴共用）
+  Future<GitHubAuthResult> _finishSignIn(Uri callback, String state) async {
+    // 校验 state 防 CSRF
+    if (callback.queryParameters['state'] != state) {
+      throw StateError('授权回调 state 校验失败');
+    }
+    final error = callback.queryParameters['error'];
+    if (error != null) {
+      throw StateError(
+        '授权被拒绝：$error ${callback.queryParameters['error_description'] ?? ''}',
+      );
+    }
+
+    // 后端中转回调会带回一次性 ticket（token 已由后端换好），
+    // 直接深链回调则带回 code，两种情况都交给后端接口。
+    final ticket = callback.queryParameters['ticket'];
+    final code = callback.queryParameters['code'];
+    if ((ticket ?? '').isEmpty && (code ?? '').isEmpty) {
+      throw StateError('授权回调缺少 code / ticket');
+    }
+
+    final result = await _exchange(ticket: ticket, code: code);
+    await _storage.write(key: _tokenKey, value: result.accessToken);
+    await _storage.write(key: _scopeKey, value: result.scope);
+    return result;
   }
 
   bool _isCallbackUri(Uri uri) {

@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 import 'package:path/path.dart' as p;
 import '../models/file_node.dart';
 
@@ -17,52 +18,11 @@ class FileService {
   };
 
   /// 从目录路径递归构建文件树
-  Future<FileNode> loadDirectory(String path) async {
-    final dir = Directory(path);
-    final name = path.split(Platform.pathSeparator).last;
-
-    if (!await dir.exists()) {
-      return FileNode(name: name, path: path, type: FileNodeType.directory);
-    }
-
-    final entities = await dir.list().toList();
-
-    // 排序：目录优先，然后按名称字母排序
-    entities.sort((a, b) {
-      final aIsDir = a is Directory ? 0 : 1;
-      final bIsDir = b is Directory ? 0 : 1;
-      if (aIsDir != bIsDir) return aIsDir.compareTo(bIsDir);
-      return a.path.split(Platform.pathSeparator).last.toLowerCase().compareTo(
-            b.path.split(Platform.pathSeparator).last.toLowerCase(),
-          );
-    });
-
-    final children = <FileNode>[];
-    for (final entity in entities) {
-      final nodeName = entity.path.split(Platform.pathSeparator).last;
-      // 跳过隐藏项
-      if (_hiddenNames.contains(nodeName)) continue;
-      if (nodeName.startsWith('.') && nodeName != '.metadata') continue;
-
-      if (entity is Directory) {
-        children.add(await loadDirectory(entity.path));
-      } else if (entity is File) {
-        children.add(
-          FileNode(
-            name: nodeName,
-            path: entity.path,
-            type: FileNodeType.file,
-          ),
-        );
-      }
-    }
-
-    return FileNode(
-      name: name,
-      path: path,
-      type: FileNodeType.directory,
-      children: children,
-    );
+  ///
+  /// 大项目的递归扫描会长时间占用 UI isolate，放到独立 isolate 执行，
+  /// 保证加载动画与窗口交互不卡顿。
+  Future<FileNode> loadDirectory(String path) {
+    return Isolate.run(() => _scanDirectory(path));
   }
 
   /// 读取文件内容
@@ -174,4 +134,49 @@ class FileService {
     };
     return codeExts.contains(extension.toLowerCase());
   }
+}
+
+/// 递归扫描目录（在独立 isolate 中执行，逻辑与原实现一致）
+Future<FileNode> _scanDirectory(String path) async {
+  final dir = Directory(path);
+  final name = path.split(Platform.pathSeparator).last;
+
+  if (!await dir.exists()) {
+    return FileNode(name: name, path: path, type: FileNodeType.directory);
+  }
+
+  final entities = await dir.list().toList();
+
+  // 排序：目录优先，然后按名称字母排序
+  entities.sort((a, b) {
+    final aIsDir = a is Directory ? 0 : 1;
+    final bIsDir = b is Directory ? 0 : 1;
+    if (aIsDir != bIsDir) return aIsDir.compareTo(bIsDir);
+    return a.path.split(Platform.pathSeparator).last.toLowerCase().compareTo(
+      b.path.split(Platform.pathSeparator).last.toLowerCase(),
+    );
+  });
+
+  final children = <FileNode>[];
+  for (final entity in entities) {
+    final nodeName = entity.path.split(Platform.pathSeparator).last;
+    // 跳过隐藏项
+    if (FileService._hiddenNames.contains(nodeName)) continue;
+    if (nodeName.startsWith('.') && nodeName != '.metadata') continue;
+
+    if (entity is Directory) {
+      children.add(await _scanDirectory(entity.path));
+    } else if (entity is File) {
+      children.add(
+        FileNode(name: nodeName, path: entity.path, type: FileNodeType.file),
+      );
+    }
+  }
+
+  return FileNode(
+    name: name,
+    path: path,
+    type: FileNodeType.directory,
+    children: children,
+  );
 }

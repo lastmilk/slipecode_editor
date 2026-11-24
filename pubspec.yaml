@@ -19,7 +19,8 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 version: 1.0.0+1
 
 environment:
-  sdk: ^3.13.7
+  # 对齐本机可用的 Flutter 3.47.1 / Dart 3.13.1，避免本地构建被 SDK 约束阻塞
+  sdk: ^3.13.1
 
 # Dependencies specify other packages that your package needs in order to work.
 # To automatically upgrade your package dependencies to the latest versions
@@ -64,6 +65,17 @@ dependencies:
   video_player: ^2.9.2
   qr_flutter: 4.1.0
   tdesign_flutter: 1.1.0
+  # 桌面端：窗口管理 / PTY 终端 / 拖拽导入
+  window_manager: ^0.6.0
+  flutter_pty: ^0.4.2
+  xterm: ^4.0.0
+  desktop_drop: ^0.8.4
+
+  # 桌面 Lua 插件运行时与 metadata.xml
+  ffi: ^2.2.0
+  xml: ^6.6.1
+  slipe_lua:
+    path: packages/slipe_lua
 
 dev_dependencies:
   flutter_test:

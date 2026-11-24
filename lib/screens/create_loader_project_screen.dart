@@ -25,7 +25,18 @@ class CreateLoaderProjectScreen extends StatefulWidget {
   /// 从设计稿列表进入时预选的设计稿
   final DesignDraft? initialDraft;
 
-  const CreateLoaderProjectScreen({super.key, this.initialDraft});
+  /// 是否以内嵌形式渲染（不带 Scaffold / AppBar），用于 VibeCoding 工作台。
+  final bool embedded;
+
+  /// 内嵌模式下的创建成功回调（参数为项目路径）。
+  final ValueChanged<String>? onCreated;
+
+  const CreateLoaderProjectScreen({
+    super.key,
+    this.initialDraft,
+    this.embedded = false,
+    this.onCreated,
+  });
 
   @override
   State<CreateLoaderProjectScreen> createState() =>
@@ -35,44 +46,28 @@ class CreateLoaderProjectScreen extends StatefulWidget {
 class _CreateLoaderProjectScreenState extends State<CreateLoaderProjectScreen> {
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
-  final _orgController = TextEditingController();
+  final _orgController = TextEditingController(text: 'com.example');
   final _repoNameController = TextEditingController();
 
   List<DesignDraft> _drafts = [];
   String? _selectedDraftId;
 
   bool _isCreating = false;
-  bool _createRepo = false;
-
-  /// 用户是否手动切换过建仓开关（含设计稿联动）；未切换时跟随偏好设置默认值
-  bool _repoSwitchTouched = false;
+  bool _createRepo = true;
   GitHost _host = GitHost.github;
   bool _repoNameEdited = false;
 
-  /// 用户是否手动改过 Org；未改过时跟随项目名（com.example.<项目名>）
+  /// 用户是否手动改过包名；未改过时跟随项目名自动补全为 com.example.<name>
   bool _orgEdited = false;
 
   /// 是否开启 Agent 版本隔离（独立 MCP / Skills）
   bool _agentIsolated = false;
   final List<String> _outputLines = [];
 
-  /// 是否有任一 Git 平台已登录（决定远程仓库功能是否可用）
-  bool get _anyHostSignedIn {
-    return context.read<GitHubProvider>().isSignedIn ||
-        context.read<GiteeProvider>().isSignedIn;
-  }
-
-  /// 实际生效的建仓开关：
-  /// 未登录任何平台时强制关闭；未手动切换时跟随偏好设置
-  bool get _effectiveCreateRepo {
-    if (!_anyHostSignedIn) return false;
-    if (_repoSwitchTouched) return _createRepo;
-    return context.read<SettingsProvider>().settings.createRepoOnCreate;
-  }
-
   @override
   void initState() {
     super.initState();
+    // 项目固定保存在应用私有目录，无需用户选择存放位置。
     final settings = context.read<SettingsProvider>().settings;
     _host = settings.defaultGitHost;
     _createRepo = settings.createRepoOnCreate;
@@ -84,6 +79,14 @@ class _CreateLoaderProjectScreenState extends State<CreateLoaderProjectScreen> {
       if (!_orgEdited) {
         _orgController.text = name.isEmpty ? 'com.example' : 'com.example.$name';
       }
+    });
+    // 两个平台都未登录时，默认关闭「创建远程仓库」
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (!_anyHostSignedIn()) {
+        setState(() => _createRepo = false);
+      }
+      _ensureHostAvailable();
     });
     _loadDrafts();
   }
@@ -105,6 +108,54 @@ class _CreateLoaderProjectScreenState extends State<CreateLoaderProjectScreen> {
     _orgController.dispose();
     _repoNameController.dispose();
     super.dispose();
+  }
+
+  bool _hostSignedIn(GitHost host) => host == GitHost.github
+      ? context.read<GitHubProvider>().isSignedIn
+      : context.read<GiteeProvider>().isSignedIn;
+
+  bool _anyHostSignedIn() =>
+      _hostSignedIn(GitHost.github) || _hostSignedIn(GitHost.gitee);
+
+  /// 当前选中的平台未登录时，回落到已登录平台
+  void _ensureHostAvailable() {
+    if (!_hostSignedIn(_host)) {
+      final fallback = GitHost.values.firstWhere(
+        _hostSignedIn,
+        orElse: () => GitHost.github,
+      );
+      setState(() => _host = fallback);
+    }
+  }
+
+  /// 提示需要先配置 GitHub / Gitee 账号
+  void _showNeedAccountDialog() {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('需要配置 Git 账号'),
+        content: const Text(
+          '创建远程仓库需要先在首页登录 GitHub 或 Gitee 账号。\n'
+          '登录后即可创建并自动推送项目骨架。',
+        ),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('确定'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 由「包名」字段反推模板用的 org 前缀（去掉结尾的项目名段）
+  String _effectiveOrg() {
+    final name = _nameController.text.trim();
+    var org = _orgController.text.trim();
+    if (name.isNotEmpty && org.toLowerCase().endsWith('.$name')) {
+      org = org.substring(0, org.length - name.length - 1);
+    }
+    return org.isEmpty ? 'com.example' : org;
   }
 
   DesignDraft? get _selectedDraft {
@@ -132,8 +183,6 @@ class _CreateLoaderProjectScreenState extends State<CreateLoaderProjectScreen> {
     final rootParams = _activeDraft.root.params;
     final gitHost = rootParams['git_host'] ?? 'github';
     setState(() {
-      // 设计稿明确指定了策略，视为已切换（不再跟随偏好默认值）
-      _repoSwitchTouched = true;
       switch (gitHost) {
         case 'gitee':
           _host = GitHost.gitee;
@@ -144,18 +193,15 @@ class _CreateLoaderProjectScreenState extends State<CreateLoaderProjectScreen> {
           _host = GitHost.github;
           _createRepo = true;
       }
+      // 登录态约束优先：未登录任何平台时强制关闭
+      if (_createRepo && !_anyHostSignedIn()) _createRepo = false;
+      _ensureHostAvailable();
     });
   }
 
-  /// 项目固定存放在应用私有目录下（用户无需也无法更改）
-  Future<String> _resolveTargetPath() async {
-    final docs = await getApplicationDocumentsDirectory();
-    return p.join(docs.path, 'Projects', _nameController.text.trim());
-  }
-
-  String get _org {
-    final org = _orgController.text.trim();
-    return org.isEmpty ? 'com.example' : org;
+  Future<String> get _targetPath async {
+    final dir = await getApplicationDocumentsDirectory();
+    return p.join(dir.path, 'Projects', _nameController.text.trim());
   }
 
   Future<void> _create() async {
@@ -187,13 +233,14 @@ class _CreateLoaderProjectScreenState extends State<CreateLoaderProjectScreen> {
     });
 
     final projectProvider = context.read<ProjectProvider>();
-    final targetPath = await _resolveTargetPath();
+    final targetPath = await _targetPath;
+    if (!mounted) return;
 
     try {
       await for (final line in LoaderProjectService().createLoaderProject(
         projectName: _nameController.text.trim(),
         targetPath: targetPath,
-        org: _org,
+        org: _effectiveOrg(),
         draft: draft,
         root: draft.root,
         systems: draft.systems,
@@ -209,8 +256,8 @@ class _CreateLoaderProjectScreenState extends State<CreateLoaderProjectScreen> {
       );
       if (!mounted) return;
 
-      // 创建远程仓库并推送骨架（需已登录对应平台）
-      if (_effectiveCreateRepo) {
+      // 创建远程仓库并推送骨架
+      if (_createRepo) {
         final repoName = _repoNameController.text.trim().isEmpty
             ? _nameController.text.trim()
             : _repoNameController.text.trim();
@@ -263,7 +310,12 @@ class _CreateLoaderProjectScreenState extends State<CreateLoaderProjectScreen> {
           ),
         );
         await Future.delayed(const Duration(seconds: 1));
-        if (mounted) Navigator.of(context).pop(true);
+        if (!mounted) return;
+        if (widget.embedded) {
+          widget.onCreated?.call(targetPath);
+        } else {
+          Navigator.of(context).pop(true);
+        }
       }
     } catch (e) {
       if (mounted) {
@@ -283,39 +335,44 @@ class _CreateLoaderProjectScreenState extends State<CreateLoaderProjectScreen> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final content = Form(
+      key: _formKey,
+      child: ListView(
+        padding: EdgeInsets.all(widget.embedded ? 0 : 16),
+        children: [
+          _buildBanner(isDark),
+          const SizedBox(height: 16),
+          _buildNameField(),
+          const SizedBox(height: 16),
+          _buildOrgField(),
+          const SizedBox(height: 20),
+          _buildDraftPicker(isDark),
+          const SizedBox(height: 20),
+          _buildRepoOptions(isDark),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            value: _agentIsolated,
+            onChanged: (value) => setState(() => _agentIsolated = value),
+            title: const Text('Agent 版本隔离', style: TextStyle(fontSize: 14)),
+            subtitle: const Text(
+              '开启后该项目使用独立的 MCP / Skills 配置（不会与其它项目共享）',
+              style: TextStyle(fontSize: 11),
+            ),
+          ),
+          const SizedBox(height: 24),
+          _buildCreateButton(),
+          const SizedBox(height: 24),
+          if (_outputLines.isNotEmpty) _buildLogs(isDark),
+        ],
+      ),
+    );
+
+    // 内嵌模式：只返回表单本体，由外层工作台提供外壳与导航。
+    if (widget.embedded) return content;
+
     return Scaffold(
       appBar: AppBar(title: const Text('创建 Loader 项目')),
-      body: Form(
-        key: _formKey,
-        child: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            _buildBanner(isDark),
-            const SizedBox(height: 16),
-            _buildNameField(),
-            const SizedBox(height: 16),
-            _buildOrgField(),
-            const SizedBox(height: 20),
-            _buildDraftPicker(isDark),
-            const SizedBox(height: 20),
-            _buildRepoOptions(isDark),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              value: _agentIsolated,
-              onChanged: (value) => setState(() => _agentIsolated = value),
-              title: const Text('Agent 版本隔离', style: TextStyle(fontSize: 14)),
-              subtitle: const Text(
-                '开启后该项目使用独立的 MCP / Skills 配置（不会与其它项目共享）',
-                style: TextStyle(fontSize: 11),
-              ),
-            ),
-            const SizedBox(height: 24),
-            _buildCreateButton(),
-            const SizedBox(height: 24),
-            if (_outputLines.isNotEmpty) _buildLogs(isDark),
-          ],
-        ),
-      ),
+      body: content,
     );
   }
 
@@ -371,33 +428,18 @@ class _CreateLoaderProjectScreenState extends State<CreateLoaderProjectScreen> {
     );
   }
 
-  /// Org（包名前缀）：默认跟随项目名 com.example.<项目名>，
-  /// 用户手动修改后不再跟随
   Widget _buildOrgField() {
     return TextFormField(
       controller: _orgController,
       enabled: !_isCreating,
-      onChanged: (value) {
-        final name = _nameController.text.trim();
-        final auto = name.isEmpty ? 'com.example' : 'com.example.$name';
-        _orgEdited = value.trim().isNotEmpty && value.trim() != auto;
-      },
+      onChanged: (_) => _orgEdited = true,
       decoration: const InputDecoration(
-        labelText: '组织标识（Org）',
-        hintText: 'com.example.<项目名>',
+        labelText: '包名',
+        hintText: 'com.example.myapp',
         border: OutlineInputBorder(),
         prefixIcon: Icon(Icons.domain),
       ),
       textInputAction: TextInputAction.done,
-      validator: (value) {
-        final org = (value ?? '').trim();
-        if (org.isEmpty) return null; // 空时回退 com.example
-        if (!RegExp(r'^[a-zA-Z][a-zA-Z0-9_]*(\.[a-zA-Z][a-zA-Z0-9_]*)+$')
-            .hasMatch(org)) {
-          return '包名格式不正确（如 com.example.app）';
-        }
-        return null;
-      },
     );
   }
 
@@ -576,39 +618,17 @@ class _CreateLoaderProjectScreenState extends State<CreateLoaderProjectScreen> {
 
   // --- 仓库选项（与创建传统项目一致） ------------------------------------------
 
-  /// 未登录任何 Git 平台时，试图开启建仓功能 → 弹窗提醒配置账号
-  void _showRepoLoginRequiredDialog() {
-    showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('需要配置 Git 平台账号'),
-        content: const Text(
-          '创建远程仓库需要登录 GitHub 或 Gitee 账号。\n'
-          '请先在首页底部或账号页完成登录，再开启此功能。',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('知道了'),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildRepoOptions(bool isDark) {
-    final github = context.watch<GitHubProvider>();
-    final gitee = context.watch<GiteeProvider>();
-    final signedInHosts = <GitHost>[
-      if (github.isSignedIn) GitHost.github,
-      if (gitee.isSignedIn) GitHost.gitee,
+    // 登录态变化时联动可选平台；仅展示已登录的平台
+    final githubSignedIn = context.watch<GitHubProvider>().isSignedIn;
+    final giteeSignedIn = context.watch<GiteeProvider>().isSignedIn;
+    final availableHosts = <GitHost>[
+      if (githubSignedIn) GitHost.github,
+      if (giteeSignedIn) GitHost.gitee,
     ];
-    final anySignedIn = signedInHosts.isNotEmpty;
-    // 当前选中平台未登录时，自动切到已登录平台
-    if (anySignedIn && !signedInHosts.contains(_host)) {
-      _host = signedInHosts.first;
+    if (_createRepo && availableHosts.isNotEmpty && !_hostSignedIn(_host)) {
+      _host = availableHosts.first;
     }
-    final effectiveCreateRepo = anySignedIn && _effectiveCreateRepo;
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
@@ -625,23 +645,23 @@ class _CreateLoaderProjectScreenState extends State<CreateLoaderProjectScreen> {
             contentPadding: EdgeInsets.zero,
             title: const Text('创建远程仓库'),
             subtitle: Text(
-              anySignedIn ? '创建后自动提交并推送项目骨架' : '未登录 GitHub / Gitee，默认关闭',
+              availableHosts.isEmpty
+                  ? '需要先在首页登录 GitHub 或 Gitee 账号'
+                  : '创建后自动提交并推送项目骨架',
             ),
-            value: effectiveCreateRepo,
+            value: _createRepo,
             onChanged: _isCreating
                 ? null
                 : (value) {
-                    if (value && !anySignedIn) {
-                      _showRepoLoginRequiredDialog();
+                    // 未登录任何平台时不允许开启，并弹窗引导配置账号
+                    if (value && availableHosts.isEmpty) {
+                      _showNeedAccountDialog();
                       return;
                     }
-                    setState(() {
-                      _repoSwitchTouched = true;
-                      _createRepo = value;
-                    });
+                    setState(() => _createRepo = value);
                   },
           ),
-          if (effectiveCreateRepo) ...[
+          if (_createRepo) ...[
             const Divider(height: 8),
             Padding(
               padding: const EdgeInsets.only(top: 8),
@@ -649,8 +669,7 @@ class _CreateLoaderProjectScreenState extends State<CreateLoaderProjectScreen> {
                 children: [
                   const Text('平台', style: TextStyle(fontSize: 13)),
                   const SizedBox(width: 12),
-                  // 仅展示已登录的平台选项
-                  ...signedInHosts.map(
+                  ...availableHosts.map(
                     (host) => Padding(
                       padding: const EdgeInsets.only(right: 8),
                       child: ChoiceChip(

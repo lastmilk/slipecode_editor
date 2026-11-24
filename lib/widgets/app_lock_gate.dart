@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../l10n/app_localizations.dart';
+import '../services/desktop_platform.dart';
 import '../services/security_service.dart';
 
 /// 应用锁入口
@@ -28,17 +29,25 @@ class _AppLockGateState extends State<AppLockGate> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    SecurityService.relockSignal.addListener(_onRelockRequest);
     unawaited(_load());
   }
 
+  void _onRelockRequest() {
+    if (!_locked) unawaited(_relock());
+  }
+
   Future<void> _load() async {
-    final enabled = await SecurityService.instance.isBiometricEnabled();
+    // 桌面端只支持密码解锁；移动端沿用「应用锁开关」判断
+    final enabled = DesktopPlatform.isDesktop
+        ? await SecurityService.instance.hasPassword()
+        : await SecurityService.instance.isBiometricEnabled();
     if (!mounted) return;
     setState(() {
       _loading = false;
       _locked = enabled;
     });
-    if (enabled) {
+    if (enabled && !DesktopPlatform.isDesktop) {
       // 启动时自动尝试一次生物认证
       unawaited(_tryBiometric());
     }
@@ -62,13 +71,16 @@ class _AppLockGateState extends State<AppLockGate> with WidgetsBindingObserver {
   }
 
   Future<void> _relock() async {
-    final enabled = await SecurityService.instance.isBiometricEnabled();
+    final enabled = DesktopPlatform.isDesktop
+        ? await SecurityService.instance.hasPassword()
+        : await SecurityService.instance.isBiometricEnabled();
     if (!mounted || !enabled) return;
     setState(() => _locked = true);
-    await _tryBiometric();
+    if (!DesktopPlatform.isDesktop) await _tryBiometric();
   }
 
   Future<void> _tryBiometric() async {
+    if (DesktopPlatform.isDesktop) return;
     final ok = await SecurityService.instance.authenticate();
     if (!mounted) return;
     if (ok) {
@@ -88,6 +100,7 @@ class _AppLockGateState extends State<AppLockGate> with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    SecurityService.relockSignal.removeListener(_onRelockRequest);
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -98,7 +111,9 @@ class _AppLockGateState extends State<AppLockGate> with WidgetsBindingObserver {
       // 读取持久化状态期间的占位页：跟随主题色，避免突兀黑屏
       final isDark = Theme.of(context).brightness == Brightness.dark;
       return Scaffold(
-        backgroundColor: isDark ? const Color(0xFF121212) : const Color(0xFFF5F7FA),
+        backgroundColor: isDark
+            ? const Color(0xFF121212)
+            : const Color(0xFFF5F7FA),
         body: const Center(child: CircularProgressIndicator()),
       );
     }
@@ -106,6 +121,7 @@ class _AppLockGateState extends State<AppLockGate> with WidgetsBindingObserver {
     return _LockScreen(
       onPassword: _unlockWithPassword,
       onBiometric: _tryBiometric,
+      showBiometric: !DesktopPlatform.isDesktop,
     );
   }
 }
@@ -115,10 +131,15 @@ class _WrongPassword implements Exception {
 }
 
 class _LockScreen extends StatefulWidget {
-  const _LockScreen({required this.onPassword, required this.onBiometric});
+  const _LockScreen({
+    required this.onPassword,
+    required this.onBiometric,
+    this.showBiometric = true,
+  });
 
   final Future<void> Function(String password) onPassword;
   final Future<void> Function() onBiometric;
+  final bool showBiometric;
 
   @override
   State<_LockScreen> createState() => _LockScreenState();
@@ -181,7 +202,9 @@ class _LockScreenState extends State<_LockScreen> {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return Scaffold(
-      backgroundColor: isDark ? const Color(0xFF121212) : const Color(0xFFF5F7FA),
+      backgroundColor: isDark
+          ? const Color(0xFF121212)
+          : const Color(0xFFF5F7FA),
       body: SafeArea(
         child: Center(
           child: ConstrainedBox(
@@ -257,12 +280,14 @@ class _LockScreenState extends State<_LockScreen> {
                       label: Text(t('lock.unlock')),
                     ),
                   ),
-                  const SizedBox(height: 10),
-                  TextButton.icon(
-                    onPressed: _busy ? null : _biometric,
-                    icon: const Icon(Icons.fingerprint),
-                    label: Text(t('lock.biometric')),
-                  ),
+                  if (widget.showBiometric) ...[
+                    const SizedBox(height: 10),
+                    TextButton.icon(
+                      onPressed: _busy ? null : _biometric,
+                      icon: const Icon(Icons.fingerprint),
+                      label: Text(t('lock.biometric')),
+                    ),
+                  ],
                 ],
               ),
             ),

@@ -156,9 +156,8 @@ class _TutorialLessonScreenState extends State<TutorialLessonScreen> {
       if (path == null || !mounted) return;
       await context.read<ProjectProvider>().openProject(path, kind: 'classic');
       if (!mounted) return;
-      await Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => const EditorScreen()),
-      );
+      await Navigator.of(context)
+          .push(MaterialPageRoute(builder: (_) => const EditorScreen()));
     } catch (e) {
       if (!mounted) return;
       TToast.showFail('进入实操失败：$e', context: context);
@@ -172,12 +171,12 @@ class _TutorialLessonScreenState extends State<TutorialLessonScreen> {
       Scaffold(
         backgroundColor: CommunityTheme.bg,
         appBar: AppBar(
-          backgroundColor: Colors.white,
+          backgroundColor: CommunityTheme.card,
           elevation: 0,
-          iconTheme: const IconThemeData(color: CommunityTheme.textPrimary),
+          iconTheme: IconThemeData(color: CommunityTheme.textPrimary),
           title: Text(
             _lesson?.title ?? '课程',
-            style: const TextStyle(fontSize: 16, color: CommunityTheme.textPrimary),
+            style: TextStyle(fontSize: 16, color: CommunityTheme.textPrimary),
           ),
         ),
         body: _buildBody(),
@@ -223,12 +222,18 @@ class _TutorialLessonScreenState extends State<TutorialLessonScreen> {
             children: [
               Text(
                 '第 ${_index + 1} / ${lesson.steps.length} 步',
-                style: const TextStyle(fontSize: 11, color: CommunityTheme.textSecondary),
+                style: TextStyle(
+                  fontSize: 11,
+                  color: CommunityTheme.textSecondary,
+                ),
               ),
               const Spacer(),
               Text(
                 _stepLabel(step.type),
-                style: const TextStyle(fontSize: 11, color: CommunityTheme.brand),
+                style: const TextStyle(
+                  fontSize: 11,
+                  color: CommunityTheme.brand,
+                ),
               ),
             ],
           ),
@@ -240,7 +245,10 @@ class _TutorialLessonScreenState extends State<TutorialLessonScreen> {
               _buildStep(step),
               if (lesson.assets.isNotEmpty) ...[
                 const SizedBox(height: 20),
-                const Text('课程资源', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
+                const Text(
+                  '课程资源',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                ),
                 const SizedBox(height: 6),
                 for (final asset in lesson.assets) _buildAsset(asset),
               ],
@@ -249,8 +257,8 @@ class _TutorialLessonScreenState extends State<TutorialLessonScreen> {
         ),
         Container(
           padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
-          decoration: const BoxDecoration(
-            color: Colors.white,
+          decoration: BoxDecoration(
+            color: CommunityTheme.card,
             border: Border(top: BorderSide(color: CommunityTheme.border)),
           ),
           child: Row(
@@ -265,7 +273,9 @@ class _TutorialLessonScreenState extends State<TutorialLessonScreen> {
               const SizedBox(width: 10),
               Expanded(
                 child: TButton(
-                  child: Text(_index >= lesson.steps.length - 1 ? '完成课程' : '下一步'),
+                  child: Text(
+                    _index >= lesson.steps.length - 1 ? '完成课程' : '下一步',
+                  ),
                   onPressed: _next,
                 ),
               ),
@@ -296,7 +306,13 @@ class _TutorialLessonScreenState extends State<TutorialLessonScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             if (step.title.isNotEmpty)
-              Text(step.title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+              Text(
+                step.title,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
             if (step.body.isNotEmpty) ...[
               const SizedBox(height: 8),
               _markdown(step.body),
@@ -309,30 +325,53 @@ class _TutorialLessonScreenState extends State<TutorialLessonScreen> {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(step.question, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, height: 1.5)),
+            Text(
+              step.question,
+              style: const TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+                height: 1.5,
+              ),
+            ),
             const SizedBox(height: 10),
             for (var i = 0; i < step.options.length; i++)
               GestureDetector(
-                onTap: _quizChecked ? null : () => setState(() => _quizChoice = i),
+                onTap: _quizChecked
+                    ? null
+                    : () => setState(() => _quizChoice = i),
                 child: Container(
                   margin: const EdgeInsets.only(bottom: 8),
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 12,
+                  ),
                   decoration: BoxDecoration(
-                    color: Colors.white,
+                    color: CommunityTheme.card,
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(
-                      color: _quizChoice == i ? CommunityTheme.brand : CommunityTheme.border,
+                      color: _quizChoice == i
+                          ? CommunityTheme.brand
+                          : CommunityTheme.border,
                     ),
                   ),
                   child: Row(
                     children: [
                       Icon(
-                        _quizChoice == i ? Icons.radio_button_checked : Icons.radio_button_unchecked,
+                        _quizChoice == i
+                            ? Icons.radio_button_checked
+                            : Icons.radio_button_unchecked,
                         size: 18,
-                        color: _quizChoice == i ? CommunityTheme.brand : CommunityTheme.textSecondary,
+                        color: _quizChoice == i
+                            ? CommunityTheme.brand
+                            : CommunityTheme.textSecondary,
                       ),
                       const SizedBox(width: 8),
-                      Expanded(child: Text(step.options[i], style: const TextStyle(fontSize: 13))),
+                      Expanded(
+                        child: Text(
+                          step.options[i],
+                          style: const TextStyle(fontSize: 13),
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -359,7 +398,9 @@ class _TutorialLessonScreenState extends State<TutorialLessonScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      _quizChoice == step.answer ? '回答正确' : '回答错误，正确答案：${step.options.isEmpty ? '' : step.options[step.answer]}',
+                      _quizChoice == step.answer
+                          ? '回答正确'
+                          : '回答错误，正确答案：${step.options.isEmpty ? '' : step.options[step.answer]}',
                       style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w600,
@@ -370,7 +411,10 @@ class _TutorialLessonScreenState extends State<TutorialLessonScreen> {
                     ),
                     if (step.explain.isNotEmpty) ...[
                       const SizedBox(height: 6),
-                      Text(step.explain, style: const TextStyle(fontSize: 12, height: 1.6)),
+                      Text(
+                        step.explain,
+                        style: const TextStyle(fontSize: 12, height: 1.6),
+                      ),
                     ],
                   ],
                 ),
@@ -383,10 +427,19 @@ class _TutorialLessonScreenState extends State<TutorialLessonScreen> {
           children: [
             Row(
               children: [
-                const Icon(Icons.play_circle_outline, color: CommunityTheme.brand),
+                const Icon(
+                  Icons.play_circle_outline,
+                  color: CommunityTheme.brand,
+                ),
                 const SizedBox(width: 6),
                 Expanded(
-                  child: Text(step.title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                  child: Text(
+                    step.title,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
                 ),
               ],
             ),
@@ -394,12 +447,9 @@ class _TutorialLessonScreenState extends State<TutorialLessonScreen> {
             _markdown(step.body),
             if (_lesson?.track == 'flutter') ...[
               const SizedBox(height: 14),
-              TButton(
-                child: const Text('进入实操'),
-                onPressed: _startPractice,
-              ),
+              TButton(child: const Text('进入实操'), onPressed: _startPractice),
               const SizedBox(height: 6),
-              const Text(
+              Text(
                 '进入后会创建临时练习项目，并在右下角显示「教学模式」悬浮球。',
                 style: TextStyle(
                   fontSize: 11,
@@ -414,7 +464,14 @@ class _TutorialLessonScreenState extends State<TutorialLessonScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             if (step.title.isNotEmpty)
-              Text(step.title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700, height: 1.4)),
+              Text(
+                step.title,
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                  height: 1.4,
+                ),
+              ),
             const SizedBox(height: 10),
             _markdown(step.body),
           ],
@@ -463,7 +520,10 @@ class _TutorialLessonScreenState extends State<TutorialLessonScreen> {
                 TToast.showSuccess('代码已复制', context: context);
               },
               icon: const Icon(Icons.copy, size: 14, color: Colors.white70),
-              label: const Text('复制', style: TextStyle(fontSize: 11, color: Colors.white70)),
+              label: const Text(
+                '复制',
+                style: TextStyle(fontSize: 11, color: Colors.white70),
+              ),
             ),
           ),
           Padding(
@@ -493,7 +553,7 @@ class _TutorialLessonScreenState extends State<TutorialLessonScreen> {
       margin: const EdgeInsets.only(top: 8),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: CommunityTheme.card,
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: CommunityTheme.border),
       ),
@@ -501,22 +561,41 @@ class _TutorialLessonScreenState extends State<TutorialLessonScreen> {
         children: [
           Row(
             children: [
-              const Icon(Icons.folder_zip_outlined, size: 20, color: CommunityTheme.brand),
+              const Icon(
+                Icons.folder_zip_outlined,
+                size: 20,
+                color: CommunityTheme.brand,
+              ),
               const SizedBox(width: 8),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(asset.name, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                    Text(
+                      asset.name,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                     if (sizeText.isNotEmpty)
-                      Text(sizeText, style: const TextStyle(fontSize: 10, color: CommunityTheme.textSecondary)),
+                      Text(
+                        sizeText,
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: CommunityTheme.textSecondary,
+                        ),
+                      ),
                   ],
                 ),
               ),
               if (progress != null)
                 SizedBox(
                   width: 56,
-                  child: LinearProgressIndicator(value: progress == 0 ? null : progress, minHeight: 4),
+                  child: LinearProgressIndicator(
+                    value: progress == 0 ? null : progress,
+                    minHeight: 4,
+                  ),
                 )
               else
                 TButton(

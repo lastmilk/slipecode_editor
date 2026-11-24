@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<plugin id="example.aop-completion" name="AOP Completion" version="1.0.0"
+        publisher="SLIPE" api="1">
+  <entry>main.lua</entry>
+  <capabilities>
+    <capability name="editor.modify" reason="为补全列表追加一个带 Lua 标识的候选项" />
+  </capabilities>
+</plugin>

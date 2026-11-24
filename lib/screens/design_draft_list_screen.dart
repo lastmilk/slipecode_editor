@@ -1,14 +1,16 @@
 import 'package:flutter/material.dart';
 
 import '../models/design_draft.dart';
+import '../models/scene.dart';
 import '../payloads/loader/loader_payload.dart';
 import '../services/design_draft_service.dart';
-import 'create_loader_project_screen.dart';
 import 'design_draft_editor_screen.dart';
+import 'scene_workspaces/vibe_coding_workspace.dart';
 
 /// 设计稿列表
 ///
 /// 管理本机的全部设计稿：新建 / 编辑 / 删除 / 用设计稿创建 Loader 项目。
+/// 「用设计稿创建」会进入 VibeCoding 工作台的新范式表单（预选该设计稿）。
 class DesignDraftListScreen extends StatefulWidget {
   const DesignDraftListScreen({super.key});
 
@@ -90,9 +92,18 @@ class _DesignDraftListScreenState extends State<DesignDraftListScreen> {
   Future<void> _createLoaderProject(DesignDraft draft) async {
     await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => CreateLoaderProjectScreen(initialDraft: draft),
+        builder: (_) => VibeCodingWorkspace(
+          // 设计稿天然属于「新范式」：直接带入该设计稿。
+          selection: const SceneSelection(
+            sceneId: 'vibe_coding',
+            elementId: 'mobile',
+            typeId: 'paradigm_new',
+          ),
+          initialDraftId: draft.id,
+        ),
       ),
     );
+    _reload();
   }
 
   @override

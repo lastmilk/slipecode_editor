@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../models/editor_diagnostic.dart';
+import '../services/lsp/semantic_tokens.dart';
+
 /// 语法高亮配色
 class SyntaxColors {
   final Color plain;
@@ -61,6 +64,46 @@ class HighlightingController extends TextEditingController {
 
   /// 当前配色
   SyntaxColors colors;
+
+  /// 当前文件的诊断（波浪线）
+  List<EditorDiagnostic> diagnostics = const [];
+
+  /// 语义高亮 token（LSP semanticTokens，覆盖正则高亮配色）
+  List<SemanticTokenSpan> semanticTokens = const [];
+
+  // TextSpan 缓存：光标移动、选区变化、补全刷新都会触发 buildTextSpan，
+  // 但文本并未改变。缓存可避免对整篇文档重复执行正则分词。
+  String? _spanText;
+  String? _spanLanguage;
+  SyntaxColors? _spanColors;
+  List<SemanticTokenSpan>? _spanSemantic;
+  List<EditorDiagnostic>? _spanDiagnostics;
+  TextStyle? _spanStyle;
+  TextSpan? _spanCache;
+
+  /// 诊断变化后重绘
+  void setDiagnostics(List<EditorDiagnostic> value) {
+    if (identical(diagnostics, value)) return;
+    if (diagnostics.length == value.length) {
+      var same = true;
+      for (var i = 0; i < value.length; i++) {
+        if (diagnostics[i] != value[i]) {
+          same = false;
+          break;
+        }
+      }
+      if (same) return;
+    }
+    diagnostics = value;
+    notifyListeners();
+  }
+
+  /// 语义高亮变化后重绘
+  void setSemanticTokens(List<SemanticTokenSpan> value) {
+    if (identical(semanticTokens, value)) return;
+    semanticTokens = value;
+    notifyListeners();
+  }
 
   /// 切换到新语言并触发重绘
   void setLanguage(String value) {
@@ -148,6 +191,49 @@ class HighlightingController extends TextEditingController {
 
   @override
   TextSpan buildTextSpan({
+    required BuildContext context,
+    TextStyle? style,
+    required bool withComposing,
+  }) {
+    // 输入法组合态需要走默认逻辑，其余情况文本未变则直接复用缓存
+    final canCache = !withComposing || !value.composing.isValid;
+    final cached = _spanCache;
+    if (canCache &&
+        cached != null &&
+        _spanText == value.text &&
+        _spanLanguage == language &&
+        identical(_spanColors, colors) &&
+        identical(_spanSemantic, semanticTokens) &&
+        identical(_spanDiagnostics, diagnostics) &&
+        _spanStyle == style) {
+      return cached;
+    }
+
+    var span = _buildBaseSpan(
+      context: context,
+      style: style,
+      withComposing: withComposing,
+    );
+    if (semanticTokens.isNotEmpty) {
+      span = _decorateSemantic(span, value.text);
+    }
+    if (diagnostics.isNotEmpty) {
+      span = _decorateDiagnostics(span, value.text);
+    }
+
+    if (canCache) {
+      _spanText = value.text;
+      _spanLanguage = language;
+      _spanColors = colors;
+      _spanSemantic = semanticTokens;
+      _spanDiagnostics = diagnostics;
+      _spanStyle = style;
+      _spanCache = span;
+    }
+    return span;
+  }
+
+  TextSpan _buildBaseSpan({
     required BuildContext context,
     TextStyle? style,
     required bool withComposing,
@@ -346,5 +432,161 @@ class HighlightingController extends TextEditingController {
       if (token.startsWith('>')) return colors.comment;
       return colors.keyword; // 列表标记
     });
+  }
+
+  /// 诊断颜色（与 VS Code 保持一致）
+  Color _severityColor(DiagnosticSeverity severity) => switch (severity) {
+        DiagnosticSeverity.error => const Color(0xFFE51400),
+        DiagnosticSeverity.warning => const Color(0xFFBF8803),
+        DiagnosticSeverity.information => const Color(0xFF1A85FF),
+        DiagnosticSeverity.hint => const Color(0xFF8A8A8A),
+      };
+
+  /// 语义高亮：在正则分词结果之上覆盖颜色
+  TextSpan _decorateSemantic(TextSpan root, String text) {
+    final children = root.children;
+    if (children == null || children.isEmpty || text.isEmpty) return root;
+
+    final ranges = <({int start, int end, Color color})>[];
+    for (final token in semanticTokens) {
+      final color = _semanticColor(token.category);
+      if (color == null) continue;
+      final start = token.start.clamp(0, text.length);
+      final end = token.end.clamp(start, text.length);
+      if (end <= start) continue;
+      ranges.add((start: start, end: end, color: color));
+    }
+    if (ranges.isEmpty) return root;
+    ranges.sort((a, b) => a.start.compareTo(b.start));
+
+    final out = <InlineSpan>[];
+    var rangeIndex = 0;
+    var cursor = 0;
+    for (final child in children) {
+      if (child is! TextSpan || child.text == null) {
+        out.add(child);
+        continue;
+      }
+      final token = child.text!;
+      final tokenStart = cursor;
+      final tokenEnd = cursor + token.length;
+      cursor = tokenEnd;
+      var position = tokenStart;
+      while (position < tokenEnd) {
+        while (rangeIndex < ranges.length &&
+            ranges[rangeIndex].end <= position) {
+          rangeIndex++;
+        }
+        final range = rangeIndex < ranges.length ? ranges[rangeIndex] : null;
+        if (range == null || range.start >= tokenEnd) {
+          out.add(TextSpan(
+            text: text.substring(position, tokenEnd),
+            style: child.style,
+          ));
+          break;
+        }
+        if (range.start > position) {
+          final stop = range.start.clamp(position, tokenEnd);
+          out.add(TextSpan(
+            text: text.substring(position, stop),
+            style: child.style,
+          ));
+          position = stop;
+          continue;
+        }
+        final stop = range.end.clamp(position, tokenEnd);
+        out.add(TextSpan(
+          text: text.substring(position, stop),
+          style: (child.style ?? const TextStyle()).copyWith(color: range.color),
+        ));
+        position = stop;
+      }
+    }
+    return TextSpan(style: root.style, children: out);
+  }
+
+  Color? _semanticColor(SemanticCategory category) => switch (category) {
+        SemanticCategory.keyword => colors.keyword,
+        SemanticCategory.type => colors.type,
+        SemanticCategory.comment => colors.comment,
+        SemanticCategory.string => colors.string,
+        SemanticCategory.number => colors.number,
+        SemanticCategory.function => colors.type,
+        SemanticCategory.namespace => colors.type,
+        SemanticCategory.annotation => colors.annotation,
+        SemanticCategory.operator => colors.keyword,
+        _ => null,
+      };
+
+  /// 在已分词 spans 的基础上按诊断边界切分，只改样式不改文本。
+  TextSpan _decorateDiagnostics(TextSpan root, String text) {
+    final children = root.children;
+    if (children == null || children.isEmpty || text.isEmpty) return root;
+
+    final ranges = <({int start, int end, Color color})>[];
+    for (final diagnostic in diagnostics) {
+      var start = diagnostic.start.toOffset(text).clamp(0, text.length);
+      var end = diagnostic.end.toOffset(text).clamp(0, text.length);
+      if (end <= start) {
+        end = (start + 1).clamp(0, text.length);
+        if (end <= start) continue;
+      }
+      ranges.add((
+        start: start,
+        end: end,
+        color: _severityColor(diagnostic.severity),
+      ));
+    }
+    if (ranges.isEmpty) return root;
+    ranges.sort((a, b) => a.start.compareTo(b.start));
+
+    final out = <InlineSpan>[];
+    var rangeIndex = 0;
+    var cursor = 0;
+    for (final child in children) {
+      if (child is! TextSpan || child.text == null) {
+        out.add(child);
+        continue;
+      }
+      final token = child.text!;
+      final tokenStart = cursor;
+      final tokenEnd = cursor + token.length;
+      cursor = tokenEnd;
+      var position = tokenStart;
+      while (position < tokenEnd) {
+        while (rangeIndex < ranges.length &&
+            ranges[rangeIndex].end <= position) {
+          rangeIndex++;
+        }
+        final range = rangeIndex < ranges.length ? ranges[rangeIndex] : null;
+        if (range == null || range.start >= tokenEnd) {
+          out.add(TextSpan(
+            text: text.substring(position, tokenEnd),
+            style: child.style,
+          ));
+          break;
+        }
+        if (range.start > position) {
+          final stop = range.start.clamp(position, tokenEnd);
+          out.add(TextSpan(
+            text: text.substring(position, stop),
+            style: child.style,
+          ));
+          position = stop;
+          continue;
+        }
+        final stop = range.end.clamp(position, tokenEnd);
+        out.add(TextSpan(
+          text: text.substring(position, stop),
+          style: (child.style ?? const TextStyle()).copyWith(
+            decoration: TextDecoration.underline,
+            decorationStyle: TextDecorationStyle.wavy,
+            decorationColor: range.color,
+          ),
+        ));
+        position = stop;
+      }
+    }
+    return TextSpan(style: root.style, children: out);
   }
 }

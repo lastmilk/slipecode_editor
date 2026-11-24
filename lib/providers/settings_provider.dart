@@ -16,8 +16,35 @@ import '../services/git_host.dart';
 class SettingsProvider extends ChangeNotifier {
   static const _key = 'slipe_app_settings';
 
+  // _settings 始终是用户基础值；Lua 覆盖只体现在 settings getter 中。
   AppSettings _settings = AppSettings.defaults;
-  AppSettings get settings => _settings;
+  Map<String, Object?> _luaOverrides = const {};
+
+  AppSettings get baseSettings => _settings;
+  AppSettings get settings {
+    if (_luaOverrides.isEmpty) return _settings;
+    final fontSize = _luaOverrides['editor.fontSize'];
+    final themeMode = switch (_luaOverrides['view.themeMode']) {
+      'system' => ThemeMode.system,
+      'light' => ThemeMode.light,
+      'dark' => ThemeMode.dark,
+      _ => null,
+    };
+    return _settings.copyWith(
+      themeMode: themeMode,
+      editorFontSize: fontSize is num ? fontSize.toDouble() : null,
+      fontFamily: _luaOverrides['editor.fontFamily'] as String?,
+      completionEnabled: _luaOverrides['editor.completionEnabled'] as bool?,
+      language: _luaOverrides['view.language'] as String?,
+    );
+  }
+
+  /// 原子替换 Lua 有效值覆盖层；基础值与持久化内容保持不变。
+  void applyLuaOverrides(Map<String, Object?> overrides) {
+    _luaOverrides = Map.unmodifiable(overrides);
+    L10n.apply(settings.language);
+    notifyListeners();
+  }
 
   bool _loaded = false;
   bool get isLoaded => _loaded;
@@ -36,7 +63,7 @@ class SettingsProvider extends ChangeNotifier {
         _settings = AppSettings.defaults;
       }
     }
-    L10n.apply(_settings.language);
+    L10n.apply(settings.language);
     _loaded = true;
     notifyListeners();
   }
@@ -70,7 +97,7 @@ class SettingsProvider extends ChangeNotifier {
       // 应用锁属于设备本地安全设置，不跟随云端
       appLockEnabled: _settings.appLockEnabled,
     );
-    L10n.apply(_settings.language);
+    L10n.apply(settings.language);
     await _persist();
     notifyListeners();
   }
@@ -90,7 +117,7 @@ class SettingsProvider extends ChangeNotifier {
   /// 切换界面语言（立即生效，无需重启）
   Future<void> setLanguage(String language) async {
     _settings = _settings.copyWith(language: language);
-    L10n.apply(language);
+    L10n.apply(settings.language);
     await _save();
   }
 
@@ -101,6 +128,18 @@ class SettingsProvider extends ChangeNotifier {
 
   Future<void> setAiApprovalEnabled(bool value) async {
     _settings = _settings.copyWith(aiApprovalEnabled: value);
+    await _save();
+  }
+
+  /// 设置 Agent 操作审批模式（manual / auto / full / custom）
+  Future<void> setAgentApprovalMode(String mode) async {
+    _settings = _settings.copyWith(agentApprovalMode: mode);
+    await _save();
+  }
+
+  /// 设置自定义审批规则
+  Future<void> setAgentApprovalRules(String rules) async {
+    _settings = _settings.copyWith(agentApprovalRules: rules);
     await _save();
   }
 
@@ -210,10 +249,7 @@ class SettingsProvider extends ChangeNotifier {
 
   /// 选择某个内置模型（自动切换到内置模型模式）
   Future<void> setBuiltinLlm(String id) async {
-    _settings = _settings.copyWith(
-      llmUseBuiltin: true,
-      builtinLlmId: id,
-    );
+    _settings = _settings.copyWith(llmUseBuiltin: true, builtinLlmId: id);
     await _save();
   }
 

@@ -15,8 +15,7 @@ class FeedTab extends StatefulWidget {
   State<FeedTab> createState() => _FeedTabState();
 }
 
-class _FeedTabState extends State<FeedTab>
-    with AutomaticKeepAliveClientMixin {
+class _FeedTabState extends State<FeedTab> with AutomaticKeepAliveClientMixin {
   final _scroll = ScrollController();
   final _service = CommunityService.instance;
 
@@ -240,7 +239,9 @@ class _PostCard extends StatelessWidget {
                 TAvatar(
                   size: TAvatarSize.medium,
                   child: Text(
-                    post.authorName.isEmpty ? '?' : post.authorName.characters.first,
+                    post.authorName.isEmpty
+                        ? '?'
+                        : post.authorName.characters.first,
                     style: const TextStyle(fontSize: 12),
                   ),
                 ),
@@ -248,7 +249,7 @@ class _PostCard extends StatelessWidget {
                 Expanded(
                   child: Text(
                     post.authorName.isEmpty ? '匿名' : post.authorName,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w600,
                       color: CommunityTheme.textPrimary,
@@ -258,7 +259,7 @@ class _PostCard extends StatelessWidget {
                 if (_timeText != null)
                   Text(
                     _timeText!,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 11,
                       color: CommunityTheme.textSecondary,
                     ),
@@ -270,7 +271,7 @@ class _PostCard extends StatelessWidget {
               post.title,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 15,
                 fontWeight: FontWeight.w700,
                 height: 1.35,
@@ -283,7 +284,7 @@ class _PostCard extends StatelessWidget {
                 post.excerpt,
                 maxLines: 3,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 12,
                   height: 1.5,
                   color: CommunityTheme.textSecondary,
@@ -303,13 +304,33 @@ class _PostCard extends StatelessWidget {
                     ),
                   ),
                 const Spacer(),
-                Icon(Icons.favorite_border, size: 14, color: CommunityTheme.textSecondary),
+                Icon(
+                  Icons.favorite_border,
+                  size: 14,
+                  color: CommunityTheme.textSecondary,
+                ),
                 const SizedBox(width: 3),
-                Text('${post.likes}', style: const TextStyle(fontSize: 11, color: CommunityTheme.textSecondary)),
+                Text(
+                  '${post.likes}',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: CommunityTheme.textSecondary,
+                  ),
+                ),
                 const SizedBox(width: 12),
-                Icon(Icons.chat_bubble_outline, size: 13, color: CommunityTheme.textSecondary),
+                Icon(
+                  Icons.chat_bubble_outline,
+                  size: 13,
+                  color: CommunityTheme.textSecondary,
+                ),
                 const SizedBox(width: 3),
-                Text('${post.commentCount}', style: const TextStyle(fontSize: 11, color: CommunityTheme.textSecondary)),
+                Text(
+                  '${post.commentCount}',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: CommunityTheme.textSecondary,
+                  ),
+                ),
               ],
             ),
           ],

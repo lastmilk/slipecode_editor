@@ -36,6 +36,12 @@ class AppSettings {
   /// AI 改动写盘前是否需要用户审批
   final bool aiApprovalEnabled;
 
+  /// Agent 操作审批模式：manual / auto / full / custom
+  final String agentApprovalMode;
+
+  /// 自定义审批规则（一行一条：allow <工具或命令前缀> / deny <…> / ask <…>）
+  final String agentApprovalRules;
+
   /// 是否开启应用锁（生物认证 + 密码兜底）
   final bool appLockEnabled;
 
@@ -169,6 +175,8 @@ class AppSettings {
     this.language = 'zh',
     this.fontFamily = '',
     this.aiApprovalEnabled = true,
+    this.agentApprovalMode = 'auto',
+    this.agentApprovalRules = '',
     this.appLockEnabled = false,
     this.showSaying = true,
     this.defaultGitHost = GitHost.github,
@@ -223,6 +231,8 @@ class AppSettings {
     String? language,
     String? fontFamily,
     bool? aiApprovalEnabled,
+    String? agentApprovalMode,
+    String? agentApprovalRules,
     bool? appLockEnabled,
     bool? showSaying,
     GitHost? defaultGitHost,
@@ -262,6 +272,8 @@ class AppSettings {
       language: language ?? this.language,
       fontFamily: fontFamily ?? this.fontFamily,
       aiApprovalEnabled: aiApprovalEnabled ?? this.aiApprovalEnabled,
+      agentApprovalMode: agentApprovalMode ?? this.agentApprovalMode,
+      agentApprovalRules: agentApprovalRules ?? this.agentApprovalRules,
       appLockEnabled: appLockEnabled ?? this.appLockEnabled,
       showSaying: showSaying ?? this.showSaying,
       defaultGitHost: defaultGitHost ?? this.defaultGitHost,
@@ -315,6 +327,8 @@ class AppSettings {
       'language': language,
       'fontFamily': fontFamily,
       'aiApprovalEnabled': aiApprovalEnabled,
+      'agentApprovalMode': agentApprovalMode,
+      'agentApprovalRules': agentApprovalRules,
       'appLockEnabled': appLockEnabled,
       'showSaying': showSaying,
       'defaultGitHost': defaultGitHost.id,
@@ -402,6 +416,15 @@ class AppSettings {
       fontFamily: json['fontFamily'] as String? ?? defaults.fontFamily,
       aiApprovalEnabled:
           json['aiApprovalEnabled'] as bool? ?? defaults.aiApprovalEnabled,
+      agentApprovalMode: switch (json['agentApprovalMode'] as String?) {
+        'manual' => 'manual',
+        'auto' => 'auto',
+        'full' => 'full',
+        'custom' => 'custom',
+        _ => defaults.agentApprovalMode,
+      },
+      agentApprovalRules:
+          json['agentApprovalRules'] as String? ?? defaults.agentApprovalRules,
       appLockEnabled:
           json['appLockEnabled'] as bool? ?? defaults.appLockEnabled,
       showSaying: json['showSaying'] as bool? ?? defaults.showSaying,

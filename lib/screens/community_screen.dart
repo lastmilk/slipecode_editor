@@ -50,27 +50,31 @@ class CommunityScreenState extends State<CommunityScreen>
       Scaffold(
         backgroundColor: CommunityTheme.bg,
         appBar: AppBar(
-          backgroundColor: Colors.white,
+          backgroundColor: CommunityTheme.card,
           elevation: 0,
           automaticallyImplyLeading: false,
           titleSpacing: 16,
-          title: const Row(
+          title: Row(
             children: [
               Icon(Icons.forum_outlined, size: 20, color: CommunityTheme.brand),
               SizedBox(width: 6),
               Text(
                 'SLIPE 社区',
-                style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: CommunityTheme.textPrimary),
+                style: TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w700,
+                  color: CommunityTheme.textPrimary,
+                ),
               ),
             ],
           ),
-          iconTheme: const IconThemeData(color: CommunityTheme.textPrimary),
+          iconTheme: IconThemeData(color: CommunityTheme.textPrimary),
           actions: [
             IconButton(
               tooltip: '社区公约',
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const CovenantScreen()),
-              ),
+              onPressed: () => Navigator.of(
+                context,
+              ).push(MaterialPageRoute(builder: (_) => const CovenantScreen())),
               icon: const Icon(Icons.gavel_outlined, size: 20),
             ),
             const SizedBox(width: 4),

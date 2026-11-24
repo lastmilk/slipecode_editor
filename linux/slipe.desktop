@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=SLIPE
+Comment=SLIPE — Flutter code editor
+Exec=slipe_editor %u
+Icon=slipe_editor
+Terminal=false
+Type=Application
+Categories=Development;IDE;
+MimeType=x-scheme-handler/slipe;
+StartupWMClass=com.slipe.slipe_editor

@@ -8,6 +8,8 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'desktop_platform.dart';
+
 /// 应用安全服务
 ///
 /// - 解锁密码仅保存加盐 SHA-256 摘要
@@ -24,6 +26,13 @@ class SecurityService {
   SecurityService._();
 
   static final SecurityService instance = SecurityService._();
+
+  /// 主动锁定信号（桌面 Ctrl+L 触发），AppLockGate 监听后立即上锁
+  static final ValueNotifier<int> relockSignal = ValueNotifier<int>(0);
+
+  static void requestRelock() {
+    relockSignal.value++;
+  }
 
   static const _kHash = 'slipe_app_lock_hash';
   static const _kSalt = 'slipe_app_lock_salt';
@@ -109,6 +118,8 @@ class SecurityService {
   /// 通过 BiometricPrompt 的备用凭据验证，此时 [canCheckBiometrics] 为 false，
   /// 若强制要求会导致设置页误报「设备不支持」。
   Future<bool> biometricAvailable() async {
+    // 桌面端不提供生物认证，统一使用解锁密码
+    if (DesktopPlatform.isDesktop) return false;
     try {
       return await _auth.isDeviceSupported();
     } catch (e) {
@@ -122,6 +133,7 @@ class SecurityService {
   /// 已录入生物特征时只允许生物识别；设备仅有锁屏密码时回退到
   /// 系统凭据（PIN / 图案 / 密码），避免直接抛错导致无法解锁。
   Future<bool> authenticate({String reason = '验证身份以解锁 SLIPE'}) async {
+    if (DesktopPlatform.isDesktop) return false;
     try {
       final enrolled = await _auth.getAvailableBiometrics();
       return await _auth.authenticate(

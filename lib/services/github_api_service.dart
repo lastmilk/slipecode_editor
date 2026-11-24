@@ -370,18 +370,47 @@ class GitHubApiService {
     return ActionsBilling.fromJson(json);
   }
 
+  /// 列出当前授权账号可访问的仓库，按更新时间返回前 100 条。
+  Future<List<GitHubRepo>> listRepositories() async {
+    final res = await _client
+        .get(
+          _u('/user/repos', {
+            'page': '1',
+            'per_page': '100',
+            'sort': 'updated',
+          }),
+          headers: _headers,
+        )
+        .timeout(const Duration(seconds: 20));
+    _check(res, 'GET /user/repos');
+    final decoded = jsonDecode(res.body);
+    if (decoded is! List) {
+      throw HttpExceptionWithBody(
+        'GET /user/repos 返回了非列表数据（${decoded.runtimeType}）',
+        res.body,
+      );
+    }
+    return [
+      for (final item in decoded)
+        if (item is Map) GitHubRepo.fromJson(Map<String, dynamic>.from(item)),
+    ];
+  }
+
   /// 列出通过 SLIPE 创建的 GitHub 仓库（按创建描述识别）
   Future<List<GitHubRepo>> listSlipeRepos() async {
     const marker = 'created by slipe';
     final repos = <GitHubRepo>[];
     for (var page = 1; page <= 5; page++) {
       final res = await _client
-          .get(_u('/user/repos', {
-            'page': '$page',
-            'per_page': '100',
-            'sort': 'updated',
-            'affiliation': 'owner',
-          }), headers: _headers)
+          .get(
+            _u('/user/repos', {
+              'page': '$page',
+              'per_page': '100',
+              'sort': 'updated',
+              'affiliation': 'owner',
+            }),
+            headers: _headers,
+          )
           .timeout(const Duration(seconds: 20));
       _check(res, 'GET /user/repos');
       final decoded = jsonDecode(res.body);
@@ -395,8 +424,7 @@ class GitHubApiService {
       for (final item in decoded) {
         if (item is! Map) continue;
         final map = Map<String, dynamic>.from(item);
-        final description =
-            (map['description'] as String? ?? '').toLowerCase();
+        final description = (map['description'] as String? ?? '').toLowerCase();
         if (description.contains(marker)) {
           repos.add(GitHubRepo.fromJson(map));
         }
@@ -447,6 +475,51 @@ class GitHubApiService {
     return true;
   }
 
+  /// 读取仓库中的 UTF-8 文本文件，最大 256KB。
+  Future<String> readTextFile(
+    String fullName,
+    String path,
+    String branch,
+  ) async {
+    const maxBytes = 256 * 1024;
+    final encodedPath = path.split('/').map(Uri.encodeComponent).join('/');
+    final res = await _client
+        .get(
+          _u('/repos/$fullName/contents/$encodedPath', {'ref': branch}),
+          headers: _headers,
+        )
+        .timeout(_timeout);
+    _check(res, 'GET contents/$path');
+    if (res.body.trim().isEmpty) throw StateError('远程接口返回为空');
+    final decoded = jsonDecode(res.body);
+    if (decoded is List) throw StateError('不能读取目录，请提供文件路径');
+    if (decoded is! Map) throw StateError('远程接口返回了无法识别的内容');
+    final json = Map<String, dynamic>.from(decoded);
+    if (json['type'] != 'file') throw StateError('目标不是普通文件');
+    final declaredSize = (json['size'] as num?)?.toInt();
+    if (declaredSize != null && declaredSize > maxBytes) {
+      throw StateError('文件超过 256KB，无法通过连接器读取');
+    }
+    final content = json['content'];
+    if (content is! String) {
+      throw StateError('远程接口未返回文件内容，文件可能超过接口限制');
+    }
+    final List<int> bytes;
+    try {
+      bytes = base64Decode(content.replaceAll(RegExp(r'\s'), ''));
+    } on FormatException {
+      throw StateError('远程文件内容不是有效的 Base64');
+    }
+    if (bytes.length > maxBytes) {
+      throw StateError('文件超过 256KB，无法通过连接器读取');
+    }
+    try {
+      return utf8.decode(bytes);
+    } on FormatException {
+      throw StateError('文件不是有效的 UTF-8 文本');
+    }
+  }
+
   /// 读取分支最新 tree 中所有文件的 git blob sha（path → sha）
   ///
   /// 用于构建前比对本地与远程，避免「本地已改但未推送」。
@@ -463,10 +536,9 @@ class GitHubApiService {
     final headSha = (ref['object'] as Map<String, dynamic>)['sha'] as String;
     final commit = await _getJson('/repos/$fullName/git/commits/$headSha');
     final treeSha = (commit['tree'] as Map<String, dynamic>)['sha'] as String;
-    final tree = await _getJson(
-      '/repos/$fullName/git/trees/$treeSha',
-      {'recursive': '1'},
-    );
+    final tree = await _getJson('/repos/$fullName/git/trees/$treeSha', {
+      'recursive': '1',
+    });
     final entries = tree['tree'];
     if (entries is List) {
       for (final item in entries) {

@@ -21,11 +21,11 @@ class GiteeUser {
   });
 
   factory GiteeUser.fromJson(Map<String, dynamic> json) => GiteeUser(
-        login: json['login'] as String? ?? '',
-        name: json['name'] as String?,
-        avatarUrl: json['avatar_url'] as String?,
-        htmlUrl: json['html_url'] as String? ?? '',
-      );
+    login: json['login'] as String? ?? '',
+    name: json['name'] as String?,
+    avatarUrl: json['avatar_url'] as String?,
+    htmlUrl: json['html_url'] as String? ?? '',
+  );
 }
 
 /// Gitee 仓库
@@ -43,12 +43,12 @@ class GiteeRepo {
   });
 
   factory GiteeRepo.fromJson(Map<String, dynamic> json) => GiteeRepo(
-        fullName: json['full_name'] as String? ?? '',
-        // Gitee 新仓库默认分支通常为 master
-        defaultBranch: json['default_branch'] as String? ?? 'master',
-        htmlUrl: json['html_url'] as String? ?? '',
-        private: json['private'] as bool? ?? true,
-      );
+    fullName: json['full_name'] as String? ?? '',
+    // Gitee 新仓库默认分支通常为 master
+    defaultBranch: json['default_branch'] as String? ?? 'master',
+    htmlUrl: json['html_url'] as String? ?? '',
+    private: json['private'] as bool? ?? true,
+  );
 }
 
 /// Gitee OpenAPI v5 封装
@@ -61,12 +61,9 @@ class GiteeApiService {
   final String _token;
   final http.Client _client = http.Client();
 
-  Uri _u(String path, [Map<String, String>? query]) => Uri.parse(
-        '${AppConfig.giteeApiBase}$path',
-      ).replace(queryParameters: {
-        'access_token': _token,
-        ...?query,
-      });
+  Uri _u(String path, [Map<String, String>? query]) =>
+      Uri.parse('${AppConfig.giteeApiBase}$path')
+          .replace(queryParameters: {'access_token': _token, ...?query});
 
   void dispose() => _client.close();
 
@@ -83,16 +80,19 @@ class GiteeApiService {
     if (res.body.isEmpty) return {};
     final decoded = jsonDecode(res.body);
     if (decoded is Map<String, dynamic>) return decoded;
-    final preview =
-        res.body.length > 200 ? '${res.body.substring(0, 200)}…' : res.body;
+    final preview = res.body.length > 200
+        ? '${res.body.substring(0, 200)}…'
+        : res.body;
     throw HttpExceptionWithBody(
       '$what 返回了非对象数据（${decoded.runtimeType}）：$preview',
       res.body,
     );
   }
 
-  Future<Map<String, dynamic>> _getJson(String path,
-      [Map<String, String>? query]) async {
+  Future<Map<String, dynamic>> _getJson(
+    String path, [
+    Map<String, String>? query,
+  ]) async {
     final res = await _client.get(_u(path, query)).timeout(_timeout);
     _check(res, 'GET $path');
     return _decodeMap(res, 'GET $path');
@@ -139,6 +139,32 @@ class GiteeApiService {
     return GiteeUser.fromJson(json);
   }
 
+  /// 列出当前授权账号可访问的仓库，按更新时间返回前 100 条。
+  Future<List<GiteeRepo>> listRepositories() async {
+    final res = await _client
+        .get(
+          _u('/user/repos', {
+            'page': '1',
+            'per_page': '100',
+            'sort': 'updated',
+            'direction': 'desc',
+          }),
+        )
+        .timeout(const Duration(seconds: 20));
+    _check(res, 'GET /user/repos');
+    final decoded = jsonDecode(res.body);
+    if (decoded is! List) {
+      throw HttpExceptionWithBody(
+        'GET /user/repos 返回了非列表数据（${decoded.runtimeType}）',
+        res.body,
+      );
+    }
+    return [
+      for (final item in decoded)
+        if (item is Map) GiteeRepo.fromJson(Map<String, dynamic>.from(item)),
+    ];
+  }
+
   /// 列出通过 SLIPE 创建的 Gitee 仓库（按创建描述识别）
   ///
   /// 只返回当前授权用户自己名下的仓库，避免把协作仓库也算进来。
@@ -147,13 +173,15 @@ class GiteeApiService {
     final repos = <GiteeRepo>[];
     for (var page = 1; page <= 5; page++) {
       final res = await _client
-          .get(_u('/user/repos', {
-            'page': '$page',
-            'per_page': '100',
-            'sort': 'updated',
-            'direction': 'desc',
-            'affiliation': 'owner',
-          }))
+          .get(
+            _u('/user/repos', {
+              'page': '$page',
+              'per_page': '100',
+              'sort': 'updated',
+              'direction': 'desc',
+              'affiliation': 'owner',
+            }),
+          )
           .timeout(const Duration(seconds: 20));
       _check(res, 'GET /user/repos');
       final decoded = jsonDecode(res.body);
@@ -167,8 +195,7 @@ class GiteeApiService {
       for (final item in decoded) {
         if (item is! Map) continue;
         final map = Map<String, dynamic>.from(item);
-        final description =
-            (map['description'] as String? ?? '').toLowerCase();
+        final description = (map['description'] as String? ?? '').toLowerCase();
         if (description.contains(marker)) {
           repos.add(GiteeRepo.fromJson(map));
         }
@@ -234,12 +261,51 @@ class GiteeApiService {
   static String _encodePath(String path) =>
       path.split('/').map(Uri.encodeComponent).join('/');
 
-  /// 读取文件当前 blob sha；文件不存在时返回 null
-  Future<String?> _fileSha(
+  /// 读取仓库中的 UTF-8 文本文件，最大 256KB。
+  Future<String> readTextFile(
     String fullName,
     String path,
     String branch,
   ) async {
+    const maxBytes = 256 * 1024;
+    final res = await _client
+        .get(
+          _u('/repos/$fullName/contents/${_encodePath(path)}', {'ref': branch}),
+        )
+        .timeout(_timeout);
+    _check(res, 'GET contents/$path');
+    if (res.body.trim().isEmpty) throw StateError('远程接口返回为空');
+    final decoded = jsonDecode(res.body);
+    if (decoded is List) throw StateError('不能读取目录，请提供文件路径');
+    if (decoded is! Map) throw StateError('远程接口返回了无法识别的内容');
+    final json = Map<String, dynamic>.from(decoded);
+    if (json['type'] != 'file') throw StateError('目标不是普通文件');
+    final declaredSize = (json['size'] as num?)?.toInt();
+    if (declaredSize != null && declaredSize > maxBytes) {
+      throw StateError('文件超过 256KB，无法通过连接器读取');
+    }
+    final content = json['content'];
+    if (content is! String) {
+      throw StateError('远程接口未返回文件内容，文件可能超过接口限制');
+    }
+    final List<int> bytes;
+    try {
+      bytes = base64Decode(content.replaceAll(RegExp(r'\s'), ''));
+    } on FormatException {
+      throw StateError('远程文件内容不是有效的 Base64');
+    }
+    if (bytes.length > maxBytes) {
+      throw StateError('文件超过 256KB，无法通过连接器读取');
+    }
+    try {
+      return utf8.decode(bytes);
+    } on FormatException {
+      throw StateError('文件不是有效的 UTF-8 文本');
+    }
+  }
+
+  /// 读取文件当前 blob sha；文件不存在时返回 null
+  Future<String?> _fileSha(String fullName, String path, String branch) async {
     final res = await _client.get(
       _u('/repos/$fullName/contents/${_encodePath(path)}', {'ref': branch}),
     );

@@ -129,7 +129,10 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, controller.text),
             child: const Text('提交'),
@@ -157,10 +160,13 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       Scaffold(
         backgroundColor: CommunityTheme.bg,
         appBar: AppBar(
-          backgroundColor: Colors.white,
+          backgroundColor: CommunityTheme.card,
           elevation: 0,
-          title: const Text('帖子详情', style: TextStyle(fontSize: 16, color: CommunityTheme.textPrimary)),
-          iconTheme: const IconThemeData(color: CommunityTheme.textPrimary),
+          title: Text(
+            '帖子详情',
+            style: TextStyle(fontSize: 16, color: CommunityTheme.textPrimary),
+          ),
+          iconTheme: IconThemeData(color: CommunityTheme.textPrimary),
           actions: [
             IconButton(
               tooltip: '举报',
@@ -226,14 +232,19 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                   TAvatar(
                     size: TAvatarSize.medium,
                     child: Text(
-                      post.authorName.isEmpty ? '?' : post.authorName.characters.first,
+                      post.authorName.isEmpty
+                          ? '?'
+                          : post.authorName.characters.first,
                       style: const TextStyle(fontSize: 12),
                     ),
                   ),
                   const SizedBox(width: 8),
                   Text(
                     post.authorName.isEmpty ? '匿名' : post.authorName,
-                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                   const Spacer(),
                   if (isAuthor)
@@ -245,8 +256,14 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                             title: const Text('删除帖子'),
                             content: const Text('删除后评论也会一并删除，确定继续？'),
                             actions: [
-                              TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
-                              FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('删除')),
+                              TextButton(
+                                onPressed: () => Navigator.pop(ctx, false),
+                                child: const Text('取消'),
+                              ),
+                              FilledButton(
+                                onPressed: () => Navigator.pop(ctx, true),
+                                child: const Text('删除'),
+                              ),
                             ],
                           ),
                         );
@@ -255,11 +272,15 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                             await _service.deletePost(post.id);
                             if (mounted) Navigator.of(context).pop();
                           } catch (e) {
-                            if (mounted) TToast.showFail('$e', context: context);
+                            if (mounted)
+                              TToast.showFail('$e', context: context);
                           }
                         }
                       },
-                      child: const Text('删除', style: TextStyle(fontSize: 12, color: Colors.red)),
+                      child: const Text(
+                        '删除',
+                        style: TextStyle(fontSize: 12, color: Colors.red),
+                      ),
                     ),
                 ],
               ),
@@ -281,7 +302,9 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                   code: TextStyle(
                     fontSize: 12,
                     fontFamily: 'monospace',
-                    backgroundColor: isDark ? Colors.black26 : const Color(0xFFF2F3F5),
+                    backgroundColor: isDark
+                        ? Colors.black26
+                        : const Color(0xFFF2F3F5),
                   ),
                   codeblockDecoration: BoxDecoration(
                     color: isDark ? Colors.black26 : const Color(0xFFF2F3F5),
@@ -299,19 +322,31 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                         Icon(
                           _liked ? Icons.favorite : Icons.favorite_border,
                           size: 18,
-                          color: _liked ? Colors.redAccent : CommunityTheme.textSecondary,
+                          color: _liked
+                              ? Colors.redAccent
+                              : CommunityTheme.textSecondary,
                         ),
                         const SizedBox(width: 4),
-                        Text('${post.likes}', style: const TextStyle(fontSize: 12)),
+                        Text(
+                          '${post.likes}',
+                          style: const TextStyle(fontSize: 12),
+                        ),
                       ],
                     ),
                   ),
                   const SizedBox(width: 18),
                   Row(
                     children: [
-                      const Icon(Icons.chat_bubble_outline, size: 16, color: CommunityTheme.textSecondary),
+                      Icon(
+                        Icons.chat_bubble_outline,
+                        size: 16,
+                        color: CommunityTheme.textSecondary,
+                      ),
                       const SizedBox(width: 4),
-                      Text('${_comments.length}', style: const TextStyle(fontSize: 12)),
+                      Text(
+                        '${_comments.length}',
+                        style: const TextStyle(fontSize: 12),
+                      ),
                     ],
                   ),
                 ],
@@ -319,13 +354,24 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
               const Divider(height: 28),
               Text(
                 '评论 ${_comments.length}',
-                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
               const SizedBox(height: 8),
               if (_comments.isEmpty)
-                const Padding(
+                Padding(
                   padding: EdgeInsets.symmetric(vertical: 20),
-                  child: Center(child: Text('还没有评论', style: TextStyle(fontSize: 12, color: CommunityTheme.textSecondary))),
+                  child: Center(
+                    child: Text(
+                      '还没有评论',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: CommunityTheme.textSecondary,
+                      ),
+                    ),
+                  ),
                 )
               else
                 for (final comment in _comments) _CommentTile(comment: comment),
@@ -339,8 +385,8 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
             12,
             8 + MediaQuery.of(context).viewInsets.bottom,
           ),
-          decoration: const BoxDecoration(
-            color: Colors.white,
+          decoration: BoxDecoration(
+            color: CommunityTheme.card,
             border: Border(top: BorderSide(color: CommunityTheme.border)),
           ),
           child: Row(
@@ -382,7 +428,9 @@ class _CommentTile extends StatelessWidget {
           TAvatar(
             size: TAvatarSize.small,
             child: Text(
-              comment.authorName.isEmpty ? '?' : comment.authorName.characters.first,
+              comment.authorName.isEmpty
+                  ? '?'
+                  : comment.authorName.characters.first,
               style: const TextStyle(fontSize: 10),
             ),
           ),
@@ -393,10 +441,16 @@ class _CommentTile extends StatelessWidget {
               children: [
                 Text(
                   comment.authorName.isEmpty ? '匿名' : comment.authorName,
-                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
                 const SizedBox(height: 3),
-                Text(comment.content, style: const TextStyle(fontSize: 13, height: 1.5)),
+                Text(
+                  comment.content,
+                  style: const TextStyle(fontSize: 13, height: 1.5),
+                ),
               ],
             ),
           ),

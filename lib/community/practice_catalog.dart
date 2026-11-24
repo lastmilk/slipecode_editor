@@ -33,12 +33,14 @@ class PracticeSpec {
   factory PracticeSpec.forLesson(TutorialLesson lesson) {
     final spec = _catalog[lesson.id];
     if (spec != null) return spec;
-    final code = lesson.steps
+    final code =
+        lesson.steps
             .where((s) => s.type == 'code' && s.code.trim().isNotEmpty)
             .map((s) => s.code)
             .firstOrNull ??
         '';
-    final tokens = RegExp(r'\b(class|Widget|StatelessWidget|StatefulWidget)\b')
+    final tokens =
+        RegExp(r'\b(class|Widget|StatelessWidget|StatefulWidget)\b')
             .allMatches(code)
             .isEmpty
         ? <String>['Widget']
@@ -103,7 +105,13 @@ class MyApp extends StatelessWidget {
 }
 ''',
     hints: ['入口必须是 void main()', 'runApp 接收根 Widget', '用 Center 居中 Text'],
-    requiredTokens: ['void main', 'runApp', 'MaterialApp', 'Center', 'Hello SLIPE'],
+    requiredTokens: [
+      'void main',
+      'runApp',
+      'MaterialApp',
+      'Center',
+      'Hello SLIPE',
+    ],
   ),
   'flutter-02': PracticeSpec(
     lessonId: 'flutter-02',
@@ -142,8 +150,7 @@ class HomePage extends StatelessWidget {
   'flutter-03': PracticeSpec(
     lessonId: 'flutter-03',
     title: 'Widget 基础',
-    requirement:
-        '实现一个 StatefulWidget 计数器：页面显示当前次数，点击按钮后 setState 让数字 +1。',
+    requirement: '实现一个 StatefulWidget 计数器：页面显示当前次数，点击按钮后 setState 让数字 +1。',
     starter: r'''import 'package:flutter/material.dart';
 
 void main() => runApp(const MyApp());
@@ -213,7 +220,12 @@ class _CounterPageState extends State<CounterPage> {
 }
 ''',
     hints: ['State 类里保存 int 字段', '通过 setState 更新字段', 'Text 用字符串插值显示'],
-    requiredTokens: ['StatefulWidget', 'setState', 'int count', 'ElevatedButton'],
+    requiredTokens: [
+      'StatefulWidget',
+      'setState',
+      'int count',
+      'ElevatedButton',
+    ],
   ),
   'flutter-04': PracticeSpec(
     lessonId: 'flutter-04',
@@ -247,13 +259,17 @@ class Greeting extends StatelessWidget {
 }
 ''',
     hints: ['构造函数加 required this.name', 'build 中直接用 name'],
-    requiredTokens: ['class Greeting', 'final String name', 'required this.name', 'Hello, \$name'],
+    requiredTokens: [
+      'class Greeting',
+      'final String name',
+      'required this.name',
+      'Hello, \$name',
+    ],
   ),
   'flutter-05': PracticeSpec(
     lessonId: 'flutter-05',
     title: '布局基础',
-    requirement:
-        '使用 Row + Expanded 实现左右两栏：左栏固定 100 宽并显示「左」，右栏自适应并显示「右」。',
+    requirement: '使用 Row + Expanded 实现左右两栏：左栏固定 100 宽并显示「左」，右栏自适应并显示「右」。',
     starter: _defaultStarter,
     answer: r'''import 'package:flutter/material.dart';
 
@@ -278,7 +294,13 @@ class MyApp extends StatelessWidget {
 }
 ''',
     hints: ['Row 子项按顺序横向排列', 'Expanded 占满剩余空间', '固定宽度用 SizedBox'],
-    requiredTokens: ['Row', 'Expanded', 'SizedBox(width: 100', 'Text(\'左\')', 'Text(\'右\')'],
+    requiredTokens: [
+      'Row',
+      'Expanded',
+      'SizedBox(width: 100',
+      'Text(\'左\')',
+      'Text(\'右\')',
+    ],
   ),
   'flutter-06': PracticeSpec(
     lessonId: 'flutter-06',
@@ -315,8 +337,17 @@ class MyApp extends StatelessWidget {
   }
 }
 ''',
-    hints: ['尺寸用 width / height', '圆角在 BoxDecoration.borderRadius', '内边距用 padding'],
-    requiredTokens: ['Container', 'BoxDecoration', 'BorderRadius.circular(16)', 'EdgeInsets.all(16)'],
+    hints: [
+      '尺寸用 width / height',
+      '圆角在 BoxDecoration.borderRadius',
+      '内边距用 padding',
+    ],
+    requiredTokens: [
+      'Container',
+      'BoxDecoration',
+      'BorderRadius.circular(16)',
+      'EdgeInsets.all(16)',
+    ],
   ),
   'flutter-07': PracticeSpec(
     lessonId: 'flutter-07',
@@ -359,8 +390,17 @@ class ListPage extends StatelessWidget {
   }
 }
 ''',
-    hints: ['itemCount 控制数量', 'itemBuilder 返回每一行', 'SnackBar 需要 ScaffoldMessenger'],
-    requiredTokens: ['ListView.builder', 'itemCount: 20', 'itemBuilder', 'ScaffoldMessenger'],
+    hints: [
+      'itemCount 控制数量',
+      'itemBuilder 返回每一行',
+      'SnackBar 需要 ScaffoldMessenger',
+    ],
+    requiredTokens: [
+      'ListView.builder',
+      'itemCount: 20',
+      'itemBuilder',
+      'ScaffoldMessenger',
+    ],
   ),
   'flutter-08': PracticeSpec(
     lessonId: 'flutter-08',
@@ -417,8 +457,17 @@ class _InputPageState extends State<InputPage> {
   }
 }
 ''',
-    hints: ['TextEditingController 记得 dispose', 'controller.text 读取内容', 'setState 刷新界面'],
-    requiredTokens: ['TextEditingController', 'TextField', 'controller.text', 'setState'],
+    hints: [
+      'TextEditingController 记得 dispose',
+      'controller.text 读取内容',
+      'setState 刷新界面',
+    ],
+    requiredTokens: [
+      'TextEditingController',
+      'TextField',
+      'controller.text',
+      'setState',
+    ],
   ),
   'flutter-09': PracticeSpec(
     lessonId: 'flutter-09',
@@ -467,7 +516,11 @@ class _TodoPageState extends State<TodoPage> {
   }
 }
 ''',
-    hints: ['用 List<bool> 保存状态', 'where((e) => e).length 统计已完成', 'setState 内更新列表元素'],
+    hints: [
+      '用 List<bool> 保存状态',
+      'where((e) => e).length 统计已完成',
+      'setState 内更新列表元素',
+    ],
     requiredTokens: ['StatefulWidget', 'setState', 'CheckboxListTile', 'done'],
   ),
   'flutter-10': PracticeSpec(
@@ -567,14 +620,23 @@ class _HttpPageState extends State<HttpPage> {
   }
 }
 ''',
-    hints: ['await http.get(...)', '.timeout(Duration(seconds: 10))', 'try/catch 包住请求'],
-    requiredTokens: ['package:http/http.dart', 'http.get', 'timeout', 'try', 'catch'],
+    hints: [
+      'await http.get(...)',
+      '.timeout(Duration(seconds: 10))',
+      'try/catch 包住请求',
+    ],
+    requiredTokens: [
+      'package:http/http.dart',
+      'http.get',
+      'timeout',
+      'try',
+      'catch',
+    ],
   ),
   'flutter-11': PracticeSpec(
     lessonId: 'flutter-11',
     title: '导航与路由',
-    requirement:
-        '实现两个页面：首页点击按钮 Navigator.push 进入详情页，详情页可以 Navigator.pop 返回。',
+    requirement: '实现两个页面：首页点击按钮 Navigator.push 进入详情页，详情页可以 Navigator.pop 返回。',
     starter: _defaultStarter,
     answer: r'''import 'package:flutter/material.dart';
 
@@ -686,8 +748,18 @@ class _FormPageState extends State<FormPage> {
   }
 }
 ''',
-    hints: ['GlobalKey<FormState> 控制表单', 'validator 返回 String 表示错误', 'validate() 触发校验'],
-    requiredTokens: ['Form(', 'TextFormField', 'validator', 'GlobalKey<FormState>', 'validate()'],
+    hints: [
+      'GlobalKey<FormState> 控制表单',
+      'validator 返回 String 表示错误',
+      'validate() 触发校验',
+    ],
+    requiredTokens: [
+      'Form(',
+      'TextFormField',
+      'validator',
+      'GlobalKey<FormState>',
+      'validate()',
+    ],
   ),
   'flutter-13': PracticeSpec(
     lessonId: 'flutter-13',
@@ -716,7 +788,11 @@ class MyApp extends StatelessWidget {
 }
 ''',
     hints: ['ThemeData 传给 MaterialApp.theme', 'ColorScheme.fromSeed 生成配色'],
-    requiredTokens: ['ThemeData', 'ColorScheme.fromSeed', 'scaffoldBackgroundColor'],
+    requiredTokens: [
+      'ThemeData',
+      'ColorScheme.fromSeed',
+      'scaffoldBackgroundColor',
+    ],
   ),
   'flutter-14': PracticeSpec(
     lessonId: 'flutter-14',
@@ -772,19 +848,22 @@ class _FadePageState extends State<FadePage>
   }
 }
 ''',
-    hints: ['需要 SingleTickerProviderStateMixin', 'Tween.animate(controller)', 'FadeTransition 接收 opacity'],
+    hints: [
+      '需要 SingleTickerProviderStateMixin',
+      'Tween.animate(controller)',
+      'FadeTransition 接收 opacity',
+    ],
     requiredTokens: [
       'AnimationController',
       'Tween<double>',
       'SingleTickerProviderStateMixin',
-      'FadeTransition'
+      'FadeTransition',
     ],
   ),
   'flutter-15': PracticeSpec(
     lessonId: 'flutter-15',
     title: '本地存储',
-    requirement:
-        '用 shared_preferences 保存并读取一个字符串（键名任意），启动时读取并显示。',
+    requirement: '用 shared_preferences 保存并读取一个字符串（键名任意），启动时读取并显示。',
     starter: _defaultStarter,
     answer: r'''import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -838,8 +917,17 @@ class _StorePageState extends State<StorePage> {
   }
 }
 ''',
-    hints: ['SharedPreferences.getInstance()', 'getString / setString', '异步后 setState'],
-    requiredTokens: ['shared_preferences', 'getInstance()', 'getString', 'setString'],
+    hints: [
+      'SharedPreferences.getInstance()',
+      'getString / setString',
+      '异步后 setState',
+    ],
+    requiredTokens: [
+      'shared_preferences',
+      'getInstance()',
+      'getString',
+      'setString',
+    ],
   ),
   'flutter-16': PracticeSpec(
     lessonId: 'flutter-16',
@@ -875,7 +963,13 @@ class MyApp extends StatelessWidget {
 }
 ''',
     hints: ['Image.network 支持 errorBuilder', 'fit: BoxFit.cover 裁剪填充'],
-    requiredTokens: ['Image.network', 'width: 200', 'height: 200', 'BoxFit.cover', 'errorBuilder'],
+    requiredTokens: [
+      'Image.network',
+      'width: 200',
+      'height: 200',
+      'BoxFit.cover',
+      'errorBuilder',
+    ],
   ),
   'flutter-17': PracticeSpec(
     lessonId: 'flutter-17',
@@ -964,8 +1058,17 @@ class _ChannelPageState extends State<ChannelPage> {
   }
 }
 ''',
-    hints: ['MethodChannel 需要唯一通道名', 'invokeMethod 是异步的', '捕获 PlatformException'],
-    requiredTokens: ['MethodChannel', 'invokeMethod', 'PlatformException', 'flutter/services'],
+    hints: [
+      'MethodChannel 需要唯一通道名',
+      'invokeMethod 是异步的',
+      '捕获 PlatformException',
+    ],
+    requiredTokens: [
+      'MethodChannel',
+      'invokeMethod',
+      'PlatformException',
+      'flutter/services',
+    ],
   ),
   'flutter-19': PracticeSpec(
     lessonId: 'flutter-19',
@@ -992,7 +1095,11 @@ void main() {
   });
 }
 ''',
-    hints: ['testWidgets 提供 WidgetTester', 'pumpWidget 挂载组件', 'expect + find.text'],
+    hints: [
+      'testWidgets 提供 WidgetTester',
+      'pumpWidget 挂载组件',
+      'expect + find.text',
+    ],
     requiredTokens: ['testWidgets', 'pumpWidget', 'expect', 'findsOneWidget'],
   ),
   'flutter-20': PracticeSpec(
@@ -1084,7 +1191,11 @@ class ItemCard extends StatelessWidget {
 }
 ''',
     hints: ['拆分出 ItemCard 组件', '能 const 的构造尽量 const', '列表使用 ListView.builder'],
-    requiredTokens: ['class ItemCard', 'ListView.builder', 'const PracticePage'],
+    requiredTokens: [
+      'class ItemCard',
+      'ListView.builder',
+      'const PracticePage',
+    ],
     forbiddenTokens: ['print('],
     strict: true,
   ),

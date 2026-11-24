@@ -24,6 +24,9 @@ class OAuthLinkBus {
 
   bool get isInitialized => _initialized;
 
+  /// App Links 深链流；除 OAuth 外也供插件安装等动作订阅。
+  Stream<Uri> get linkStream => _controller.stream;
+
   /// 最近一次收到的深链（可能来自冷启动，也可能是上一次授权遗留）
   Uri? get lastLink => _lastLink;
 

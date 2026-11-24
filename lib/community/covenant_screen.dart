@@ -51,49 +51,65 @@ class _CovenantScreenState extends State<CovenantScreen> {
       Scaffold(
         backgroundColor: CommunityTheme.bg,
         appBar: AppBar(
-          backgroundColor: Colors.white,
+          backgroundColor: CommunityTheme.card,
           elevation: 0,
-          title: const Text('社区公约', style: TextStyle(fontSize: 16, color: CommunityTheme.textPrimary)),
-          iconTheme: const IconThemeData(color: CommunityTheme.textPrimary),
+          title: Text(
+            '社区公约',
+            style: TextStyle(fontSize: 16, color: CommunityTheme.textPrimary),
+          ),
+          iconTheme: IconThemeData(color: CommunityTheme.textPrimary),
         ),
         body: _loading
             ? const Center(child: CircularProgressIndicator())
             : _error.isNotEmpty
-                ? Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(_error, style: const TextStyle(fontSize: 13)),
-                        const SizedBox(height: 10),
-                        TextButton(onPressed: _load, child: const Text('重试')),
-                      ],
+            ? Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(_error, style: const TextStyle(fontSize: 13)),
+                    const SizedBox(height: 10),
+                    TextButton(onPressed: _load, child: const Text('重试')),
+                  ],
+                ),
+              )
+            : Container(
+                margin: const EdgeInsets.all(16),
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: CommunityTheme.card,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: CommunityTheme.border),
+                ),
+                child: Markdown(
+                  data: _content,
+                  selectable: true,
+                  padding: EdgeInsets.zero,
+                  styleSheet: MarkdownStyleSheet(
+                    h1: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
                     ),
-                  )
-                : Container(
-                    margin: const EdgeInsets.all(16),
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: CommunityTheme.border),
+                    h2: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      height: 2,
                     ),
-                    child: Markdown(
-                      data: _content,
-                      selectable: true,
-                      padding: EdgeInsets.zero,
-                      styleSheet: MarkdownStyleSheet(
-                        h1: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                        h2: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, height: 2),
-                        h3: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-                        p: const TextStyle(fontSize: 13, height: 1.7),
-                        listBullet: const TextStyle(fontSize: 13, height: 1.7),
-                        tableBorder: TableBorder.all(color: CommunityTheme.border),
-                        tableCellsPadding: const EdgeInsets.all(6),
-                        tableHead: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
-                        tableBody: const TextStyle(fontSize: 12),
-                      ),
+                    h3: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
                     ),
+                    p: const TextStyle(fontSize: 13, height: 1.7),
+                    listBullet: const TextStyle(fontSize: 13, height: 1.7),
+                    tableBorder: TableBorder.all(color: CommunityTheme.border),
+                    tableCellsPadding: const EdgeInsets.all(6),
+                    tableHead: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    tableBody: const TextStyle(fontSize: 12),
                   ),
+                ),
+              ),
       ),
     );
   }

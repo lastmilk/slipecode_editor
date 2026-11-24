@@ -26,6 +26,7 @@ class GitHubProvider extends ChangeNotifier {
   GitHubUser? _user;
   String? _token;
   String? _error;
+  String? _grantedScope;
 
   /// projectPath → repoFullName
   final Map<String, String> _repoMap = {};
@@ -33,6 +34,7 @@ class GitHubProvider extends ChangeNotifier {
   GitHubAuthStatus get status => _status;
   GitHubUser? get user => _user;
   String? get error => _error;
+  String? get grantedScope => _grantedScope;
 
   bool get isConfigured => AppConfig.isConfigured;
   bool get isSignedIn => _status == GitHubAuthStatus.signedIn && _token != null;
@@ -49,7 +51,9 @@ class GitHubProvider extends ChangeNotifier {
   Future<void> init() async {
     await _loadRepoMap();
     final token = await GitHubAuthService.instance.savedToken;
+    _grantedScope = await GitHubAuthService.instance.savedScope;
     if (token == null || token.isEmpty) {
+      _grantedScope = null;
       _status = GitHubAuthStatus.signedOut;
       notifyListeners();
       return;
@@ -61,9 +65,9 @@ class GitHubProvider extends ChangeNotifier {
     notifyListeners();
     // 校验 token 并拉取用户信息（网络不可达时降级为未登录，但保留 token 以便下次重试）
     try {
-      final user = await GitHubApiService(token).getAuthenticatedUser().timeout(
-        const Duration(seconds: 10),
-      );
+      final user = await GitHubApiService(token)
+          .getAuthenticatedUser()
+          .timeout(const Duration(seconds: 10));
       _assertGitHubAccount(user);
       _user = user;
       _status = GitHubAuthStatus.signedIn;
@@ -74,6 +78,7 @@ class GitHubProvider extends ChangeNotifier {
         // 401 等确定性失败才清除 token
         await GitHubAuthService.instance.clearToken();
         _token = null;
+        _grantedScope = null;
       }
       _status = GitHubAuthStatus.signedOut;
       _user = null;
@@ -96,6 +101,7 @@ class GitHubProvider extends ChangeNotifier {
     try {
       final result = await GitHubAuthService.instance.signIn();
       _token = result.accessToken;
+      _grantedScope = result.scope;
       // api getter 依赖 signedIn 状态，必须直接构造，否则 api! 会空指针崩溃
       final user = await GitHubApiService(result.accessToken)
           .getAuthenticatedUser()
@@ -118,9 +124,7 @@ class GitHubProvider extends ChangeNotifier {
   void _assertGitHubAccount(GitHubUser user) {
     if (user.login.trim().isEmpty ||
         !user.htmlUrl.trim().toLowerCase().contains('github.com')) {
-      throw StateError(
-        'GitHub 授权返回的不是 GitHub 账号（${user.login}），请检查 OAuth 配置',
-      );
+      throw StateError('GitHub 授权返回的不是 GitHub 账号（${user.login}），请检查 OAuth 配置');
     }
   }
 
@@ -130,6 +134,7 @@ class GitHubProvider extends ChangeNotifier {
   Future<void> signOut() async {
     await GitHubAuthService.instance.clearToken();
     _token = null;
+    _grantedScope = null;
     _user = null;
     _status = GitHubAuthStatus.signedOut;
     notifyListeners();
@@ -228,17 +233,18 @@ class GitHubProvider extends ChangeNotifier {
     // GitHub 仓库名只允许字母/数字/_/-/.，中文名需先清洗
     final safeName = sanitizeRepoName(repoName);
     if (safeName != repoName) {
-      onLog?.call(t('github.log.nameSanitized', {
-        'name': repoName,
-        'safeName': safeName,
-      }));
+      onLog?.call(
+        t('github.log.nameSanitized', {'name': repoName, 'safeName': safeName}),
+      );
     }
     final resolvedName = await uniqueRepoName(safeName);
     if (resolvedName != safeName) {
-      onLog?.call(t('github.log.repoExists', {
-        'name': safeName,
-        'resolved': resolvedName,
-      }));
+      onLog?.call(
+        t('github.log.repoExists', {
+          'name': safeName,
+          'resolved': resolvedName,
+        }),
+      );
     }
 
     onLog?.call(t('github.log.creatingRepo', {'name': resolvedName}));

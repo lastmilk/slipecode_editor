@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:markdown/markdown.dart' as md;
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../agent/mcp_tools.dart';
 import '../l10n/app_localizations.dart';
@@ -10,12 +11,15 @@ import '../providers/account_provider.dart';
 import '../providers/ai_provider.dart';
 import '../providers/editor_provider.dart';
 import '../services/ai_change_journal.dart';
+import '../services/app_globals.dart';
+import '../services/desktop_platform.dart';
 import '../services/knowledge_service.dart';
 import '../services/llm_service.dart';
+import '../services/share_service.dart';
 import '../widgets/ai_interaction_cards.dart';
 import '../widgets/credits_sheet.dart';
+import '../widgets/desktop/desktop_dialogs.dart';
 import '../widgets/llm_model_bar.dart';
-import 'settings_screen.dart';
 
 /// AI 助手对话面板
 ///
@@ -43,6 +47,7 @@ class _AiChatScreenState extends State<AiChatScreen> {
   @override
   void initState() {
     super.initState();
+    aiChatVisibleCount++;
     // 首次打开时加载本地记录（开启云同步则拉取云端）
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -52,6 +57,7 @@ class _AiChatScreenState extends State<AiChatScreen> {
 
   @override
   void dispose() {
+    aiChatVisibleCount = (aiChatVisibleCount - 1).clamp(0, 1 << 30);
     _inputController.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -223,9 +229,7 @@ class _AiChatScreenState extends State<AiChatScreen> {
               IconButton(
                 icon: const Icon(Icons.settings, size: 18),
                 tooltip: t('ai.configureLlm'),
-                onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const SettingsScreen()),
-                ),
+                onPressed: () => showSettingsDialog(context),
               ),
             ],
           ),
@@ -340,6 +344,15 @@ class _AiChatScreenState extends State<AiChatScreen> {
             onResolve: ai.resolvePlanConfirm,
           ),
 
+        // Agent 危险操作审批（安全策略）
+        if (ai.pendingApproval != null)
+          AiApprovalCard(
+            request: ai.pendingApproval!,
+            isDark: isDark,
+            onResolve: (approved, {bool always = false}) =>
+                ai.resolvePendingApproval(approved, always: always),
+          ),
+
         // 错误提示
         if (ai.error != null)
           Padding(
@@ -411,25 +424,57 @@ class _AiChatScreenState extends State<AiChatScreen> {
               Row(
                 children: [
                   Expanded(
-                    child: TextField(
-                      controller: _inputController,
-                      maxLines: null,
-                      keyboardType: TextInputType.multiline,
-                      decoration: InputDecoration(
-                        hintText: ai.isThinking
-                            ? t('ai.thinkingHint')
-                            : t('ai.inputHint'),
-                        isDense: true,
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 10,
+                    child: CallbackShortcuts(
+                      bindings: {
+                        // 桌面端：Ctrl / Cmd + Enter 直接发送
+                        const SingleActivator(
+                          LogicalKeyboardKey.enter,
+                          control: true,
+                        ): _send,
+                        const SingleActivator(
+                          LogicalKeyboardKey.enter,
+                          meta: true,
+                        ): _send,
+                      },
+                      child: Focus(
+                        onKeyEvent: (node, event) {
+                          if (event is! KeyDownEvent &&
+                              event is! KeyRepeatEvent) {
+                            return KeyEventResult.ignored;
+                          }
+                          final isEnter =
+                              event.logicalKey ==
+                                  LogicalKeyboardKey.enter ||
+                              event.logicalKey ==
+                                  LogicalKeyboardKey.numpadEnter;
+                          if (!isEnter) return KeyEventResult.ignored;
+                          // Shift+Enter 换行；Enter 直接发送
+                          if (HardwareKeyboard.instance.isShiftPressed) {
+                            return KeyEventResult.ignored;
+                          }
+                          if (!ai.isThinking) _send();
+                          return KeyEventResult.handled;
+                        },
+                        child: TextField(
+                          controller: _inputController,
+                          maxLines: null,
+                          keyboardType: TextInputType.multiline,
+                          decoration: InputDecoration(
+                            hintText: ai.isThinking
+                                ? t('ai.thinkingHint')
+                                : t('ai.inputHint'),
+                            isDense: true,
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 10,
+                            ),
+                          ),
+                          enabled: !ai.isThinking,
                         ),
                       ),
-                      enabled: !ai.isThinking,
-                      onSubmitted: (_) => _send(),
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -553,9 +598,171 @@ class _MessageBubble extends StatelessWidget {
                   styleSheet: _styleSheet(isDark),
                   builders: {'pre': _CodeBlockBuilder(isDark)},
                 ),
+              if (!isUser && !streaming && content.trim().isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _bubbleAction(
+                      context,
+                      icon: Icons.copy_rounded,
+                      label: '复制',
+                      onTap: () => _copyAll(context),
+                    ),
+                    const SizedBox(width: 6),
+                    _bubbleAction(
+                      context,
+                      icon: Icons.share_outlined,
+                      label: '分享',
+                      onTap: () => _share(context),
+                    ),
+                  ],
+                ),
+              ],
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _bubbleAction(
+    BuildContext context, {
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+  }) {
+    final color = isDark ? Colors.white54 : Colors.black45;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(6),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 13, color: color),
+            const SizedBox(width: 3),
+            Text(label, style: TextStyle(fontSize: 11, color: color)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 复制整段回答（多行 Markdown 原文），而不是只复制一行。
+  Future<void> _copyAll(BuildContext context) async {
+    await Clipboard.setData(ClipboardData(text: content));
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('已复制整段内容'),
+        duration: Duration(seconds: 1),
+      ),
+    );
+  }
+
+  /// 分享整段回答：需登录，链接由服务端生成。
+  Future<void> _share(BuildContext context) async {
+    final account = context.read<AccountProvider>();
+    if (!account.isSignedIn || account.token == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('分享需要登录账号，请先在「我的」中登录'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.showSnackBar(
+      const SnackBar(
+        content: Text('正在生成分享链接…'),
+        duration: Duration(seconds: 30),
+      ),
+    );
+    try {
+      final url = await ShareService.instance.createShare(
+        token: account.token!,
+        title: _shareTitle(content),
+        content: content,
+      );
+      messenger.hideCurrentSnackBar();
+      if (!context.mounted) return;
+      await _showShareResult(context, url);
+    } catch (e) {
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(
+        SnackBar(content: Text('$e'), duration: const Duration(seconds: 3)),
+      );
+    }
+  }
+
+  String _shareTitle(String text) {
+    final firstLine = text
+        .split('\n')
+        .map((line) => line.replaceAll(RegExp(r'^[#>\-\s]+'), '').trim())
+        .firstWhere((line) => line.isNotEmpty, orElse: () => 'AI 对话分享');
+    return firstLine.length > 40 ? '${firstLine.substring(0, 40)}…' : firstLine;
+  }
+
+  Future<void> _showShareResult(BuildContext context, String url) async {
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('分享链接已生成'),
+        content: SizedBox(
+          width: 480,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                '任何拿到链接的人都可以只读查看这段对话：',
+                style: TextStyle(fontSize: 12),
+              ),
+              const SizedBox(height: 10),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Theme.of(ctx).colorScheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: SelectableText(
+                  url,
+                  style: const TextStyle(fontSize: 12),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: url));
+              Navigator.of(ctx).pop();
+            },
+            child: const Text('复制链接'),
+          ),
+          TextButton(
+            onPressed: () async {
+              if (DesktopPlatform.isDesktop) {
+                await DesktopPlatform.openInBrowser(url);
+              } else {
+                await launchUrl(
+                  Uri.parse(url),
+                  mode: LaunchMode.externalApplication,
+                );
+              }
+            },
+            child: const Text('浏览器打开'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('关闭'),
+          ),
+        ],
       ),
     );
   }

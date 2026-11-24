@@ -4,8 +4,8 @@ import 'package:provider/provider.dart';
 import '../providers/account_provider.dart';
 import '../providers/ai_provider.dart';
 import '../providers/settings_provider.dart';
-import '../screens/settings_screen.dart';
 import 'credits_sheet.dart';
+import 'desktop/desktop_dialogs.dart';
 
 /// 对话框底部的模型选择栏
 ///
@@ -220,11 +220,7 @@ Future<void> showLlmModelSheet(BuildContext context) async {
               trailing: const Icon(Icons.chevron_right, size: 18),
               onTap: () {
                 Navigator.of(sheetContext).pop();
-                Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => const SettingsScreen(),
-                  ),
-                );
+                showSettingsDialog(context);
               },
             ),
           ],

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 
 import '../agent/agent_service.dart';
 import '../agent/design_tools.dart';
@@ -19,13 +20,17 @@ import '../providers/editor_provider.dart';
 import '../providers/project_provider.dart';
 import '../providers/settings_provider.dart';
 import '../providers/terminal_provider.dart';
+import '../services/ai_connector_service.dart';
+import '../services/agent_permission_service.dart';
 import '../services/ai_extensions_service.dart';
+import '../services/app_globals.dart';
 import '../services/conversation_service.dart';
 import '../services/design_draft_service.dart';
 import '../services/external_mcp_manager.dart';
 import '../services/live_task_service.dart';
 import '../services/llm_service.dart';
 import '../services/project_agent_settings_service.dart';
+import '../widgets/ai_interaction_cards.dart';
 import '../services/web_search_service.dart';
 
 /// AI 助手状态
@@ -64,15 +69,18 @@ class AiProvider extends ChangeNotifier {
   AiProvider(
     this._settings,
     this._editor,
-    BuildProvider build,
+    this._build,
     this._project,
     this._account, {
+    required ConnectorService connectors,
     TerminalProvider? terminal,
-  }) {
+  }) : _connectors = connectors,
+       _terminal = terminal {
     _toolbox = McpToolbox(
       project: _project,
       editor: _editor,
-      build: build,
+      build: _build,
+      connectors: connectors,
       // 仅桌面端（本地 shell 可用）时向 Agent 暴露终端工具
       terminal: terminal,
     );
@@ -80,16 +88,23 @@ class AiProvider extends ChangeNotifier {
     _toolbox
       ..onAskUser = _askUser
       ..onSubmitPlan = _submitPlan
+      ..onSpawnSubAgent = _spawnSubAgent
       ..onTodoUpdate = (todos) {
         _todos = List.unmodifiable(todos);
         _safeNotify();
       };
+    AgentPermissionService.instance
+      ..handler = _requestPermission
+      ..settingsReader = () => _s;
   }
 
   final SettingsProvider _settings;
   final EditorProvider _editor;
+  final BuildProvider _build;
   final ProjectProvider _project;
   final AccountProvider _account;
+  final ConnectorService _connectors;
+  final TerminalProvider? _terminal;
 
   late final McpToolbox _toolbox;
   late final AgentService _agent;
@@ -131,6 +146,13 @@ class AiProvider extends ChangeNotifier {
   Completer<String>? _questionCompleter;
   Map<String, dynamic>? _pendingPlan;
   Completer<bool>? _planCompleter;
+
+  /// 等待用户审批的 Agent 操作
+  AgentPermissionRequest? _pendingApproval;
+  Completer<bool>? _approvalCompleter;
+
+  /// 子代理编号（用于日志展示）
+  int _subAgentSeq = 0;
   bool _cancelRequested = false;
   String? _lastUserText;
   bool _planApprovedInRun = false;
@@ -197,9 +219,11 @@ class AiProvider extends ChangeNotifier {
   /// 等待用户确认的计划
   Map<String, dynamic>? get pendingPlan => _pendingPlan;
 
+  /// 等待用户审批的危险操作
+  AgentPermissionRequest? get pendingApproval => _pendingApproval;
+
   /// 是否可以在失败 / 中断后重试
-  bool get canRetry =>
-      _error != null && _lastUserText != null && !isThinking;
+  bool get canRetry => _error != null && _lastUserText != null && !isThinking;
 
   /// VibeCoding 是否正在执行（编辑器需锁定）
   bool get vibeBusy => _vibeBusy;
@@ -245,8 +269,8 @@ class AiProvider extends ChangeNotifier {
           final wanted = s.builtinLlmId.isNotEmpty
               ? s.builtinLlmId
               : _account.defaultBuiltinModelId;
-          final selected = models.where((m) => m.id == wanted).firstOrNull ??
-              models.first;
+          final selected =
+              models.where((m) => m.id == wanted).firstOrNull ?? models.first;
           return _ResolvedLlm(
             apiBase: '$base/api/llm',
             apiKey: token,
@@ -342,7 +366,8 @@ class AiProvider extends ChangeNotifier {
         .map((m) => '${m.role == ChatRole.user ? '用户' : 'AI'}：${m.content}')
         .join('\n\n');
     if (transcript.trim().isEmpty) return null;
-    const spec = '你是项目经验沉淀助手。请根据下面的项目任务对话，'
+    const spec =
+        '你是项目经验沉淀助手。请根据下面的项目任务对话，'
         '输出一份可直接存入团队知识库的中文 Markdown 经验文档，严格按以下结构：\n'
         '# 背景与目标\n'
         '# 实施方案与步骤\n'
@@ -359,10 +384,7 @@ class AiProvider extends ChangeNotifier {
         model: llm.model,
         messages: [
           const ChatMessage(role: ChatRole.system, content: spec),
-          ChatMessage(
-            role: ChatRole.user,
-            content: '对话记录：\n\n$transcript',
-          ),
+          ChatMessage(role: ChatRole.user, content: '对话记录：\n\n$transcript'),
         ],
         temperature: 0.3,
       );
@@ -551,6 +573,107 @@ class AiProvider extends ChangeNotifier {
     return _planCompleter!.future;
   }
 
+  /// 审批 Agent 的危险操作（由安全审批卡片调用）
+  Future<bool> _requestPermission(AgentPermissionRequest request) async {
+    // 聊天面板可见时用内联卡片；否则弹出全局对话框，避免等待一个不可见的卡片。
+    if (aiChatVisibleCount <= 0) {
+      final context = appNavigatorKey.currentContext;
+      if (context != null) {
+        final decision = await showAiApprovalDialog(context, request);
+        final approved = decision?.approved ?? false;
+        if (approved && (decision?.always ?? false)) {
+          AgentPermissionService.instance.allowAlways(request.tool);
+        }
+        return approved;
+      }
+      return request.risk != AgentRiskLevel.critical;
+    }
+    final completer = Completer<bool>();
+    _approvalCompleter = completer;
+    _pendingApproval = request;
+    _safeNotify();
+    return completer.future;
+  }
+
+  /// 用户对审批卡片的选择
+  void resolvePendingApproval(bool approved, {bool always = false}) {
+    final request = _pendingApproval;
+    final completer = _approvalCompleter;
+    _pendingApproval = null;
+    _approvalCompleter = null;
+    if (approved && always && request != null) {
+      AgentPermissionService.instance.allowAlways(request.tool);
+    } else if (!approved && always && request != null) {
+      AgentPermissionService.instance.denyAlways(request.tool);
+    }
+    if (completer != null && !completer.isCompleted) {
+      completer.complete(approved);
+    }
+    _safeNotify();
+  }
+
+  /// 派生一个子代理，共享当前项目的工具链但拥有独立上下文。
+  ///
+  /// 子代理不会再获得 spawn_subagent（避免递归），也不会向用户提问；
+  /// 完成后把结果与执行记录作为工具结果返回给主代理。
+  Future<String> _spawnSubAgent(String task, String? context) async {
+    final target = llmTarget;
+    if (target == null) return '错误：尚未配置可用模型，无法启动子代理';
+    final id = ++_subAgentSeq;
+    final subToolbox = McpToolbox(
+      project: _project,
+      editor: _editor,
+      build: _build,
+      connectors: _connectors,
+      terminal: _terminal,
+    );
+    subToolbox.externalManager = _toolbox.externalManager;
+    final subAgent = AgentService(_project, subToolbox);
+    final logs = <String>[];
+    try {
+      final result = await subAgent.run(
+        apiBase: target.apiBase,
+        apiKey: target.apiKey,
+        model: target.model,
+        history: [
+          ChatMessage(
+            role: ChatRole.user,
+            content: context == null ? task : '$task\n\n背景：\n$context',
+          ),
+        ],
+        subAgentPrompt:
+            '你是主 Agent 派生的子代理 #$id，只负责完成分配给你的子任务。\n'
+            '- 不要向用户提问；信息不足时按最合理方案执行，并在结果中说明假设；\n'
+            '- 不要调用 spawn_subagent（你不能再派生代理）；\n'
+            '- 不要做与子任务无关的大范围改动；\n'
+            '- 结束前自行验证改动（读回文件 / 运行相关命令），'
+            '最后用要点汇报：完成内容、涉及文件、验证结果、遗留问题。',
+        isCancelled: () => _cancelRequested,
+        onStep: (step) {
+          logs.add(
+            '${step.running ? '→' : '✓'} ${step.tool}：${step.summary}',
+          );
+        },
+      );
+      final report = StringBuffer()
+        ..writeln('子代理 #$id 完成（工具调用 ${result.steps.length} 次）')
+        ..writeln('--- 汇报 ---')
+        ..writeln(result.content.trim());
+      if (logs.isNotEmpty) {
+        report
+          ..writeln()
+          ..writeln('--- 执行记录 ---')
+          ..writeln(logs.take(60).join('\n'));
+      }
+      final text = report.toString();
+      return text.length > 12000
+          ? '${text.substring(0, 12000)}\n…（已截断）'
+          : text;
+    } catch (e) {
+      return '子代理 #$id 执行失败：$e';
+    }
+  }
+
   /// 用户确认 / 拒绝计划
   void resolvePlanConfirm(bool approved) {
     final completer = _planCompleter;
@@ -570,7 +693,8 @@ class AiProvider extends ChangeNotifier {
   void cancel() {
     if (_status != AiStatus.thinking &&
         _pendingQuestion == null &&
-        _pendingPlan == null) {
+        _pendingPlan == null &&
+        _pendingApproval == null) {
       return;
     }
     _cancelRequested = true;
@@ -585,6 +709,12 @@ class AiProvider extends ChangeNotifier {
     _planCompleter = null;
     if (plan != null && !plan.isCompleted) {
       plan.complete(false);
+    }
+    _pendingApproval = null;
+    final approval = _approvalCompleter;
+    _approvalCompleter = null;
+    if (approval != null && !approval.isCompleted) {
+      approval.complete(false);
     }
     _status = AiStatus.idle;
     _isStreaming = false;
@@ -668,12 +798,10 @@ class AiProvider extends ChangeNotifier {
     }
     if (_designMode) {
       _designDraft ??= await _createAiDesignDraft(text);
-      final toolkit = DesignToolkit(
-        draft: _designDraft!,
-        onChanged: () {},
-      );
+      final toolkit = DesignToolkit(draft: _designDraft!, onChanged: () {});
       extraTools.addAll(toolkit.tools);
-      commandContext = '\n\n[设计稿优先模式]\n'
+      commandContext =
+          '\n\n[设计稿优先模式]\n'
           '请先使用 design_* 工具完善设计稿（id=${_designDraft!.id}），'
           '设计完成后基于该蓝图继续执行用户的实现需求。\n'
           '${toolkit.summary}';
@@ -835,9 +963,7 @@ class AiProvider extends ChangeNotifier {
             id: 'ai',
             kind: 'ai',
             title: 'SLIPE AI',
-            text: (planOnly && !_planApprovedInRun)
-                ? '计划已生成，等待确认'
-                : '任务已完成',
+            text: (planOnly && !_planApprovedInRun) ? '计划已生成，等待确认' : '任务已完成',
           ),
         );
       }
@@ -915,9 +1041,10 @@ class AiProvider extends ChangeNotifier {
       // 1) 移除触发词所在行并落盘，保证磁盘与编辑器一致
       final text = _editor.activeFile?.content ?? '';
       final lineNumber =
-          '\n'.allMatches(text.substring(0, lineStart.clamp(0, text.length)))
-                  .length +
-              1;
+          '\n'
+              .allMatches(text.substring(0, lineStart.clamp(0, text.length)))
+              .length +
+          1;
       await _editor.replaceRangeAndSave(filePath, lineStart, lineEnd, '');
 
       // 2) 交给 Agent 用工具实现需求
@@ -928,7 +1055,8 @@ class AiProvider extends ChangeNotifier {
         history: [
           ChatMessage(
             role: ChatRole.user,
-            content: '在项目文件 `$filePath` 的第 $lineNumber 行附近实现以下需求：\n'
+            content:
+                '在项目文件 `$filePath` 的第 $lineNumber 行附近实现以下需求：\n'
                 '$requirement\n\n'
                 '要求：直接使用工具修改文件，不要只在回复里贴代码；'
                 '保持现有缩进与代码风格；完成后简要说明改了什么。',
@@ -992,7 +1120,16 @@ class AiProvider extends ChangeNotifier {
     _searchMode = false;
     _mcpAddMode = false;
     _safeNotify();
-    await ensureCloudHistoryLoaded();
+    // 历史与扩展可能依赖 I/O 或网络，后台加载以避免阻塞项目切换。
+    unawaited(ensureCloudHistoryLoaded());
+    unawaited(() async {
+      try {
+        await _prepareExtensions();
+        _safeNotify();
+      } catch (error) {
+        debugPrint('切换项目后刷新 MCP / Skills 失败：$error');
+      }
+    }());
   }
 
   /// 创建一份 AI 设计稿（/design 指令首次触发时）
@@ -1023,10 +1160,7 @@ class AiProvider extends ChangeNotifier {
         'type': 'object',
         'properties': {
           'query': {'type': 'string', 'description': '搜索词（1-128 字符）'},
-          'count': {
-            'type': 'integer',
-            'description': '返回条数，默认 5，最多 10',
-          },
+          'count': {'type': 'integer', 'description': '返回条数，默认 5，最多 10'},
         },
         'required': ['query'],
       },
@@ -1095,8 +1229,8 @@ class AiProvider extends ChangeNotifier {
           final cmdArgs = rawArgs is List
               ? rawArgs.map((e) => e.toString()).toList()
               : rawArgs is String && rawArgs.trim().isNotEmpty
-                  ? rawArgs.trim().split(RegExp(r'\s+'))
-                  : <String>[];
+              ? rawArgs.trim().split(RegExp(r'\s+'))
+              : <String>[];
           await AiExtensionsService.instance.addServer(
             name: name,
             transport: transport,

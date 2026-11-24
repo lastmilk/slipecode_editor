@@ -19,8 +19,8 @@ class PracticeFloatingBall extends StatelessWidget {
         final color = passed
             ? const Color(0xFF00A870)
             : result == null
-                ? const Color(0xFF2D6CF6)
-                : const Color(0xFFFF8B00);
+            ? const Color(0xFF2D6CF6)
+            : const Color(0xFFFF8B00);
         return Stack(
           fit: StackFit.expand,
           children: [
@@ -50,8 +50,8 @@ class PracticeFloatingBall extends StatelessWidget {
                         passed
                             ? Icons.check_rounded
                             : result == null
-                                ? Icons.school_outlined
-                                : Icons.priority_high_rounded,
+                            ? Icons.school_outlined
+                            : Icons.priority_high_rounded,
                         color: Colors.white,
                         size: 26,
                       ),
@@ -59,7 +59,9 @@ class PracticeFloatingBall extends StatelessWidget {
                     const SizedBox(height: 4),
                     Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 7, vertical: 2),
+                        horizontal: 7,
+                        vertical: 2,
+                      ),
                       decoration: BoxDecoration(
                         color: Colors.black.withValues(alpha: 0.66),
                         borderRadius: BorderRadius.circular(8),
@@ -132,8 +134,11 @@ class _PracticeSheetState extends State<PracticeSheet> {
             padding: const EdgeInsets.fromLTRB(16, 0, 8, 4),
             child: Row(
               children: [
-                const Icon(Icons.school_rounded,
-                    size: 20, color: Color(0xFF2D6CF6)),
+                const Icon(
+                  Icons.school_rounded,
+                  size: 20,
+                  color: Color(0xFF2D6CF6),
+                ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
@@ -165,8 +170,10 @@ class _PracticeSheetState extends State<PracticeSheet> {
                     const SizedBox(height: 14),
                     const Text(
                       '需求',
-                      style:
-                          TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                     const SizedBox(height: 6),
                     Text(
@@ -190,8 +197,10 @@ class _PracticeSheetState extends State<PracticeSheet> {
                                       color: Colors.white,
                                     ),
                                   )
-                                : const Icon(Icons.fact_check_outlined,
-                                    size: 16),
+                                : const Icon(
+                                    Icons.fact_check_outlined,
+                                    size: 16,
+                                  ),
                             label: const Text('提交检查'),
                           ),
                         ),
@@ -271,8 +280,8 @@ class _PracticeSheetState extends State<PracticeSheet> {
     final color = result == null
         ? const Color(0xFF2D6CF6)
         : passed
-            ? const Color(0xFF00A870)
-            : const Color(0xFFFF8B00);
+        ? const Color(0xFF00A870)
+        : const Color(0xFFFF8B00);
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -289,8 +298,8 @@ class _PracticeSheetState extends State<PracticeSheet> {
                 result == null
                     ? Icons.tips_and_updates_outlined
                     : passed
-                        ? Icons.check_circle_rounded
-                        : Icons.error_outline_rounded,
+                    ? Icons.check_circle_rounded
+                    : Icons.error_outline_rounded,
                 size: 18,
                 color: color,
               ),
@@ -299,8 +308,8 @@ class _PracticeSheetState extends State<PracticeSheet> {
                 result == null
                     ? '执行检查后可查看结果'
                     : passed
-                        ? '检测通过'
-                        : '还需要继续完善',
+                    ? '检测通过'
+                    : '还需要继续完善',
                 style: TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w700,

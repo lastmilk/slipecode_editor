@@ -8,6 +8,8 @@ import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 
 import '../config/app_config.dart';
+import 'desktop_oauth_prompt.dart';
+import 'desktop_platform.dart';
 import 'github_auth_service.dart' show HttpExceptionWithBody;
 import 'oauth_link_bus.dart';
 
@@ -116,6 +118,25 @@ class GiteeAuthService {
     final cancel = Completer<Uri>();
     _cancel = cancel;
     try {
+      // 桌面端没有移动深链：外部浏览器授权后由用户粘贴回调地址
+      if (DesktopPlatform.isDesktop) {
+        final launched = await launchUrl(
+          authorizeUri,
+          mode: LaunchMode.externalApplication,
+        );
+        if (!launched) {
+          throw StateError('无法打开浏览器完成 Gitee 授权');
+        }
+        final pasted = await DesktopOAuthPrompt.ask(
+          hint: 'slipe://oauth/gitee/callback',
+        );
+        if (pasted == null) throw StateError('已取消授权');
+        if (!_isCallbackUri(pasted)) {
+          throw StateError('回调地址与预期不符，请复制完整链接后重试');
+        }
+        return await _finishSignIn(pasted, state);
+      }
+
       final launched = await launchUrl(
         authorizeUri,
         // 同 GitHub：用应用内浏览器视图，避免第三方浏览器/App 拦截导致 404
@@ -135,29 +156,34 @@ class GiteeAuthService {
       ]);
       OAuthLinkBus.instance.consume(callback);
 
-      if (callback.queryParameters['state'] != state) {
-        throw StateError('Gitee 授权回调 state 校验失败');
-      }
-      final error = callback.queryParameters['error'];
-      if (error != null) {
-        throw StateError(
-          'Gitee 授权被拒绝：$error ${callback.queryParameters['error_description'] ?? ''}',
-        );
-      }
-      final code = callback.queryParameters['code'];
-      if (code == null || code.isEmpty) {
-        throw StateError('Gitee 授权回调缺少 code');
-      }
-
-      final result = await _exchangeCode(code);
-      await _save(result);
-      return result;
+      return await _finishSignIn(callback, state);
     } finally {
       if (!cancel.isCompleted) {
         cancel.completeError(StateError('已取消授权'));
       }
       if (identical(_cancel, cancel)) _cancel = null;
     }
+  }
+
+  /// 校验回调并换取 token（移动端深链 / 桌面粘贴共用）
+  Future<GiteeAuthResult> _finishSignIn(Uri callback, String state) async {
+    if (callback.queryParameters['state'] != state) {
+      throw StateError('Gitee 授权回调 state 校验失败');
+    }
+    final error = callback.queryParameters['error'];
+    if (error != null) {
+      throw StateError(
+        'Gitee 授权被拒绝：$error ${callback.queryParameters['error_description'] ?? ''}',
+      );
+    }
+    final code = callback.queryParameters['code'];
+    if (code == null || code.isEmpty) {
+      throw StateError('Gitee 授权回调缺少 code');
+    }
+
+    final result = await _exchangeCode(code);
+    await _save(result);
+    return result;
   }
 
   bool _isCallbackUri(Uri uri) {

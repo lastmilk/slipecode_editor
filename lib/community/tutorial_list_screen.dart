@@ -34,7 +34,9 @@ class _TutorialListScreenState extends State<TutorialListScreen> {
       _error = '';
     });
     try {
-      final manifest = await TutorialService.instance.fetchManifest(force: true);
+      final manifest = await TutorialService.instance.fetchManifest(
+        force: true,
+      );
       final progress = await TutorialService.instance.loadProgress();
       if (!mounted) return;
       setState(() {
@@ -61,12 +63,18 @@ class _TutorialListScreenState extends State<TutorialListScreen> {
       Scaffold(
         backgroundColor: CommunityTheme.bg,
         appBar: AppBar(
-          backgroundColor: Colors.white,
+          backgroundColor: CommunityTheme.card,
           elevation: 0,
-          title: const Text('开发快速教学', style: TextStyle(fontSize: 16, color: CommunityTheme.textPrimary)),
-          iconTheme: const IconThemeData(color: CommunityTheme.textPrimary),
+          title: Text(
+            '开发快速教学',
+            style: TextStyle(fontSize: 16, color: CommunityTheme.textPrimary),
+          ),
+          iconTheme: IconThemeData(color: CommunityTheme.textPrimary),
           actions: [
-            IconButton(onPressed: _load, icon: const Icon(Icons.refresh, size: 20)),
+            IconButton(
+              onPressed: _load,
+              icon: const Icon(Icons.refresh, size: 20),
+            ),
           ],
         ),
         body: _buildBody(),
@@ -111,9 +119,7 @@ class _TutorialListScreenState extends State<TutorialListScreen> {
   }
 
   Widget _trackHeader(TutorialTrack track) {
-    final done = track.lessons
-        .where((l) => (_progress[l.id] ?? 0) > 0)
-        .length;
+    final done = track.lessons.where((l) => (_progress[l.id] ?? 0) > 0).length;
     final percent = track.lessons.isEmpty ? 0.0 : done / track.lessons.length;
     return Container(
       padding: const EdgeInsets.all(14),
@@ -133,7 +139,11 @@ class _TutorialListScreenState extends State<TutorialListScreen> {
               Expanded(
                 child: Text(
                   track.name,
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: Colors.white),
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.white,
+                  ),
                 ),
               ),
               Text(
@@ -146,7 +156,11 @@ class _TutorialListScreenState extends State<TutorialListScreen> {
             const SizedBox(height: 4),
             Text(
               track.description,
-              style: const TextStyle(fontSize: 11, height: 1.5, color: Colors.white70),
+              style: const TextStyle(
+                fontSize: 11,
+                height: 1.5,
+                color: Colors.white70,
+              ),
             ),
           ],
           const SizedBox(height: 10),
@@ -180,7 +194,7 @@ class _TutorialListScreenState extends State<TutorialListScreen> {
         margin: const EdgeInsets.only(bottom: 8),
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: CommunityTheme.card,
           borderRadius: BorderRadius.circular(10),
           border: Border.all(color: CommunityTheme.border),
         ),
@@ -200,7 +214,11 @@ class _TutorialListScreenState extends State<TutorialListScreen> {
                   ? const Icon(Icons.check, size: 18, color: Colors.white)
                   : Text(
                       '${lesson.order}',
-                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: CommunityTheme.brand),
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: CommunityTheme.brand,
+                      ),
                     ),
             ),
             const SizedBox(width: 10),
@@ -210,7 +228,10 @@ class _TutorialListScreenState extends State<TutorialListScreen> {
                 children: [
                   Text(
                     lesson.title,
-                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                   if (lesson.summary.isNotEmpty) ...[
                     const SizedBox(height: 2),
@@ -218,30 +239,60 @@ class _TutorialListScreenState extends State<TutorialListScreen> {
                       lesson.summary,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 11, height: 1.4, color: CommunityTheme.textSecondary),
+                      style: TextStyle(
+                        fontSize: 11,
+                        height: 1.4,
+                        color: CommunityTheme.textSecondary,
+                      ),
                     ),
                   ],
                   const SizedBox(height: 4),
                   Row(
                     children: [
                       if (lesson.durationMin > 0)
-                        Text('${lesson.durationMin} 分钟', style: const TextStyle(fontSize: 10, color: CommunityTheme.textSecondary)),
+                        Text(
+                          '${lesson.durationMin} 分钟',
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: CommunityTheme.textSecondary,
+                          ),
+                        ),
                       if (lesson.assets.isNotEmpty) ...[
                         const SizedBox(width: 10),
-                        const Icon(Icons.folder_zip_outlined, size: 12, color: CommunityTheme.textSecondary),
+                        Icon(
+                          Icons.folder_zip_outlined,
+                          size: 12,
+                          color: CommunityTheme.textSecondary,
+                        ),
                         const SizedBox(width: 2),
-                        Text('含资源', style: const TextStyle(fontSize: 10, color: CommunityTheme.textSecondary)),
+                        Text(
+                          '含资源',
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: CommunityTheme.textSecondary,
+                          ),
+                        ),
                       ],
                       if (step > 0 && !finished) ...[
                         const SizedBox(width: 10),
-                        Text('进行中', style: const TextStyle(fontSize: 10, color: Color(0xFFED7B2F))),
+                        Text(
+                          '进行中',
+                          style: const TextStyle(
+                            fontSize: 10,
+                            color: Color(0xFFED7B2F),
+                          ),
+                        ),
                       ],
                     ],
                   ),
                 ],
               ),
             ),
-            const Icon(Icons.chevron_right, size: 18, color: CommunityTheme.textSecondary),
+            Icon(
+              Icons.chevron_right,
+              size: 18,
+              color: CommunityTheme.textSecondary,
+            ),
           ],
         ),
       ),

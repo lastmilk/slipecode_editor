@@ -107,7 +107,10 @@ class _PayloadTabState extends State<PayloadTab> {
           children: [
             const Padding(
               padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
-              child: Text('选择要发布到社区的 Payload', style: TextStyle(fontWeight: FontWeight.w600)),
+              child: Text(
+                '选择要发布到社区的 Payload',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
             ),
             for (final spec in roots)
               ListTile(
@@ -116,7 +119,12 @@ class _PayloadTabState extends State<PayloadTab> {
                 subtitle: const Text('Root Payload'),
                 onTap: () {
                   Navigator.pop(sheetContext);
-                  _publish(kind: 'root', name: spec.name, description: spec.description, spec: spec.toMap());
+                  _publish(
+                    kind: 'root',
+                    name: spec.name,
+                    description: spec.description,
+                    spec: spec.toMap(),
+                  );
                 },
               ),
             for (final spec in systems)
@@ -126,7 +134,12 @@ class _PayloadTabState extends State<PayloadTab> {
                 subtitle: const Text('System Payload'),
                 onTap: () {
                   Navigator.pop(sheetContext);
-                  _publish(kind: 'system', name: spec.name, description: spec.description, spec: spec.toMap());
+                  _publish(
+                    kind: 'system',
+                    name: spec.name,
+                    description: spec.description,
+                    spec: spec.toMap(),
+                  );
                 },
               ),
             for (final spec in blocks)
@@ -182,8 +195,14 @@ class _PayloadTabState extends State<PayloadTab> {
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('提交审核')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('提交审核'),
+          ),
         ],
       ),
     );
@@ -241,7 +260,10 @@ class _PayloadTabState extends State<PayloadTab> {
                   setState(() => _showMine = !_showMine);
                   if (_showMine) _loadMine();
                 },
-                child: Text(_showMine ? '看社区' : '我的发布', style: const TextStyle(fontSize: 12)),
+                child: Text(
+                  _showMine ? '看社区' : '我的发布',
+                  style: const TextStyle(fontSize: 12),
+                ),
               ),
             ],
           ),
@@ -275,11 +297,16 @@ class _PayloadTabState extends State<PayloadTab> {
         decoration: BoxDecoration(
           color: selected ? CommunityTheme.brand : Colors.transparent,
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: selected ? CommunityTheme.brand : CommunityTheme.border),
+          border: Border.all(
+            color: selected ? CommunityTheme.brand : CommunityTheme.border,
+          ),
         ),
         child: Text(
           label,
-          style: TextStyle(fontSize: 11, color: selected ? Colors.white : CommunityTheme.textSecondary),
+          style: TextStyle(
+            fontSize: 11,
+            color: selected ? Colors.white : CommunityTheme.textSecondary,
+          ),
         ),
       ),
     );
@@ -332,7 +359,7 @@ class _PackageCard extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: CommunityTheme.card,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: CommunityTheme.border),
       ),
@@ -343,10 +370,17 @@ class _PackageCard extends StatelessWidget {
             children: [
               Text(
                 pkg.name,
-                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
               const SizedBox(width: 8),
-              TTag(_kindLabel, size: TTagSize.small, variant: TTagVariant.light),
+              TTag(
+                _kindLabel,
+                size: TTagSize.small,
+                variant: TTagVariant.light,
+              ),
               const Spacer(),
               if (mine) _statusTag(pkg.status),
             ],
@@ -357,7 +391,11 @@ class _PackageCard extends StatelessWidget {
               pkg.description,
               maxLines: 3,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 12, height: 1.5, color: CommunityTheme.textSecondary),
+              style: TextStyle(
+                fontSize: 12,
+                height: 1.5,
+                color: CommunityTheme.textSecondary,
+              ),
             ),
           ],
           const SizedBox(height: 8),
@@ -365,12 +403,18 @@ class _PackageCard extends StatelessWidget {
             children: [
               Text(
                 pkg.authorName.isEmpty ? '匿名' : pkg.authorName,
-                style: const TextStyle(fontSize: 11, color: CommunityTheme.textSecondary),
+                style: TextStyle(
+                  fontSize: 11,
+                  color: CommunityTheme.textSecondary,
+                ),
               ),
               const SizedBox(width: 12),
               Text(
                 '${pkg.downloads} 次下载',
-                style: const TextStyle(fontSize: 11, color: CommunityTheme.textSecondary),
+                style: TextStyle(
+                  fontSize: 11,
+                  color: CommunityTheme.textSecondary,
+                ),
               ),
               const Spacer(),
               if (!mine && pkg.status == 'approved')
@@ -397,11 +441,26 @@ class _PackageCard extends StatelessWidget {
   Widget _statusTag(String status) {
     switch (status) {
       case 'approved':
-        return TTag('已通过', size: TTagSize.small, colorPreset: TTagColorPreset.success, variant: TTagVariant.light);
+        return TTag(
+          '已通过',
+          size: TTagSize.small,
+          colorPreset: TTagColorPreset.success,
+          variant: TTagVariant.light,
+        );
       case 'rejected':
-        return TTag('已驳回', size: TTagSize.small, colorPreset: TTagColorPreset.danger, variant: TTagVariant.light);
+        return TTag(
+          '已驳回',
+          size: TTagSize.small,
+          colorPreset: TTagColorPreset.danger,
+          variant: TTagVariant.light,
+        );
       default:
-        return TTag('待审核', size: TTagSize.small, colorPreset: TTagColorPreset.warning, variant: TTagVariant.light);
+        return TTag(
+          '待审核',
+          size: TTagSize.small,
+          colorPreset: TTagColorPreset.warning,
+          variant: TTagVariant.light,
+        );
     }
   }
 }

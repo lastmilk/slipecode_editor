@@ -1,0 +1,120 @@
+// GENERATED FROM api/schema.json. Run tool/generate_schema.dart.
+const slipeApiSchemaJson = r'''
+{
+  "apiVersion": 1,
+  "limits": {
+    "jsonBytes": 1048576,
+    "jsonDepth": 64,
+    "defaultMemoryBytes": 33554432,
+    "defaultInstructionBudget": 200000,
+    "maximumAopDepth": 32
+  },
+  "capabilities": ["events", "editor.modify", "configuration", "commands"],
+  "definitions": {
+    "completionItem": {
+      "type": "object",
+      "required": ["label", "insertText", "kindLabel"],
+      "properties": {
+        "label": {"type": "string", "minLength": 1},
+        "insertText": {"type": "string"},
+        "kindLabel": {"type": "string"},
+        "detail": {"type": "string"},
+        "kind": {"type": "string", "enum": ["keyword", "widget", "snippet", "identifier", "member"]}
+      },
+      "additionalProperties": false
+    }
+  },
+  "services": {
+    "editor": {
+      "operations": {
+        "openFile": {
+          "request": {"type": "object", "required": ["path"], "properties": {"path": {"type": "string", "minLength": 1}}, "additionalProperties": false},
+          "response": {"type": "object", "required": ["path", "opened"], "properties": {"path": {"type": "string"}, "opened": {"type": "boolean"}}, "additionalProperties": false}
+        },
+        "saveFile": {
+          "request": {"type": "object", "required": ["path", "content"], "properties": {"path": {"type": "string", "minLength": 1}, "content": {"type": "string"}}, "additionalProperties": false},
+          "response": {"type": "object", "required": ["path", "saved"], "properties": {"path": {"type": "string"}, "saved": {"type": "boolean"}}, "additionalProperties": false}
+        },
+        "applyEdit": {
+          "request": {"type": "object", "required": ["path", "content"], "properties": {"path": {"type": "string", "minLength": 1}, "content": {"type": "string"}}, "additionalProperties": false},
+          "response": {"type": "object", "required": ["path", "applied"], "properties": {"path": {"type": "string"}, "applied": {"type": "boolean"}}, "additionalProperties": false}
+        }
+      }
+    },
+    "completion": {
+      "operations": {
+        "list": {
+          "request": {"type": "object", "required": ["language", "text", "cursor", "items"], "properties": {"language": {"type": "string"}, "text": {"type": "string"}, "cursor": {"type": "integer", "minimum": 0}, "items": {"type": "array", "maxItems": 256, "items": {"type": "object", "required": ["label", "insertText", "kindLabel"], "properties": {"label": {"type": "string", "minLength": 1}, "insertText": {"type": "string"}, "kindLabel": {"type": "string"}, "detail": {"type": "string"}, "kind": {"type": "string", "enum": ["keyword", "widget", "snippet", "identifier", "member"]}}, "additionalProperties": false}}}, "additionalProperties": false},
+          "response": {"type": "object", "required": ["items"], "properties": {"items": {"type": "array", "maxItems": 256, "items": {"type": "object", "required": ["label", "insertText", "kindLabel"], "properties": {"label": {"type": "string", "minLength": 1}, "insertText": {"type": "string"}, "kindLabel": {"type": "string"}, "detail": {"type": "string"}, "kind": {"type": "string", "enum": ["keyword", "widget", "snippet", "identifier", "member"]}}, "additionalProperties": false}}}, "additionalProperties": false}
+        }
+      }
+    },
+    "command": {
+      "operations": {
+        "execute": {
+          "request": {"type": "object", "required": ["id"], "properties": {"id": {"type": "string", "minLength": 1}}, "additionalProperties": false},
+          "response": {"type": "any"}
+        }
+      }
+    },
+    "ui": {
+      "operations": {
+        "notify": {
+          "request": {"type": "object", "required": ["message"], "properties": {"message": {"type": "string", "minLength": 1, "maxLength": 2000}, "level": {"type": "string", "enum": ["info", "warning", "error"]}}, "additionalProperties": false},
+          "response": {"type": "object", "required": ["shown"], "properties": {"shown": {"type": "boolean"}}, "additionalProperties": false}
+        }
+      }
+    }
+  },
+  "events": {
+    "file.willOpen": {"phase": "will"},
+    "file.didOpen": {"phase": "did"},
+    "file.willSave": {"phase": "will"},
+    "file.didSave": {"phase": "did"},
+    "command.willExecute": {"phase": "will"},
+    "command.didExecute": {"phase": "did"},
+    "editor.key": {"phase": "will"}
+  },
+  "event": {
+    "type": "object",
+    "required": ["type", "phase", "source", "payload", "eventId"],
+    "properties": {
+      "type": {"type": "string", "minLength": 1},
+      "phase": {"type": "string", "enum": ["will", "did"]},
+      "source": {"type": "string", "minLength": 1},
+      "payload": {"type": "object"},
+      "eventId": {"type": "string", "minLength": 1}
+    },
+    "additionalProperties": false
+  },
+  "eventDecision": {
+    "type": "object",
+    "required": ["action"],
+    "properties": {
+      "action": {"type": "string", "enum": ["continue", "modify", "swallow"]},
+      "event": {"type": "object"}
+    },
+    "additionalProperties": false
+  },
+  "configuration": {
+    "type": "object",
+    "properties": {
+      "editor.fontSize": {"type": "number", "minimum": 11, "maximum": 22},
+      "editor.fontFamily": {"type": "string"},
+      "editor.completionEnabled": {"type": "boolean"},
+      "view.themeMode": {"type": "string", "enum": ["system", "light", "dark"]},
+      "view.language": {"type": "string", "enum": ["zh", "zhHant", "en"]},
+      "view.soloLayout": {"type": "boolean"},
+      "view.sidebarVisible": {"type": "boolean"},
+      "view.panelVisible": {"type": "boolean"},
+      "view.aiPanelWidth": {"type": "number", "minimum": 280, "maximum": 720},
+      "view.windowWidth": {"type": "number", "minimum": 1024},
+      "view.windowHeight": {"type": "number", "minimum": 680},
+      "lsp.enabled": {"type": "boolean"},
+      "terminal.fontSize": {"type": "number", "minimum": 8, "maximum": 48}
+    },
+    "additionalProperties": false
+  }
+}
+
+''';

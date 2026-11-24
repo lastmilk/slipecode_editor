@@ -1,0 +1,4 @@
+LuaJIT rolling release v2.1
+commit 96f7b297326e9fd454b7186c6858b2773f94a0dc
+.relver timestamp 1795119671
+FFI is disabled at compile time; see tool/regenerate_luajit.sh and the platform build files.

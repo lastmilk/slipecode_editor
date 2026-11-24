@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<plugin id="example.hello" name="Lua Hello" version="1.0.0"
+        publisher="SLIPE" api="1">
+  <entry>main.lua</entry>
+  <config>config.lua</config>
+  <capabilities>
+    <capability name="configuration" />
+    <capability name="commands" />
+  </capabilities>
+</plugin>

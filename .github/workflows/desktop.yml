@@ -1,0 +1,171 @@
+name: Desktop Build
+
+on:
+  push:
+    branches: [main, ci/lua-plugin-system]
+    paths-ignore:
+      - '**.md'
+  workflow_dispatch:
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Linux toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang cmake ninja-build pkg-config \
+            libgtk-3-dev libblkid-dev liblzma-dev libstdc++-12-dev
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Pub get
+        run: flutter pub get
+
+      - name: Pub get (slipe_lua)
+        working-directory: packages/slipe_lua
+        run: flutter pub get
+
+      - name: Check generated Lua API schema
+        working-directory: packages/slipe_lua
+        run: dart run tool/generate_schema.dart --check
+
+      - name: Analyze
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+
+      - name: Build Linux
+        # 自定义 Payload 图标为非 const IconData，必须关闭图标 tree-shaking
+        run: flutter build linux --release --no-tree-shake-icons
+
+      - name: Verify Linux LuaJIT bundle
+        run: |
+          library=build/linux/x64/release/bundle/lib/libslipe_lua.so
+          test -f "$library"
+          description="$(file -b "$library")"
+          [[ "$description" == *"ELF 64-bit"* && "$description" == *"x86-64"* ]]
+
+      - name: Run Linux LuaJIT FFI smoke test
+        working-directory: packages/slipe_lua
+        env:
+          SLIPE_LUA_LIBRARY: ${{ github.workspace }}/build/linux/x64/release/bundle/lib/libslipe_lua.so
+        run: flutter test test/slipe_lua_test.dart --plain-name "executes real LuaJIT arithmetic and preserves UTF-8"
+
+      - name: Upload Linux bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: slipe-linux-x64
+          path: build/linux/x64/release/bundle
+          if-no-files-found: error
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Pub get
+        run: flutter pub get
+
+      - name: Pub get (slipe_lua)
+        working-directory: packages/slipe_lua
+        run: flutter pub get
+
+      - name: Build Windows
+        run: flutter build windows --release --no-tree-shake-icons
+
+      - name: Verify Windows LuaJIT bundle
+        shell: pwsh
+        run: |
+          $library = "build/windows/x64/runner/Release/slipe_lua.dll"
+          if (-not (Test-Path $library -PathType Leaf)) { throw "Missing $library" }
+          $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path $library))
+          $peOffset = [BitConverter]::ToInt32($bytes, 0x3c)
+          $machine = [BitConverter]::ToUInt16($bytes, $peOffset + 4)
+          if ($machine -ne 0x8664) { throw "Expected x64 DLL, machine was 0x$($machine.ToString('x4'))" }
+
+      - name: Run Windows LuaJIT FFI smoke test
+        working-directory: packages/slipe_lua
+        env:
+          SLIPE_LUA_LIBRARY: ${{ github.workspace }}/build/windows/x64/runner/Release/slipe_lua.dll
+        run: flutter test test/slipe_lua_test.dart --plain-name "executes real LuaJIT arithmetic and preserves UTF-8"
+
+      - name: Upload Windows bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: slipe-windows-x64
+          path: build/windows/x64/runner/Release
+          if-no-files-found: error
+
+  macos:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: macos-15-intel
+            native-arch: x86_64
+          - arch: arm64
+            runner: macos-latest
+            native-arch: arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Pub get
+        run: flutter pub get
+
+      - name: Pub get (slipe_lua)
+        working-directory: packages/slipe_lua
+        run: flutter pub get
+
+      - name: Verify macOS runner architecture
+        run: test "$(uname -m)" = "${{ matrix.native-arch }}"
+
+      - name: Build macOS
+        run: flutter build macos --release --no-tree-shake-icons
+
+      - name: Verify macOS LuaJIT bundle, architecture and entitlements
+        run: |
+          app=build/macos/Build/Products/Release/slipe_editor.app
+          library="$app/Contents/Frameworks/libslipe_lua.dylib"
+          test -f "$library"
+          test "$(lipo -archs "$library")" = "${{ matrix.native-arch }}"
+          codesign -d --entitlements :- --xml "$app" > "$RUNNER_TEMP/slipe-entitlements.plist"
+          entitlements="$RUNNER_TEMP/slipe-entitlements.plist"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.app-sandbox' "$entitlements")" = false
+          test "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.cs.allow-jit' "$entitlements")" = true
+          test "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.cs.allow-unsigned-executable-memory' "$entitlements")" = true
+
+      - name: Run macOS LuaJIT FFI smoke test
+        working-directory: packages/slipe_lua
+        env:
+          SLIPE_LUA_LIBRARY: ${{ github.workspace }}/build/macos/Build/Products/Release/slipe_editor.app/Contents/Frameworks/libslipe_lua.dylib
+        run: flutter test test/slipe_lua_test.dart --plain-name "executes real LuaJIT arithmetic and preserves UTF-8"
+
+      - name: Upload macOS bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: slipe-macos-${{ matrix.arch }}
+          path: build/macos/Build/Products/Release
+          if-no-files-found: error

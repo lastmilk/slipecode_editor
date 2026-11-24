@@ -28,6 +28,8 @@ class GiteeProvider extends ChangeNotifier {
   GiteeUser? _user;
   String? _token;
   String? _error;
+  String? _grantedScope;
+  DateTime? _expiresAt;
 
   /// projectPath → repoFullName
   final Map<String, String> _repoMap = {};
@@ -35,6 +37,8 @@ class GiteeProvider extends ChangeNotifier {
   GiteeAuthStatus get status => _status;
   GiteeUser? get user => _user;
   String? get error => _error;
+  String? get grantedScope => _grantedScope;
+  DateTime? get expiresAt => _expiresAt;
 
   /// 当前已保存的 access token（仓库拉取需要用它做 HTTPS 认证）
   String? get token => _token;
@@ -50,7 +54,11 @@ class GiteeProvider extends ChangeNotifier {
   Future<void> init() async {
     await _loadRepoMap();
     final token = await GiteeAuthService.instance.validToken();
+    _grantedScope = await GiteeAuthService.instance.savedScope;
+    _expiresAt = await GiteeAuthService.instance.savedExpiry;
     if (token == null || token.isEmpty) {
+      _grantedScope = null;
+      _expiresAt = null;
       _status = GiteeAuthStatus.signedOut;
       notifyListeners();
       return;
@@ -73,6 +81,8 @@ class GiteeProvider extends ChangeNotifier {
       if (!isNetworkError) {
         await GiteeAuthService.instance.clearToken();
         _token = null;
+        _grantedScope = null;
+        _expiresAt = null;
       }
       _status = GiteeAuthStatus.signedOut;
       _user = null;
@@ -93,6 +103,8 @@ class GiteeProvider extends ChangeNotifier {
     try {
       final result = await GiteeAuthService.instance.signIn();
       _token = result.accessToken;
+      _grantedScope = result.scope;
+      _expiresAt = result.expiresAt;
       // 此时 _status 仍为 signingIn，api getter 会返回 null，必须直接构造客户端。
       final user = await GiteeApiService(result.accessToken)
           .getAuthenticatedUser()
@@ -125,6 +137,8 @@ class GiteeProvider extends ChangeNotifier {
   Future<void> signOut() async {
     await GiteeAuthService.instance.clearToken();
     _token = null;
+    _grantedScope = null;
+    _expiresAt = null;
     _user = null;
     _status = GiteeAuthStatus.signedOut;
     notifyListeners();
@@ -212,17 +226,15 @@ class GiteeProvider extends ChangeNotifier {
     // Gitee 仓库名只允许字母/数字/_/-/.,中文名需先清洗，否则服务端 400
     final safeName = sanitizeRepoName(repoName);
     if (safeName != repoName) {
-      onLog?.call(t('gitee.log.nameSanitized', {
-        'name': repoName,
-        'safeName': safeName,
-      }));
+      onLog?.call(
+        t('gitee.log.nameSanitized', {'name': repoName, 'safeName': safeName}),
+      );
     }
     final resolvedName = await uniqueRepoName(safeName);
     if (resolvedName != safeName) {
-      onLog?.call(t('gitee.log.repoExists', {
-        'name': safeName,
-        'resolved': resolvedName,
-      }));
+      onLog?.call(
+        t('gitee.log.repoExists', {'name': safeName, 'resolved': resolvedName}),
+      );
     }
 
     onLog?.call(t('gitee.log.creatingRepo', {'name': resolvedName}));
@@ -259,10 +271,9 @@ class GiteeProvider extends ChangeNotifier {
       branch: repo.defaultBranch,
       onProgress: (done, total) {
         if (done == total || done % 10 == 0) {
-          onLog?.call(t('gitee.log.pushProgress', {
-            'done': '$done',
-            'total': '$total',
-          }));
+          onLog?.call(
+            t('gitee.log.pushProgress', {'done': '$done', 'total': '$total'}),
+          );
         }
       },
     );

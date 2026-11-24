@@ -6,10 +6,13 @@ import 'package:path/path.dart' as p;
 
 import '../services/github_actions_templates.dart';
 import 'android_payload.dart';
+import 'cpp_payload.dart';
 import 'flutter_payload.dart';
 import 'html_payload.dart';
+import 'java_payload.dart';
 import 'loader/loader_project_payload.dart';
 import 'node_payload.dart';
+import 'python_payload.dart';
 import 'taro_payload.dart';
 
 /// 模板文件
@@ -112,6 +115,9 @@ class PayloadRegistry {
     const NodeBackendPayload(),
     const HtmlFrontendPayload(),
     const TaroPayload(),
+    const PythonPayload(),
+    const JavaPayload(),
+    const CppPayload(),
     // Loader 项目（三层 Payload 体系）不参与创建页选择，
     // 仅用于打开已生成的 Loader 项目时识别。
     const LoaderProjectPayload(),
@@ -167,6 +173,14 @@ class PayloadRegistry {
     if (await has('pubspec.yaml')) return byId('flutter');
     if (await has('project.config.json') || await has('src/app.tsx')) {
       return byId('taro');
+    }
+    if (await has('pom.xml')) return byId('java');
+    if (await has('requirements.txt') || await has('pyproject.toml')) {
+      return byId('python');
+    }
+    if (await has('CMakeLists.txt') ||
+        (await has('src/main.cpp') && await has('Makefile'))) {
+      return byId('cpp');
     }
     if (await has('settings.gradle') ||
         await has('settings.gradle.kts') ||

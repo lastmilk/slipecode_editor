@@ -11,18 +11,26 @@ import '../models/app_settings.dart';
 import '../models/llm_profile.dart';
 import '../models/mcp_config.dart';
 import '../providers/account_provider.dart';
+import '../providers/lsp_provider.dart';
+import '../providers/project_provider.dart';
 import '../providers/settings_provider.dart';
 import '../services/ai_extensions_service.dart';
+import '../services/desktop_platform.dart';
+import '../services/desktop_prefs_service.dart';
 import '../services/docs_service.dart';
 import '../services/external_mcp_manager.dart';
 import '../services/git_host.dart';
 import '../services/github_hosts_service.dart';
 import '../services/live_task_service.dart';
 import '../services/llm_presets.dart';
+import '../services/lsp/lsp_server_store.dart';
+import '../services/lua/lua_runtime_service.dart';
 import '../services/security_service.dart';
+import '../services/tool_policy.dart';
 import '../widgets/ai_floating_ball.dart';
 import '../widgets/image_crop_dialog.dart';
 import '../widgets/mcp_edit_dialog.dart';
+import 'desktop/plugins_screen.dart';
 
 /// 偏好设置页面
 ///
@@ -70,6 +78,7 @@ class _SettingsScreenState extends State<SettingsScreen>
   Widget build(BuildContext context) {
     final settingsProvider = context.watch<SettingsProvider>();
     final account = context.watch<AccountProvider>();
+    final lspProvider = context.watch<LspProvider>();
     final settings = settingsProvider.settings;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final searching = _query.trim().isNotEmpty;
@@ -77,7 +86,7 @@ class _SettingsScreenState extends State<SettingsScreen>
     // 各 Tab 的分区数据（搜索时跨 Tab 统一过滤）
     final tabSections = <List<_SectionData>>[
       _appearanceSections(settingsProvider, settings, isDark),
-      _editorSections(settingsProvider, settings),
+      _editorSections(settingsProvider, settings, lspProvider),
       _gitSections(settingsProvider, settings),
       _llmSections(settingsProvider, account, settings),
       _aiSections(settingsProvider, settings),
@@ -193,6 +202,16 @@ class _SettingsScreenState extends State<SettingsScreen>
   // 各 Tab 内容
   // ---------------------------------------------------------------------------
 
+  bool _luaControls(String key) =>
+      LuaRuntimeService.instance.config.isOverridden(key);
+
+  String _luaSubtitle(String key, String base) {
+    final source = LuaRuntimeService.instance.config.sourceOf(key);
+    if (source == null) return base;
+    final notice = '由 Lua 配置接管：$source';
+    return base.isEmpty ? notice : '$base\n$notice';
+  }
+
   List<_SectionData> _appearanceSections(
     SettingsProvider sp,
     AppSettings settings,
@@ -209,7 +228,9 @@ class _SettingsScreenState extends State<SettingsScreen>
           ListTile(
             contentPadding: EdgeInsets.zero,
             title: Text(t('settings.language')),
-            subtitle: Text(t('settings.languageSub')),
+            subtitle: Text(
+              _luaSubtitle('view.language', t('settings.languageSub')),
+            ),
             // DropdownButton 的宽度取「最宽菜单项」，不约束会把标题挤成竖排
             trailing: SizedBox(
               width: 132,
@@ -227,9 +248,11 @@ class _SettingsScreenState extends State<SettingsScreen>
                       ),
                     ),
                 ],
-                onChanged: (value) {
-                  if (value != null) sp.setLanguage(value);
-                },
+                onChanged: _luaControls('view.language')
+                    ? null
+                    : (value) {
+                        if (value != null) sp.setLanguage(value);
+                      },
               ),
             ),
           ),
@@ -239,7 +262,9 @@ class _SettingsScreenState extends State<SettingsScreen>
           ListTile(
             contentPadding: EdgeInsets.zero,
             title: Text(t('settings.font')),
-            subtitle: Text(t('settings.fontSub')),
+            subtitle: Text(
+              _luaSubtitle('editor.fontFamily', t('settings.fontSub')),
+            ),
             trailing: SizedBox(
               width: 132,
               child: DropdownButton<String>(
@@ -256,9 +281,11 @@ class _SettingsScreenState extends State<SettingsScreen>
                       ),
                     ),
                 ],
-                onChanged: (value) {
-                  if (value != null) sp.setFontFamily(value);
-                },
+                onChanged: _luaControls('editor.fontFamily')
+                    ? null
+                    : (value) {
+                        if (value != null) sp.setFontFamily(value);
+                      },
               ),
             ),
           ),
@@ -287,9 +314,19 @@ class _SettingsScreenState extends State<SettingsScreen>
                       ButtonSegment(value: ThemeMode.dark, label: Text('深色')),
                     ],
                     selected: {settings.themeMode},
-                    onSelectionChanged: (value) => sp.setThemeMode(value.first),
+                    onSelectionChanged: _luaControls('view.themeMode')
+                        ? null
+                        : (value) => sp.setThemeMode(value.first),
                   ),
                 ),
+                if (_luaControls('view.themeMode'))
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(
+                      _luaSubtitle('view.themeMode', ''),
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                  ),
               ],
             ),
           ),
@@ -466,12 +503,173 @@ class _SettingsScreenState extends State<SettingsScreen>
             ),
           ),
       ]),
+      if (DesktopPlatform.isDesktop) _desktopBehaviorSection(isDark),
     ];
+  }
+
+  /// 桌面行为：Hub 打开项目后的去向 + Linux 保守内存策略（机器本地偏好）
+  _SectionData _desktopBehaviorSection(bool isDark) {
+    final prefs = DesktopPrefsService.instance;
+    final isLinux = Platform.isLinux;
+    return _SectionData('桌面行为', [
+      _Entry(
+        'Hub 打开项目后 隐藏 关闭 每次询问 hub window 进程',
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('打开项目后 Hub 的处理'),
+          subtitle: const Text('关闭 Hub 后，返回 Hub 时自动重新拉起'),
+          trailing: SizedBox(
+            width: 132,
+            child: DropdownButton<String>(
+              value: normalizeHubExitMode(prefs.hubExitMode),
+              isExpanded: true,
+              underline: const SizedBox.shrink(),
+              items: const [
+                DropdownMenuItem(value: 'close', child: Text('关闭 Hub')),
+                DropdownMenuItem(value: 'ask', child: Text('每次询问我')),
+              ],
+              onChanged: (value) {
+                if (value == null) return;
+                prefs.update(() => prefs.hubExitMode = value);
+                setState(() {});
+              },
+            ),
+          ),
+        ),
+      ),
+      if (isLinux) ...[
+        _Entry(
+          'Linux 保守内存策略 memory rss oom',
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Linux 保守内存策略'),
+            subtitle: const Text('接近内存上限时清理缓存并提示，超过退出阈值保存后退出'),
+            value: prefs.linuxMemoryGuardEnabled,
+            onChanged: (value) {
+              prefs.update(() => prefs.linuxMemoryGuardEnabled = value);
+              setState(() {});
+            },
+          ),
+        ),
+        _Entry(
+          '内存提醒阈值 warn memory percent',
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('内存提醒阈值'),
+            subtitle: const Text('RSS 达到物理内存的该比例时清理缓存'),
+            trailing: SizedBox(
+              width: 96,
+              child: DropdownButton<int>(
+                value: _nearestOption([
+                  for (var v = 30; v <= 90; v += 5) v,
+                ], prefs.linuxMemoryWarnPercent),
+                isExpanded: true,
+                underline: const SizedBox.shrink(),
+                items: [for (var v = 30; v <= 90; v += 5) v]
+                    .map(
+                      (value) => DropdownMenuItem(
+                        value: value,
+                        child: Text('$value%'),
+                      ),
+                    )
+                    .toList(),
+                onChanged: (value) {
+                  if (value == null) return;
+                  prefs.update(() => prefs.linuxMemoryWarnPercent = value);
+                  setState(() {});
+                },
+              ),
+            ),
+          ),
+        ),
+        _Entry(
+          '内存退出阈值 exit memory percent',
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('内存退出阈值'),
+            subtitle: const Text('超过后保存全部文件并退出，由 systemd / supervisor 重新拉起'),
+            trailing: SizedBox(
+              width: 96,
+              child: DropdownButton<int>(
+                value: _nearestOption([
+                  for (var v = 35; v <= 95; v += 5) v,
+                ], prefs.linuxMemoryExitPercent),
+                isExpanded: true,
+                underline: const SizedBox.shrink(),
+                items: [for (var v = 35; v <= 95; v += 5) v]
+                    .map(
+                      (value) => DropdownMenuItem(
+                        value: value,
+                        child: Text('$value%'),
+                      ),
+                    )
+                    .toList(),
+                onChanged: (value) {
+                  if (value == null) return;
+                  prefs.update(() => prefs.linuxMemoryExitPercent = value);
+                  setState(() {});
+                },
+              ),
+            ),
+          ),
+        ),
+        _Entry(
+          '内存检查间隔 memory interval',
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('检查间隔'),
+            trailing: SizedBox(
+              width: 96,
+              child: DropdownButton<int>(
+                value: _nearestOption(const [
+                  2,
+                  5,
+                  10,
+                  15,
+                  30,
+                ], prefs.linuxMemoryCheckSeconds),
+                isExpanded: true,
+                underline: const SizedBox.shrink(),
+                items: const [2, 5, 10, 15, 30]
+                    .map(
+                      (value) => DropdownMenuItem(
+                        value: value,
+                        child: Text('$value 秒'),
+                      ),
+                    )
+                    .toList(),
+                onChanged: (value) {
+                  if (value == null) return;
+                  prefs.update(() => prefs.linuxMemoryCheckSeconds = value);
+                  setState(() {});
+                },
+              ),
+            ),
+          ),
+        ),
+        _Entry(
+          'Linux 内存策略说明 systemd supervisor restart',
+          Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: Text(
+              '说明：阈值按物理内存百分比计算。退出码为 0，'
+              '建议用 systemd（Restart=always）或 supervisor 常驻拉起。',
+              style: TextStyle(
+                fontSize: 11,
+                height: 1.4,
+                color: isDark ? Colors.white38 : Colors.black45,
+              ),
+            ),
+          ),
+        ),
+      ],
+    ]);
   }
 
   List<_SectionData> _editorSections(
     SettingsProvider sp,
     AppSettings settings,
+    LspProvider lsp,
   ) {
     return [
       _SectionData('编辑行为', [
@@ -499,8 +697,18 @@ class _SettingsScreenState extends State<SettingsScreen>
                 divisions: 11,
                 value: settings.editorFontSize,
                 label: settings.editorFontSize.toStringAsFixed(0),
-                onChanged: sp.setEditorFontSize,
+                onChanged: _luaControls('editor.fontSize')
+                    ? null
+                    : sp.setEditorFontSize,
               ),
+              if (_luaControls('editor.fontSize'))
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    _luaSubtitle('editor.fontSize', ''),
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                ),
             ],
           ),
         ),
@@ -511,9 +719,16 @@ class _SettingsScreenState extends State<SettingsScreen>
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
             title: const Text('语法补全建议'),
-            subtitle: const Text('输入时在编辑器顶部显示关键字 / 组件 / 代码片段建议'),
+            subtitle: Text(
+              _luaSubtitle(
+                'editor.completionEnabled',
+                '输入时在编辑器顶部显示关键字 / 组件 / 代码片段建议',
+              ),
+            ),
             value: settings.completionEnabled,
-            onChanged: sp.setCompletionEnabled,
+            onChanged: _luaControls('editor.completionEnabled')
+                ? null
+                : sp.setCompletionEnabled,
           ),
         ),
         _Entry(
@@ -534,6 +749,130 @@ class _SettingsScreenState extends State<SettingsScreen>
           ),
         ),
       ]),
+      if (DesktopPlatform.isDesktop)
+        _SectionData('插件 plugins extension', [
+          _Entry(
+            '插件中心 plugins marketplace lsp 语言服务',
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.extension_outlined),
+              title: const Text('插件中心'),
+              subtitle: const Text(
+                '扩展语言服务（LSP）、命令与代码片段；与项目模板（Payload）相互独立',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+              trailing: const Icon(Icons.chevron_right, size: 18),
+              onTap: () => Navigator.of(
+                context,
+              ).push(MaterialPageRoute(builder: (_) => const PluginsScreen())),
+            ),
+          ),
+        ]),
+      if (DesktopPlatform.isDesktop)
+        _SectionData('语言服务 LSP language server', [
+          _Entry(
+            '启用 lsp 语言服务 language server',
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text(t('desktop.lsp.enable')),
+              subtitle: Text(
+                _luaSubtitle('lsp.enabled', t('desktop.lsp.autoDart')),
+              ),
+              value: DesktopPrefsService.instance.lspEnabled,
+              onChanged: _luaControls('lsp.enabled')
+                  ? null
+                  : (value) => lsp.setEnabled(value),
+            ),
+          ),
+          _Entry(
+            'lsp 状态 status dart version',
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text(t(lsp.statusKey)),
+              subtitle: Text(
+                lsp.error ??
+                    (lsp.dartVersion == null
+                        ? t('desktop.lsp.noDiagnostics')
+                        : 'Dart ${lsp.dartVersion}'),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextButton(
+                    onPressed: lsp.enabled ? lsp.restart : null,
+                    child: Text(t('desktop.lsp.restart')),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          _Entry(
+            'lsp 日志 logs language server',
+            ExpansionTile(
+              tilePadding: EdgeInsets.zero,
+              title: Text(t('desktop.lsp.logs')),
+              children: [
+                Container(
+                  width: double.infinity,
+                  constraints: const BoxConstraints(maxHeight: 220),
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.surfaceContainerHighest
+                        .withValues(alpha: 0.4),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: SingleChildScrollView(
+                    child: SelectableText(
+                      lsp.logs.isEmpty
+                          ? t('desktop.lsp.logsEmpty')
+                          : lsp.logs.join('\n'),
+                      style: const TextStyle(
+                        fontSize: 11,
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          _Entry(
+            '语言服务器 servers language server',
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                ListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(t('desktop.lsp.autoDart')),
+                  subtitle: const Text('dart language-server --protocol=lsp'),
+                ),
+                for (final server in LspServerStore.instance.customServers)
+                  SwitchListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(server.name),
+                    subtitle: Text(
+                      '${server.command} ${server.args.join(' ')}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    value: server.enabled,
+                    onChanged: (value) async {
+                      await LspServerStore.instance.setCustomEnabled(
+                        server.id,
+                        value,
+                      );
+                      await lsp.restart();
+                    },
+                  ),
+              ],
+            ),
+          ),
+        ]),
     ];
   }
 
@@ -628,10 +967,7 @@ class _SettingsScreenState extends State<SettingsScreen>
             },
           ),
         ),
-        _Entry(
-          'github hosts 更新 刷新 状态',
-          const _GithubHostsStatus(),
-        ),
+        _Entry('github hosts 更新 刷新 状态', const _GithubHostsStatus()),
       ]),
     ];
   }
@@ -668,15 +1004,18 @@ class _SettingsScreenState extends State<SettingsScreen>
                 contentPadding: EdgeInsets.zero,
                 leading: Icon(
                   settings.llmUseBuiltin &&
-                          model.id == (settings.builtinLlmId.isEmpty
-                              ? account.defaultBuiltinModelId
-                              : settings.builtinLlmId)
+                          model.id ==
+                              (settings.builtinLlmId.isEmpty
+                                  ? account.defaultBuiltinModelId
+                                  : settings.builtinLlmId)
                       ? Icons.radio_button_checked
                       : Icons.radio_button_off,
-                  color: settings.llmUseBuiltin &&
-                          model.id == (settings.builtinLlmId.isEmpty
-                              ? account.defaultBuiltinModelId
-                              : settings.builtinLlmId)
+                  color:
+                      settings.llmUseBuiltin &&
+                          model.id ==
+                              (settings.builtinLlmId.isEmpty
+                                  ? account.defaultBuiltinModelId
+                                  : settings.builtinLlmId)
                       ? Theme.of(context).colorScheme.primary
                       : Colors.grey,
                 ),
@@ -738,7 +1077,8 @@ class _SettingsScreenState extends State<SettingsScreen>
                 !settings.llmUseBuiltin && profile.id == settings.activeLlmId
                     ? Icons.radio_button_checked
                     : Icons.radio_button_off,
-                color: !settings.llmUseBuiltin &&
+                color:
+                    !settings.llmUseBuiltin &&
                         profile.id == settings.activeLlmId
                     ? Theme.of(context).colorScheme.primary
                     : Colors.grey,
@@ -811,6 +1151,26 @@ class _SettingsScreenState extends State<SettingsScreen>
 
   List<_SectionData> _aiSections(SettingsProvider sp, AppSettings settings) {
     return [
+      _SectionData('Agent 安全', [
+        _Entry(
+          'Agent 审批 安全 权限 手动审批 自动审批 完全访问 自定义',
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: _ApprovalModePicker(
+              mode: settings.agentApprovalMode,
+              onChanged: sp.setAgentApprovalMode,
+            ),
+          ),
+        ),
+        if (settings.agentApprovalMode == 'custom')
+          _Entry(
+            '自定义规则 allow deny ask 命令 工具',
+            _AgentRulesField(
+              initial: settings.agentApprovalRules,
+              onChanged: sp.setAgentApprovalRules,
+            ),
+          ),
+      ]),
       _SectionData('AI 改动', [
         _Entry(
           'AI 改动 自动保存 撤回 未批准 推送 git push',
@@ -853,7 +1213,7 @@ class _SettingsScreenState extends State<SettingsScreen>
             subtitle: Text(
               Platform.isAndroid
                   ? 'App 退到后台后仍显示悬浮球（需授予悬浮窗权限）；'
-                      '点击后可直接选择项目并输入需求，AI 自动执行'
+                        '点击后可直接选择项目并输入需求，AI 自动执行'
                   : 'iOS 不支持系统悬浮窗，仅可使用应用内悬浮球',
             ),
             value: settings.systemOverlayEnabled,
@@ -898,10 +1258,7 @@ class _SettingsScreenState extends State<SettingsScreen>
             onChanged: sp.setLiveNotifications,
           ),
         ),
-        _Entry(
-          '实况通知 适配状态 厂商',
-          const _LiveNotificationStatus(),
-        ),
+        _Entry('实况通知 适配状态 厂商', const _LiveNotificationStatus()),
       ]),
       _SectionData('第三方 MCP', [
         _Entry(
@@ -910,10 +1267,7 @@ class _SettingsScreenState extends State<SettingsScreen>
         ),
       ]),
       _SectionData('外源 Skill', [
-        _Entry(
-          '外源 Skill 导入 markdown 提示词 skill',
-          const _ImportedSkillsCard(),
-        ),
+        _Entry('外源 Skill 导入 markdown 提示词 skill', const _ImportedSkillsCard()),
       ]),
     ];
   }
@@ -1184,15 +1538,21 @@ class _SecurityCardState extends State<_SecurityCard> {
         final ok = await _promptPassword();
         if (!ok) return;
       }
-      if (!_biometricAvailable) {
-        messenger.showSnackBar(
-          SnackBar(content: Text(t('settings.biometricUnavailable'))),
-        );
+      if (!DesktopPlatform.isDesktop) {
+        if (!_biometricAvailable) {
+          messenger.showSnackBar(
+            SnackBar(content: Text(t('settings.biometricUnavailable'))),
+          );
+        }
+        await SecurityService.instance.setBiometricEnabled(true);
       }
-      await SecurityService.instance.setBiometricEnabled(true);
       await widget.settingsProvider.setAppLockEnabled(true);
     } else {
       await SecurityService.instance.setBiometricEnabled(false);
+      // 桌面端应用锁完全由密码控制，关闭时一并清除密码
+      if (DesktopPlatform.isDesktop) {
+        await SecurityService.instance.disable();
+      }
       await widget.settingsProvider.setAppLockEnabled(false);
     }
     if (mounted) await _load();
@@ -1328,19 +1688,20 @@ class _SecurityCardState extends State<_SecurityCard> {
             ),
           ),
         ),
-        ListTile(
-          contentPadding: EdgeInsets.zero,
-          title: Text(t('settings.biometric')),
-          subtitle: Text(
-            _biometricAvailable
-                ? '指纹 / 面容 / 虹膜'
-                : t('settings.biometricUnavailable'),
+        if (!DesktopPlatform.isDesktop)
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            title: Text(t('settings.biometric')),
+            subtitle: Text(
+              _biometricAvailable
+                  ? '指纹 / 面容 / 虹膜'
+                  : t('settings.biometricUnavailable'),
+            ),
+            trailing: Icon(
+              _biometricAvailable ? Icons.fingerprint : Icons.no_accounts,
+              color: _biometricAvailable ? Colors.green : Colors.grey,
+            ),
           ),
-          trailing: Icon(
-            _biometricAvailable ? Icons.fingerprint : Icons.no_accounts,
-            color: _biometricAvailable ? Colors.green : Colors.grey,
-          ),
-        ),
       ],
     );
   }
@@ -1458,9 +1819,7 @@ class _ProfileEditDialogState extends State<_ProfileEditDialog> {
                 hintText: 'https://api.openai.com/v1',
                 isDense: true,
                 border: const OutlineInputBorder(),
-                helperText: isCloud
-                    ? '云端模型地址由账号后端自动决定'
-                    : '可填到 /v1，也可直接填完整地址（如 https://api.stepfun.com/v1/chat/completions）',
+                helperText: isCloud ? '云端模型地址由账号后端自动决定' : '可填到 /v1，也可直接填完整地址（如 https://api.stepfun.com/v1/chat/completions）',
                 helperMaxLines: 2,
               ),
             ),
@@ -1690,6 +2049,7 @@ class _McpServersCard extends StatelessWidget {
     final service = AiExtensionsService.instance;
     final manager = ExternalMcpManager.instance;
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final projectPath = context.watch<ProjectProvider>().projectPath;
     return ListenableBuilder(
       listenable: Listenable.merge([service, manager]),
       builder: (context, _) {
@@ -1705,6 +2065,35 @@ class _McpServersCard extends StatelessWidget {
               style: TextStyle(fontSize: 11, color: Colors.grey, height: 1.4),
             ),
             const SizedBox(height: 8),
+            if (DesktopPlatform.isDesktop) ...[
+              Text(
+                '快速添加预设（需本机已安装 npx / uvx）',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: isDark ? Colors.white54 : Colors.black54,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Wrap(
+                spacing: 8,
+                runSpacing: 4,
+                children: [
+                  for (final preset in _mcpPresets)
+                    OutlinedButton.icon(
+                      onPressed: () =>
+                          _addPreset(context, preset, projectPath, servers),
+                      icon: Icon(
+                        preset.requiresProject
+                            ? Icons.folder_outlined
+                            : Icons.extension_outlined,
+                        size: 16,
+                      ),
+                      label: Text(preset.label),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 8),
+            ],
             if (servers.isEmpty)
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 6),
@@ -1752,8 +2141,7 @@ class _McpServersCard extends StatelessWidget {
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
                               fontSize: 10,
-                              color:
-                                  isDark ? Colors.white38 : Colors.black45,
+                              color: isDark ? Colors.white38 : Colors.black45,
                             ),
                           ),
                           if (server.enabled && errors[server.id] != null)
@@ -1769,9 +2157,9 @@ class _McpServersCard extends StatelessWidget {
                           else if (server.enabled &&
                               manager.hasServers &&
                               !errors.containsKey(server.id))
-                            const Text(
-                              '已连接',
-                              style: TextStyle(
+                            Text(
+                              '已连接 · ${manager.toolCounts[server.id] ?? 0} 个工具',
+                              style: const TextStyle(
                                 fontSize: 10,
                                 color: Colors.green,
                               ),
@@ -1788,6 +2176,17 @@ class _McpServersCard extends StatelessWidget {
                       icon: const Icon(Icons.edit_outlined, size: 18),
                       tooltip: '编辑',
                       onPressed: () => _editServer(context, server),
+                    ),
+                    if (server.enabled)
+                      IconButton(
+                        icon: const Icon(Icons.restart_alt, size: 18),
+                        tooltip: '重启',
+                        onPressed: () => manager.restartServer(server),
+                      ),
+                    IconButton(
+                      icon: const Icon(Icons.receipt_long_outlined, size: 18),
+                      tooltip: '日志',
+                      onPressed: () => _showServerLogs(context, server),
                     ),
                     IconButton(
                       icon: const Icon(Icons.delete_outline, size: 18),
@@ -1830,10 +2229,90 @@ class _McpServersCard extends StatelessWidget {
     );
   }
 
-  Future<void> _editServer(
+  Future<void> _addPreset(
     BuildContext context,
-    McpServerConfig? existing,
-  ) =>
+    _McpPreset preset,
+    String? projectPath,
+    List<McpServerConfig> servers,
+  ) async {
+    final messenger = ScaffoldMessenger.of(context);
+    if (servers.any((server) => server.name == preset.name)) {
+      messenger.showSnackBar(
+        SnackBar(content: Text('已存在同名服务器 ${preset.name}')),
+      );
+      return;
+    }
+    if (!ToolPolicy.hasExecutable(preset.command)) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            '未检测到 ${preset.command}，请先安装 '
+            '${preset.command == 'npx' ? 'Node.js' : 'uv（Python）'} 后重试',
+          ),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+    if (preset.requiresProject &&
+        (projectPath == null || projectPath.isEmpty)) {
+      messenger.showSnackBar(const SnackBar(content: Text('请先打开项目后再添加该预设')));
+      return;
+    }
+    final args = preset.args?.call(projectPath ?? '') ?? const <String>[];
+    await AiExtensionsService.instance.addServer(
+      name: preset.name,
+      transport: 'stdio',
+      command: preset.command,
+      args: args,
+    );
+    await ExternalMcpManager.instance.refresh(
+      AiExtensionsService.instance.enabledServers,
+    );
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text('已添加 ${preset.label} 预设'),
+        backgroundColor: Colors.green,
+      ),
+    );
+  }
+
+  Future<void> _showServerLogs(
+    BuildContext context,
+    McpServerConfig server,
+  ) async {
+    final logs = ExternalMcpManager.instance.logsFor(server.id);
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('${server.name} 日志'),
+        content: SizedBox(
+          width: 640,
+          height: 400,
+          child: logs.isEmpty
+              ? const Center(child: Text('暂无日志'))
+              : SingleChildScrollView(
+                  child: SelectableText(
+                    logs.join('\n'),
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontFamily: 'monospace',
+                      height: 1.4,
+                    ),
+                  ),
+                ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('关闭'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _editServer(BuildContext context, McpServerConfig? existing) =>
       showMcpServerEditor(context, existing: existing);
 
   Future<void> _importConfig(BuildContext context) =>
@@ -1859,7 +2338,7 @@ class _McpServersCard extends StatelessWidget {
       final message = imported.error != null
           ? imported.error!
           : '已导入 ${imported.imported} 个配置'
-              '${imported.skipped > 0 ? '，跳过 ${imported.skipped} 个' : ''}';
+                '${imported.skipped > 0 ? '，跳过 ${imported.skipped} 个' : ''}';
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(message),
@@ -1868,12 +2347,71 @@ class _McpServersCard extends StatelessWidget {
       );
     } catch (e) {
       if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('导入失败：$e')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('导入失败：$e')));
     }
   }
 }
+
+/// 桌面端 MCP 预设
+class _McpPreset {
+  final String name;
+  final String label;
+  final String command;
+
+  /// 根据项目根生成参数；为 null 时表示与项目无关
+  final List<String> Function(String root)? args;
+
+  /// 是否必须打开项目才能添加
+  final bool requiresProject;
+
+  const _McpPreset({
+    required this.name,
+    required this.label,
+    required this.command,
+    this.args,
+    this.requiresProject = false,
+  });
+}
+
+const List<_McpPreset> _mcpPresets = [
+  _McpPreset(
+    name: 'filesystem',
+    label: '文件系统',
+    command: 'npx',
+    requiresProject: true,
+    args: _filesystemArgs,
+  ),
+  _McpPreset(
+    name: 'playwright',
+    label: '浏览器自动化',
+    command: 'npx',
+    args: _playwrightArgs,
+  ),
+  _McpPreset(name: 'memory', label: '长期记忆', command: 'npx', args: _memoryArgs),
+  _McpPreset(
+    name: 'git',
+    label: 'Git 仓库',
+    command: 'uvx',
+    requiresProject: true,
+    args: _gitArgs,
+  ),
+];
+
+List<String> _filesystemArgs(String root) => [
+  '-y',
+  '@modelcontextprotocol/server-filesystem',
+  root,
+];
+
+List<String> _playwrightArgs(String root) => ['-y', '@playwright/mcp@latest'];
+
+List<String> _memoryArgs(String root) => [
+  '-y',
+  '@modelcontextprotocol/server-memory',
+];
+
+List<String> _gitArgs(String root) => ['mcp-server-git', '--repository', root];
 
 // =============================================================================
 // 外源 Skill
@@ -1946,8 +2484,7 @@ class _ImportedSkillsCard extends StatelessWidget {
                               '${skill.content.length} 字符',
                               style: TextStyle(
                                 fontSize: 10,
-                                color:
-                                    isDark ? Colors.white38 : Colors.black45,
+                                color: isDark ? Colors.white38 : Colors.black45,
                               ),
                             ),
                           ],
@@ -2004,14 +2541,12 @@ class _ImportedSkillsCard extends StatelessWidget {
       final name = fileName.replaceAll(RegExp(r'\.(md|markdown|txt)$'), '');
       await AiExtensionsService.instance.addSkill(name: name, content: content);
       if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('已导入 Skill「$name」')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('已导入 Skill「$name」')));
     } catch (e) {
       if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('导入失败：$e')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('导入失败：$e')));
     }
   }
 
@@ -2069,9 +2604,8 @@ class _ImportedSkillsCard extends StatelessWidget {
     if (confirmed != true || content.trim().isEmpty) return;
     await AiExtensionsService.instance.addSkill(name: name, content: content);
     if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Skill 已导入')),
-    );
+    ScaffoldMessenger.of(context)
+        .showSnackBar(const SnackBar(content: Text('Skill 已导入')));
   }
 
   Future<void> _showSkill(BuildContext context, ImportedSkill skill) async {
@@ -2163,7 +2697,8 @@ class _LiveNotificationStatus extends StatefulWidget {
   const _LiveNotificationStatus();
 
   @override
-  State<_LiveNotificationStatus> createState() => _LiveNotificationStatusState();
+  State<_LiveNotificationStatus> createState() =>
+      _LiveNotificationStatusState();
 }
 
 class _LiveNotificationStatusState extends State<_LiveNotificationStatus> {
@@ -2209,4 +2744,129 @@ class _LiveNotificationStatusState extends State<_LiveNotificationStatus> {
       ),
     );
   }
+}
+
+/// Agent 审批模式选择器
+///
+/// 四档：手动 / 自动 / 完全 / 自定义。取值与
+/// [AgentApprovalMode] 的 id 一致（manual / auto / full / custom）。
+class _ApprovalModePicker extends StatelessWidget {
+  const _ApprovalModePicker({required this.mode, required this.onChanged});
+
+  final String mode;
+  final ValueChanged<String> onChanged;
+
+  static const List<List<String>> _modes = [
+    ['manual', '手动审批', '每个会改变环境或访问网络的操作都询问'],
+    ['auto', '自动放行', '普通操作自动放行，高风险与网络访问需确认（推荐）'],
+    ['full', '完全访问', '不再询问，仅受硬性安全策略限制'],
+    ['custom', '自定义', '按下方自定义规则逐条判断'],
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final current = _modes.firstWhere(
+      (m) => m[0] == mode,
+      orElse: () => _modes[1],
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final m in _modes)
+              ChoiceChip(
+                label: Text(m[1]),
+                selected: mode == m[0],
+                onSelected: (_) => onChanged(m[0]),
+              ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        Text(
+          current[2],
+          style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+        ),
+      ],
+    );
+  }
+}
+
+/// Agent 自定义规则编辑器
+///
+/// 规则文本为多行，每行一条：`allow|deny|ask <工具>[:关键字]`，
+/// `#` 开头为注释，工具名 `*` 为通配；先命中先生效。
+class _AgentRulesField extends StatefulWidget {
+  const _AgentRulesField({required this.initial, required this.onChanged});
+
+  final String initial;
+  final ValueChanged<String> onChanged;
+
+  @override
+  State<_AgentRulesField> createState() => _AgentRulesFieldState();
+}
+
+class _AgentRulesFieldState extends State<_AgentRulesField> {
+  late final TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initial);
+  }
+
+  @override
+  void didUpdateWidget(covariant _AgentRulesField oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.initial != widget.initial &&
+        _controller.text != widget.initial) {
+      _controller.text = widget.initial;
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        TextField(
+          controller: _controller,
+          minLines: 3,
+          maxLines: 8,
+          style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
+          decoration: const InputDecoration(
+            border: OutlineInputBorder(),
+            isDense: true,
+            hintText:
+                '# 每行一条规则：allow|deny|ask <工具>[:关键字]\n'
+                'allow run_terminal_command\n'
+                'deny run_terminal_command:sudo\n'
+                'ask download\n'
+                'allow *',
+          ),
+          onChanged: widget.onChanged,
+        ),
+        const SizedBox(height: 4),
+        Text(
+          '工具名可写 * 通配；带冒号时仅当命令/详情包含关键字才命中；先命中先生效。',
+          style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+        ),
+      ],
+    );
+  }
+}
+
+/// 返回最接近 [value] 的可选项，避免 DropdownButton 因值不在列表中断言
+int _nearestOption(List<int> options, int value) {
+  return options.reduce(
+    (a, b) => (b - value).abs() < (a - value).abs() ? b : a,
+  );
 }

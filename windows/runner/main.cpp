@@ -2,8 +2,52 @@
 #include <flutter/flutter_view_controller.h>
 #include <windows.h>
 
+#include <string>
+
 #include "flutter_window.h"
 #include "utils.h"
+
+namespace {
+
+// 把 slipe:// 协议注册到当前用户（HKCU），用于 OAuth 深链回调。
+// 无需管理员权限，重复执行只是覆盖同一份键值。
+void RegisterUriScheme() {
+  wchar_t exe_path[MAX_PATH];
+  if (::GetModuleFileNameW(nullptr, exe_path, MAX_PATH) == 0) {
+    return;
+  }
+  const std::wstring base = L"Software\\Classes\\slipe";
+  HKEY key = nullptr;
+  if (::RegCreateKeyExW(HKEY_CURRENT_USER, base.c_str(), 0, nullptr, 0,
+                        KEY_WRITE, nullptr, &key, nullptr) != ERROR_SUCCESS) {
+    return;
+  }
+  const wchar_t description[] = L"URL:SLIPE Protocol";
+  ::RegSetValueExW(
+      key, nullptr, 0, REG_SZ,
+      reinterpret_cast<const BYTE*>(description),
+      static_cast<DWORD>(sizeof(description)));
+  const wchar_t url_protocol[] = L"";
+  ::RegSetValueExW(
+      key, L"URL Protocol", 0, REG_SZ,
+      reinterpret_cast<const BYTE*>(url_protocol),
+      static_cast<DWORD>(sizeof(url_protocol)));
+  ::RegCloseKey(key);
+
+  const std::wstring command_key = base + L"\\shell\\open\\command";
+  if (::RegCreateKeyExW(HKEY_CURRENT_USER, command_key.c_str(), 0, nullptr, 0,
+                        KEY_WRITE, nullptr, &key, nullptr) != ERROR_SUCCESS) {
+    return;
+  }
+  const std::wstring command = L"\"" + std::wstring(exe_path) + L"\" \"%1\"";
+  ::RegSetValueExW(
+      key, nullptr, 0, REG_SZ,
+      reinterpret_cast<const BYTE*>(command.c_str()),
+      static_cast<DWORD>((command.size() + 1) * sizeof(wchar_t)));
+  ::RegCloseKey(key);
+}
+
+}  // namespace
 
 int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
                       _In_ wchar_t *command_line, _In_ int show_command) {
@@ -17,6 +61,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   // plugins.
   ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
 
+  RegisterUriScheme();
+
   flutter::DartProject project(L"data");
 
   std::vector<std::string> command_line_arguments =
@@ -26,8 +72,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
 
   FlutterWindow window(project);
   Win32Window::Point origin(10, 10);
-  Win32Window::Size size(1280, 720);
-  if (!window.Create(L"slipe_editor", origin, size)) {
+  Win32Window::Size size(1440, 900);
+  if (!window.Create(L"SLIPE", origin, size)) {
     return EXIT_FAILURE;
   }
   window.SetQuitOnClose(true);

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 
 import '../services/community_service.dart';
+import 'community_theme.dart';
 
 /// 打开发帖面板，成功发布返回 true
 Future<bool?> showCreatePostSheet(BuildContext context) {
@@ -78,8 +79,8 @@ class _CreatePostSheetState extends State<_CreatePostSheet> {
     return Padding(
       padding: EdgeInsets.only(bottom: bottom),
       child: Container(
-        decoration: const BoxDecoration(
-          color: Colors.white,
+        decoration: BoxDecoration(
+          color: CommunityTheme.card,
           borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
         ),
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
@@ -127,15 +128,15 @@ class _CreatePostSheetState extends State<_CreatePostSheet> {
                 minLines: 6,
               ),
               const SizedBox(height: 10),
-              TInput(
-                controller: _tags,
-                hintText: '标签（可选，用逗号分隔，最多 5 个）',
-              ),
+              TInput(controller: _tags, hintText: '标签（可选，用逗号分隔，最多 5 个）'),
               if (_error.isNotEmpty) ...[
                 const SizedBox(height: 8),
                 Text(
                   _error,
-                  style: const TextStyle(fontSize: 12, color: Color(0xFFD54941)),
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: Color(0xFFD54941),
+                  ),
                 ),
               ],
               const SizedBox(height: 16),

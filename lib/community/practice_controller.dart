@@ -46,10 +46,7 @@ class PracticeController extends ChangeNotifier {
 
     _overlay = OverlayEntry(builder: (_) => const PracticeFloatingBall());
     overlay.insert(_overlay!);
-    _timer = Timer.periodic(
-      const Duration(seconds: 4),
-      (_) => autoCheck(),
-    );
+    _timer = Timer.periodic(const Duration(seconds: 4), (_) => autoCheck());
     notifyListeners();
   }
 

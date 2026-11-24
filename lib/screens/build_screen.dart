@@ -11,10 +11,12 @@ import '../providers/git_sync_provider.dart';
 import '../providers/gitee_provider.dart';
 import '../providers/github_provider.dart';
 import '../providers/project_provider.dart';
+import '../services/desktop_platform.dart';
 import '../services/git_host.dart';
 import '../services/github_api_service.dart' show WorkflowJob, WorkflowStep;
 import '../widgets/log_console.dart';
 import 'build_downloads_screen.dart';
+import 'desktop/local_build_panel.dart';
 
 /// 云端构建页面
 ///
@@ -57,6 +59,9 @@ class BuildScreen extends StatefulWidget {
 class _BuildScreenState extends State<BuildScreen> {
   bool _repoSetupRunning = false;
   final List<String> _repoSetupLogs = [];
+
+  /// 构建方式：0=云端，1=本地；桌面端默认本地
+  late int _mode = DesktopPlatform.isDesktop ? 1 : 0;
 
   /// 当前项目使用的平台（默认 GitHub）
   GitHost _host = GitHost.github;
@@ -324,19 +329,57 @@ class _BuildScreenState extends State<BuildScreen> {
           const SizedBox(width: 4),
         ],
       ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: _buildCloudSection(
-          isDark,
-          build,
-          github,
-          gitee,
-          sync,
-          link,
-          signedIn,
-          canBuild,
-          projectPath,
-        ),
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
+            child: Row(
+              children: [
+                SegmentedButton<int>(
+                  segments: const [
+                    ButtonSegment(
+                      value: 1,
+                      icon: Icon(Icons.computer, size: 16),
+                      label: Text('本地构建'),
+                    ),
+                    ButtonSegment(
+                      value: 0,
+                      icon: Icon(Icons.cloud_outlined, size: 16),
+                      label: Text('云端构建'),
+                    ),
+                  ],
+                  selected: {_mode},
+                  onSelectionChanged: (selection) =>
+                      setState(() => _mode = selection.first),
+                ),
+                const Spacer(),
+                if (_mode == 1)
+                  Text(
+                    '使用应用内工具链在本机执行构建命令',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: _mode == 1
+                ? const LocalBuildPanel()
+                : ListView(
+                    padding: const EdgeInsets.all(16),
+                    children: _buildCloudSection(
+                      isDark,
+                      build,
+                      github,
+                      gitee,
+                      sync,
+                      link,
+                      signedIn,
+                      canBuild,
+                      projectPath,
+                    ),
+                  ),
+          ),
+        ],
       ),
     );
   }

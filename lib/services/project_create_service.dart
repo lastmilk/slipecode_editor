@@ -17,13 +17,15 @@ class ProjectCreateService {
   /// [projectName] 项目名称（snake_case）
   /// [targetPath] 项目将创建在哪个目录下
   /// [org] Android/iOS 的包名前缀
-  /// [template] 模板类型（仅 Flutter 载荷使用）
+  /// [template] 模板类型（Flutter: app/package/plugin；Java: gradle/maven；C++: make/cmake）
+  /// [options] 载荷自定义选项（如 PYTHON_VERSION / CPP_COMPILER），按 {{KEY}} 替换
   Stream<String> createProject({
     required ProjectPayload payload,
     required String projectName,
     required String targetPath,
     String org = 'com.example',
     String template = 'app',
+    Map<String, String> options = const {},
   }) async* {
     final files = payload.templateFiles(template);
     if (files.isEmpty) {
@@ -52,6 +54,8 @@ class ProjectCreateService {
       '{{TEMPLATE}}': template,
       '{{PAYLOAD}}': payload.id,
       '{{PAYLOAD_NAME}}': payload.name,
+      for (final option in options.entries)
+        '{{${option.key.toUpperCase()}}}': option.value,
     };
 
     for (final file in files) {

@@ -101,9 +101,17 @@ class TerminalProvider extends ChangeNotifier {
   /// 供 AI 工具调用：在项目目录执行命令并返回文本结果
   Future<String> executeForAi(String command) async {
     if (!await ensureStarted()) {
-      return t('terminal.aiNotReady', {'error': _error ?? t('terminal.unsupported')});
+      return t('terminal.aiNotReady', {
+        'error': _error ?? t('terminal.unsupported'),
+      });
     }
-    final result = await _execute(command);
+    final ({int exitCode, String out, String err}) result;
+    try {
+      // AI 调用的命令限制在 2 分钟内，避免长时间占用对话
+      result = await _execute(command).timeout(const Duration(minutes: 2));
+    } on TimeoutException {
+      return '错误：命令执行超时（120 秒）\n命令：$command';
+    }
     final output = StringBuffer();
     if (result.out.trim().isNotEmpty) output.writeln(result.out.trimRight());
     if (result.err.trim().isNotEmpty) output.writeln(result.err.trimRight());
@@ -170,13 +178,13 @@ class TerminalProvider extends ChangeNotifier {
       );
     }
 
-    final script = 'cd ${_shellQuote(cwd)} 2>/dev/null; $cmd\n'
+    final script =
+        'cd ${_shellQuote(cwd)} 2>/dev/null; $cmd\n'
         'printf "\\n$_cwdMarker%s\\n" "\$PWD"';
-    final result = await Process.run(
-      '/bin/sh',
-      ['-c', script],
-      workingDirectory: cwd,
-    );
+    final result = await Process.run('/bin/sh', [
+      '-c',
+      script,
+    ], workingDirectory: cwd);
     return (
       exitCode: result.exitCode,
       out: '${result.stdout}',
@@ -193,8 +201,7 @@ class TerminalProvider extends ChangeNotifier {
     return (output: raw.substring(0, index), cwd: newCwd);
   }
 
-  String _shellQuote(String value) =>
-      "'${value.replaceAll("'", "'\\''")}'";
+  String _shellQuote(String value) => "'${value.replaceAll("'", "'\\''")}'";
 
   /// 重启（重置环境检查状态）
   Future<void> restart() async {

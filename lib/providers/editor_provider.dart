@@ -5,8 +5,10 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../models/editor_diagnostic.dart';
 import '../models/open_file.dart';
 import '../services/file_service.dart';
+import '../services/lua/editor_service_adapter.dart';
 
 /// 编辑器状态 Provider
 ///
@@ -14,7 +16,11 @@ import '../services/file_service.dart';
 /// 每个项目拥有独立的标签页工作区：切换项目时先保存当前项目的
 /// 打开列表，再恢复目标项目上次打开的文件。
 class EditorProvider extends ChangeNotifier {
+  EditorProvider({EditorServiceAdapter? plugins})
+    : _plugins = plugins ?? EditorServiceAdapter();
+
   final FileService _fileService = FileService();
+  final EditorServiceAdapter _plugins;
 
   final List<OpenFile> _openFiles = [];
 
@@ -107,16 +113,52 @@ class EditorProvider extends ChangeNotifier {
     }
   }
 
-  /// 打开文件（如果已打开则切换到它）
+  /// 打开文件（如果已打开则切换到它），允许 Lua 修改或取消本次操作。
   Future<OpenFile?> openFile(String path) async {
-    // 已打开？直接切换
+    final will = await _plugins.events.dispatch(
+      'file.willOpen',
+      _plugins.event('file.willOpen', 'will', {'path': path}),
+    );
+    if (will.swallowed) return null;
+    path = _eventPath(will.event, fallback: path);
+
+    final raw = await _plugins.registry.invoke(
+      'editor',
+      'openFile',
+      {'path': path},
+      (request) async {
+        final requestPath = _requestPath(request);
+        final opened = await _openFileDefault(requestPath);
+        return {'path': requestPath, 'opened': opened != null};
+      },
+    );
+    final result = _resultMap(raw, 'editor.openFile');
+    if (result['opened'] is! bool) {
+      throw const FormatException('editor.openFile 返回值缺少 bool opened');
+    }
+    final resultPath = result['path'] is String
+        ? result['path'] as String
+        : path;
+    if (result['opened'] == false) return null;
+    final opened = _openFiles
+        .where((file) => file.path == resultPath)
+        .firstOrNull;
+    if (opened != null) {
+      await _plugins.events.dispatch(
+        'file.didOpen',
+        _plugins.event('file.didOpen', 'did', {'path': opened.path}),
+      );
+    }
+    return opened;
+  }
+
+  Future<OpenFile?> _openFileDefault(String path) async {
     final existing = _openFiles.where((f) => f.path == path).firstOrNull;
     if (existing != null) {
       _activeFile = existing;
       notifyListeners();
       return existing;
     }
-
     try {
       final content = await _fileService.readFile(path);
       final openFile = OpenFile(path: path, content: content);
@@ -163,11 +205,69 @@ class EditorProvider extends ChangeNotifier {
   }
 
   /// 更新活动文件的内容
+  ///
+  /// 内容本身立即写入（保存 / 未保存判断不受影响），但通知做节流：
+  /// 连续输入时每 120ms 最多触发一次重建，避免每敲一个字符就重建整屏。
   void updateActiveContent(String content) {
-    if (_activeFile != null) {
-      _activeFile!.updateContent(content);
+    final file = _activeFile;
+    if (file == null) return;
+    file.updateContent(content);
+    final now = DateTime.now();
+    if (now.difference(_lastContentNotify).inMilliseconds >= 120) {
+      _lastContentNotify = now;
+      _contentNotifyTimer?.cancel();
+      _contentNotifyTimer = null;
       notifyListeners();
+    } else {
+      _contentNotifyTimer ??= Timer(const Duration(milliseconds: 120), () {
+        _contentNotifyTimer = null;
+        _lastContentNotify = DateTime.now();
+        notifyListeners();
+      });
     }
+  }
+
+  DateTime _lastContentNotify = DateTime.fromMillisecondsSinceEpoch(0);
+  Timer? _contentNotifyTimer;
+
+  @override
+  void dispose() {
+    _contentNotifyTimer?.cancel();
+    super.dispose();
+  }
+
+  /// 替换指定文件的内容（LSP 重命名 / Code Action 等外部编辑）
+  ///
+  /// 只改内存中的标签内容，保持「未保存」状态，由用户决定是否落盘。
+  void replaceContent(String path, String content) {
+    final file = _openFiles.where((f) => f.path == path).firstOrNull;
+    if (file == null || file.content == content) return;
+    file.updateContent(content);
+    notifyListeners();
+  }
+
+  /// 外部编辑服务入口：Lua 可包裹请求，默认仅修改内存并保持未保存状态。
+  Future<bool> applyEdit(String path, String content) async {
+    final raw = await _plugins.registry.invoke(
+      'editor',
+      'applyEdit',
+      {'path': path, 'content': content},
+      (request) {
+        final requestPath = _requestPath(request);
+        final requestContent = request['content'];
+        if (requestContent is! String) {
+          throw const FormatException('editor.applyEdit.content 必须为 string');
+        }
+        final exists = _openFiles.any((file) => file.path == requestPath);
+        if (exists) replaceContent(requestPath, requestContent);
+        return Future.value({'path': requestPath, 'applied': exists});
+      },
+    );
+    final result = _resultMap(raw, 'editor.applyEdit');
+    if (result['applied'] is! bool) {
+      throw const FormatException('editor.applyEdit 返回值缺少 bool applied');
+    }
+    return result['applied'] == true;
   }
 
   /// 刷新已打开文件的内容（Agent 直接改盘后调用）
@@ -256,20 +356,65 @@ class EditorProvider extends ChangeNotifier {
 
   /// 保存指定文件（原位替换，保持标签顺序）
   Future<bool> saveFile(String path) async {
-    final index = _openFiles.indexWhere((f) => f.path == path);
-    if (index == -1) return false;
-    final file = _openFiles[index];
-    return _writeAndRefresh(index, file.content);
+    final file = _openFiles.where((item) => item.path == path).firstOrNull;
+    if (file == null) return false;
+    return _saveWithPlugins(path, file.content);
   }
 
-  /// 把指定内容写入文件并刷新保存基线
-  ///
-  /// 用于「路径 + 内容」快照的写入（如 VibeCoding），
-  /// 避免用户切换标签后把内容写到别的文件里。
+  /// 把指定内容写入文件并刷新保存基线；Lua 可以修改内容或取消保存。
   Future<bool> saveContent(String path, String content) async {
-    final index = _openFiles.indexWhere((f) => f.path == path);
-    if (index == -1) return false;
-    return _writeAndRefresh(index, content);
+    return _saveWithPlugins(path, content);
+  }
+
+  Future<bool> _saveWithPlugins(String path, String content) async {
+    final will = await _plugins.events.dispatch(
+      'file.willSave',
+      _plugins.event('file.willSave', 'will', {
+        'path': path,
+        'content': content,
+      }),
+    );
+    if (will.swallowed) return false;
+    final payload = will.event['payload'];
+    if (payload is! Map) {
+      throw const FormatException('file.willSave 缺少 payload 对象');
+    }
+    path = payload['path'] is String ? payload['path'] as String : path;
+    content = payload['content'] is String
+        ? payload['content'] as String
+        : content;
+
+    final raw = await _plugins.registry.invoke(
+      'editor',
+      'saveFile',
+      {'path': path, 'content': content},
+      (request) async {
+        final requestPath = _requestPath(request);
+        final requestContent = request['content'];
+        if (requestContent is! String) {
+          throw const FormatException('editor.saveFile.content 必须为 string');
+        }
+        final index = _openFiles.indexWhere((file) => file.path == requestPath);
+        if (index < 0) return {'path': requestPath, 'saved': false};
+        final saved = await _writeAndRefresh(index, requestContent);
+        return {'path': requestPath, 'saved': saved};
+      },
+    );
+    final result = _resultMap(raw, 'editor.saveFile');
+    if (result['saved'] is! bool) {
+      throw const FormatException('editor.saveFile 返回值缺少 bool saved');
+    }
+    final saved = result['saved'] == true;
+    if (saved) {
+      await _plugins.events.dispatch(
+        'file.didSave',
+        _plugins.event('file.didSave', 'did', {
+          'path': path,
+          'content': content,
+        }),
+      );
+    }
+    return saved;
   }
 
   Future<bool> _writeAndRefresh(int index, String content) async {
@@ -303,7 +448,7 @@ class EditorProvider extends ChangeNotifier {
       return false;
     }
     file.updateContent(file.content.replaceRange(start, end, replacement));
-    return _writeAndRefresh(index, file.content);
+    return saveContent(path, file.content);
   }
 
   /// 指定文件是否有未保存修改
@@ -326,4 +471,72 @@ class EditorProvider extends ChangeNotifier {
 
   /// 是否有未保存的修改
   bool get hasUnsavedChanges => _openFiles.any((f) => f.isModified);
+
+  // ---------------------------------------------------------------------------
+  // 诊断（LSP / 本地分析）
+  // ---------------------------------------------------------------------------
+
+  final Map<String, List<EditorDiagnostic>> _diagnostics = {};
+
+  /// 指定文件的诊断
+  List<EditorDiagnostic> diagnosticsFor(String path) =>
+      _diagnostics[path] ?? const [];
+
+  /// 全部诊断（「问题」面板）
+  Map<String, List<EditorDiagnostic>> get allDiagnostics =>
+      Map.unmodifiable(_diagnostics);
+
+  int get errorCount => _diagnostics.values
+      .expand((list) => list)
+      .where((diagnostic) => diagnostic.isError)
+      .length;
+
+  int get warningCount => _diagnostics.values
+      .expand((list) => list)
+      .where((diagnostic) => diagnostic.isWarning)
+      .length;
+
+  /// 更新指定文件的诊断
+  void setDiagnostics(String path, List<EditorDiagnostic> diagnostics) {
+    if (diagnostics.isEmpty) {
+      if (_diagnostics.remove(path) != null) notifyListeners();
+      return;
+    }
+    _diagnostics[path] = List.unmodifiable(diagnostics);
+    notifyListeners();
+  }
+
+  /// 清空诊断（关闭文件 / 断开 LSP）
+  void clearDiagnostics([String? path]) {
+    if (path == null) {
+      if (_diagnostics.isEmpty) return;
+      _diagnostics.clear();
+    } else if (_diagnostics.remove(path) == null) {
+      return;
+    }
+    notifyListeners();
+  }
+}
+
+String _eventPath(Map<String, Object?> event, {required String fallback}) {
+  final payload = event['payload'];
+  if (payload is! Map) throw const FormatException('文件事件缺少 payload 对象');
+  final path = payload['path'] ?? fallback;
+  if (path is! String || path.isEmpty) {
+    throw const FormatException('文件事件 path 必须为非空 string');
+  }
+  return path;
+}
+
+String _requestPath(Map<String, Object?> request) {
+  final path = request['path'];
+  if (path is! String || path.isEmpty) {
+    throw const FormatException('编辑器服务 path 必须为非空 string');
+  }
+  return path;
+}
+
+Map<String, Object?> _resultMap(Object? value, String operation) {
+  if (value is! Map) throw FormatException('$operation 返回值必须为对象');
+  return value.map((key, value) => MapEntry(key.toString(), value));
 }

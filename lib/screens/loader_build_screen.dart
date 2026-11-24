@@ -7,6 +7,7 @@ import '../payloads/loader/loader_payload.dart';
 import '../providers/ai_provider.dart';
 import '../providers/project_provider.dart';
 import '../services/loader_project_service.dart';
+import '../widgets/desktop/desktop_dialogs.dart';
 import 'build_screen.dart';
 
 /// Loader 项目构建页
@@ -75,9 +76,7 @@ class _LoaderBuildScreenState extends State<LoaderBuildScreen> {
   Future<void> _startRealBuild() async {
     final ok = await BuildScreen.ensureSignedIn(context);
     if (!ok || !mounted) return;
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const BuildScreen()),
-    );
+    await showBuildDialog(context);
   }
 
   @override

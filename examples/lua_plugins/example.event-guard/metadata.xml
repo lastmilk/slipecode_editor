@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<plugin id="example.event-guard" name="Event Guard" version="1.0.0"
+        publisher="SLIPE" api="1">
+  <entry>main.lua</entry>
+  <capabilities>
+    <capability name="editor.modify" reason="在指定测试按键和 .lua-guard 文件上演示事件修改与吞掉" />
+  </capabilities>
+</plugin>

@@ -9,13 +9,13 @@ import '../providers/account_provider.dart';
 import '../providers/gitee_provider.dart';
 import '../providers/github_provider.dart';
 import '../providers/settings_provider.dart';
+import '../widgets/desktop/desktop_dialogs.dart';
 import '../widgets/image_crop_dialog.dart';
 import 'account_screen.dart';
 import 'authorization_screen.dart';
 import 'credit_logs_screen.dart';
 import 'login_devices_screen.dart';
 import 'recharge_screen.dart';
-import 'settings_screen.dart';
 
 /// 「我的」：SLIPE 账号中心
 ///
@@ -223,9 +223,7 @@ class _MyScreenState extends State<MyScreen> {
           IconButton(
             tooltip: '偏好设置',
             icon: const Icon(Icons.tune),
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const SettingsScreen()),
-            ),
+            onPressed: () => showSettingsDialog(context),
           ),
           const SizedBox(width: 4),
         ],

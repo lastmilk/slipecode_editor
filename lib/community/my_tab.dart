@@ -61,7 +61,7 @@ class _MyTabState extends State<MyTab> with AutomaticKeepAliveClientMixin {
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: CommunityTheme.card,
               borderRadius: BorderRadius.circular(12),
               border: Border.all(color: CommunityTheme.border),
             ),
@@ -82,19 +82,30 @@ class _MyTabState extends State<MyTab> with AutomaticKeepAliveClientMixin {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        user?.displayName.isNotEmpty == true ? user!.displayName : '未登录',
-                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                        user?.displayName.isNotEmpty == true
+                            ? user!.displayName
+                            : '未登录',
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                       const SizedBox(height: 2),
                       Text(
                         user == null ? '登录后可发帖、评论与发布 Payload' : user.email,
-                        style: const TextStyle(fontSize: 11, color: CommunityTheme.textSecondary),
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: CommunityTheme.textSecondary,
+                        ),
                       ),
                       if (user != null) ...[
                         const SizedBox(height: 4),
                         Text(
                           '${user.membership.planName} · ${user.credits} 积分',
-                          style: const TextStyle(fontSize: 11, color: CommunityTheme.brand),
+                          style: const TextStyle(
+                            fontSize: 11,
+                            color: CommunityTheme.brand,
+                          ),
                         ),
                       ],
                     ],
@@ -111,7 +122,9 @@ class _MyTabState extends State<MyTab> with AutomaticKeepAliveClientMixin {
                   icon: Icons.extension_outlined,
                   label: '我的 Payload',
                   onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const CustomPayloadManagerScreen()),
+                    MaterialPageRoute(
+                      builder: (_) => const CustomPayloadManagerScreen(),
+                    ),
                   ),
                 ),
               ),
@@ -130,19 +143,31 @@ class _MyTabState extends State<MyTab> with AutomaticKeepAliveClientMixin {
           const SizedBox(height: 18),
           Row(
             children: [
-              const Text('我的帖子', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
+              const Text(
+                '我的帖子',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+              ),
               const SizedBox(width: 6),
-              Text('${_posts.length}', style: const TextStyle(fontSize: 12, color: CommunityTheme.textSecondary)),
+              Text(
+                '${_posts.length}',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: CommunityTheme.textSecondary,
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 8),
           if (_loading)
-            const Padding(padding: EdgeInsets.all(24), child: Center(child: CircularProgressIndicator()))
+            const Padding(
+              padding: EdgeInsets.all(24),
+              child: Center(child: CircularProgressIndicator()),
+            )
           else if (_posts.isEmpty)
             Container(
               padding: const EdgeInsets.symmetric(vertical: 28),
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: CommunityTheme.card,
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(color: CommunityTheme.border),
               ),
@@ -165,7 +190,7 @@ class _MyTabState extends State<MyTab> with AutomaticKeepAliveClientMixin {
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 16),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: CommunityTheme.card,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(color: CommunityTheme.border),
         ),
@@ -196,7 +221,7 @@ class _MyTabState extends State<MyTab> with AutomaticKeepAliveClientMixin {
         margin: const EdgeInsets.only(bottom: 8),
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: CommunityTheme.card,
           borderRadius: BorderRadius.circular(10),
           border: Border.all(color: CommunityTheme.border),
         ),
@@ -206,10 +231,26 @@ class _MyTabState extends State<MyTab> with AutomaticKeepAliveClientMixin {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(post.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                  Text(
+                    post.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                   if (post.reviewNote.isNotEmpty) ...[
                     const SizedBox(height: 3),
-                    Text('审核备注：${post.reviewNote}', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 10, color: Color(0xFFD54941))),
+                    Text(
+                      '审核备注：${post.reviewNote}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 10,
+                        color: Color(0xFFD54941),
+                      ),
+                    ),
                   ],
                 ],
               ),
