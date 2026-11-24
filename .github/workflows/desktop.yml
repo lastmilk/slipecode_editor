@@ -41,6 +41,9 @@ jobs:
       - name: Analyze
         run: flutter analyze --no-fatal-infos --no-fatal-warnings
 
+      - name: Enable Linux desktop
+        run: flutter config --enable-linux-desktop
+
       - name: Build Linux
         # 自定义 Payload 图标为非 const IconData，必须关闭图标 tree-shaking
         run: flutter build linux --release --no-tree-shake-icons
@@ -83,6 +86,9 @@ jobs:
       - name: Pub get (slipe_lua)
         working-directory: packages/slipe_lua
         run: flutter pub get
+
+      - name: Enable Windows desktop
+        run: flutter config --enable-windows-desktop
 
       - name: Build Windows
         run: flutter build windows --release --no-tree-shake-icons
@@ -141,6 +147,9 @@ jobs:
 
       - name: Verify macOS runner architecture
         run: test "$(uname -m)" = "${{ matrix.native-arch }}"
+
+      - name: Enable macOS desktop
+        run: flutter config --enable-macos-desktop
 
       - name: Build macOS
         run: flutter build macos --release --no-tree-shake-icons
